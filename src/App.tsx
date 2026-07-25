@@ -1,0 +1,1396 @@
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleDot,
+  Clock3,
+  ExternalLink,
+  FileCode2,
+  GitBranch,
+  List,
+  Menu,
+  MoreVertical,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Plus,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
+import {
+  type CreateActionableRequest,
+  type ActionableDetail,
+  type ActionableSummary,
+  type Effort,
+  type EvidenceState,
+  type Priority,
+  type ScopeOptionsResponse,
+  type Status,
+  type UserSourceReference,
+} from "@actionables/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiProblem,
+  createActionable,
+  fetchActionable,
+  fetchActionables,
+  fetchScopeOptions,
+  updateActionable,
+} from "./api";
+
+type InspectorTab = "finding" | "research" | "validation";
+type PriorityFilter = "All" | Priority;
+
+const priorityOrder: Record<Priority, number> = {
+  Unset: 5,
+  Critical: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+  Backlog: 4,
+};
+
+const priorities: Priority[] = ["Unset", "Critical", "High", "Medium", "Low", "Backlog"];
+const statuses: Status[] = ["Inbox", "Researching", "Ready"];
+const efforts: Effort[] = ["Unknown", "XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL"];
+const evidenceStates: EvidenceState[] = [
+  "Unclassified",
+  "Confirmed",
+  "Suspected",
+  "Proposed",
+  "Investigation",
+];
+
+function Badge({
+  children,
+  tone,
+  title,
+  ariaLabel,
+}: {
+  children: React.ReactNode;
+  tone: string;
+  title?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <span
+      className={`badge badge-${tone.toLowerCase().replace(/\s+/g, "-")}`}
+      title={title}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </span>
+  );
+}
+
+function IconButton({
+  label,
+  children,
+  onClick,
+  pressed,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  onClick?: () => void;
+  pressed?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`icon-button ${className}`}
+      aria-label={label}
+      title={label}
+      aria-pressed={pressed}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function WorktreeRow({
+  name,
+  selected,
+  count,
+  onClick,
+}: {
+  name: string;
+  selected: boolean;
+  count?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`worktree-row ${selected ? "is-selected" : ""}`}
+      onClick={onClick}
+      title={name}
+      aria-label={`${name}${count === undefined ? "" : `, ${count} findings`}`}
+    >
+      <GitBranch aria-hidden="true" />
+      <span className="worktree-name">{name}</span>
+      {count !== undefined && <span className="tree-count">{count}</span>}
+      <span className={`tree-status ${selected ? "is-active" : ""}`} aria-hidden="true" />
+    </button>
+  );
+}
+
+function SourceHistory({ selected }: { selected: ActionableDetail }) {
+  const imported = selected.immutableSourceEvidence.imported;
+  return (
+    <section className="inspector-section">
+      <h3>{imported ? "Imported source evidence" : "Source references"}</h3>
+      <div className="source-history">
+        <div className={`source-evidence-notice ${imported ? "is-imported" : ""}`}>
+          <strong>{imported ? "Read-only imported evidence" : "No imported evidence"}</strong>
+          <p>{selected.immutableSourceEvidence.note}</p>
+        </div>
+        {imported && selected.immutableSourceEvidence.sourceFiles.map((file) => (
+          <div className="source-event" key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}>
+            <div className="source-event-meta">
+              <span className="source-label">imported</span>
+              <span>{file.lines ?? file.symbol ?? "file"}</span>
+              <span>original evidence</span>
+            </div>
+            <p><code>{file.path}</code></p>
+          </div>
+        ))}
+        <div className="source-event">
+          <div className="source-event-meta">
+            <span className="source-label">{imported ? "import" : "manual"}</span>
+            <span>now</span>
+            <span>status provenance</span>
+          </div>
+          <p>
+            {selected.statusProvenance.note}
+            {selected.statusProvenance.kind === "neutral-import" &&
+            selected.statusProvenance.suggestedStatus
+              ? ` Prototype suggestion: ${selected.statusProvenance.suggestedStatus}.`
+              : ""}
+          </p>
+        </div>
+        {selected.userSources.map((source, index) => (
+          <div className="source-event user-source" key={`${source.type}-${source.locator}-${index}`}>
+            <div className="source-event-meta">
+              <span className="source-label">user-added</span>
+              <span>{source.type}</span>
+              <span>{source.label || "source reference"}</span>
+            </div>
+            <p>{source.locator}</p>
+          </div>
+        ))}
+        {imported && selected.sourceThread && (
+          <a href={selected.sourceThread} className="source-link">
+            Open imported source thread <ExternalLink aria-hidden="true" />
+          </a>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RelationshipSection({
+  selected,
+  actionables,
+}: {
+  selected: ActionableDetail;
+  actionables: ActionableSummary[];
+}) {
+  const blockedBy = (selected.blockedBy ?? [])
+    .map((id) => actionables.find((item) => item.id === id))
+    .filter(Boolean) as ActionableSummary[];
+  const blocks = (selected.blocks ?? [])
+    .map((id) => actionables.find((item) => item.id === id))
+    .filter(Boolean) as ActionableSummary[];
+
+  if (blockedBy.length === 0 && blocks.length === 0 && !selected.childIds?.length) return null;
+
+  return (
+    <section className="inspector-section relationships">
+      {selected.childIds && (
+        <div className="relationship-group">
+          <h3>Subtasks <span>{selected.childIds.length}</span></h3>
+          {selected.childIds.map((id) => {
+            const child = actionables.find((item) => item.id === id);
+            return child ? <p key={id}>{child.title}</p> : null;
+          })}
+        </div>
+      )}
+      {blockedBy.length > 0 && (
+        <div className="relationship-group">
+          <h3>Blocked by <span>{blockedBy.length}</span></h3>
+          {blockedBy.map((item) => <p key={item.id}>{item.title}</p>)}
+        </div>
+      )}
+      {blocks.length > 0 && (
+        <div className="relationship-group">
+          <h3>Blocks <span>{blocks.length}</span></h3>
+          {blocks.map((item) => <p key={item.id}>{item.title}</p>)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Inspector({
+  selected,
+  actionables,
+  activeTab,
+  setActiveTab,
+  onCloseMobile,
+  validationChecks,
+  toggleValidation,
+  onEdit,
+}: {
+  selected: ActionableDetail;
+  actionables: ActionableSummary[];
+  activeTab: InspectorTab;
+  setActiveTab: (tab: InspectorTab) => void;
+  onCloseMobile: () => void;
+  validationChecks: Set<string>;
+  toggleValidation: (key: string) => void;
+  onEdit: () => void;
+}) {
+  return (
+    <>
+      <header className="inspector-header">
+        <div className="inspector-title-row">
+          <button type="button" className="mobile-back" onClick={onCloseMobile}>
+            <ChevronRight aria-hidden="true" /> Findings
+          </button>
+          <h2>{selected.title}</h2>
+          <div className="inspector-actions">
+            <IconButton label="Edit actionable" onClick={onEdit}><Pencil /></IconButton>
+            <IconButton label="More actionable actions"><MoreVertical /></IconButton>
+          </div>
+        </div>
+        <div className="metadata-row">
+          <Badge tone={selected.priority}>{selected.priority}</Badge>
+          <Badge
+            tone={selected.status}
+            title={selected.statusProvenance.note}
+            ariaLabel={`${selected.status}. ${selected.statusProvenance.note}`}
+          >
+            {selected.status}
+          </Badge>
+          <span className="metadata-divider" />
+          <span className="mono metadata-item"><GitBranch aria-hidden="true" />{selected.worktree}</span>
+          <span className="metadata-divider" />
+          <span className="metadata-item"><span className="effort-mark">{selected.effort}</span></span>
+          <span className="metadata-divider" />
+          <span className="metadata-item"><Clock3 aria-hidden="true" />{selected.updated}</span>
+        </div>
+      </header>
+
+      <nav className="inspector-tabs" aria-label="Actionable detail">
+        {(["finding", "research", "validation"] as InspectorTab[]).map((tab) => (
+          <button
+            type="button"
+            key={tab}
+            className={activeTab === tab ? "is-active" : ""}
+            aria-selected={activeTab === tab}
+            role="tab"
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab === "finding" ? "Finding" : tab === "research" ? "Research notes" : "Validation"}
+          </button>
+        ))}
+      </nav>
+
+      <div className="inspector-content">
+        {activeTab === "finding" && (
+          <>
+            <section className="inspector-section">
+              <h3>Finding</h3>
+              <p>{selected.finding || "No finding has been written yet."}</p>
+            </section>
+            <section className="inspector-section">
+              <h3>Description</h3>
+              <p>{selected.description || "No intended result has been written yet."}</p>
+            </section>
+
+            <section className="inspector-section">
+              <h3>Files and symbols</h3>
+              <div className="file-list">
+                {selected.files.map((file) => (
+                  <div className="file-row" key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}>
+                    <FileCode2 aria-hidden="true" />
+                    <code>{file.path}</code>
+                    <span>{file.symbol ?? file.lines ?? "reference"}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="inspector-section">
+              <h3>Research notes</h3>
+              {selected.research.length > 0
+                ? <ul className="research-list">{selected.research.map((note) => <li key={note}>{note}</li>)}</ul>
+                : <p>No research notes yet.</p>}
+            </section>
+
+            <section className="inspector-section">
+              <h3>Validation</h3>
+              {selected.validation.length > 0 ? <div className="validation-list">
+                {selected.validation.map((step, index) => {
+                  const key = `${selected.id}-${index}`;
+                  return (
+                    <label key={key}>
+                      <input
+                        type="checkbox"
+                        checked={validationChecks.has(key)}
+                        onChange={() => toggleValidation(key)}
+                      />
+                      <span>{step}</span>
+                    </label>
+                  );
+                })}
+              </div> : <p>No validation plan yet.</p>}
+            </section>
+            <RelationshipSection selected={selected} actionables={actionables} />
+            <SourceHistory selected={selected} />
+          </>
+        )}
+
+        {activeTab === "research" && (
+          <>
+            <section className="inspector-section tab-lead">
+              <h3>Research notes</h3>
+              <p className="finding-callout">{selected.finding}</p>
+              <ul className="research-list expanded">
+                {selected.research.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            </section>
+            <RelationshipSection selected={selected} actionables={actionables} />
+            <SourceHistory selected={selected} />
+          </>
+        )}
+
+        {activeTab === "validation" && (
+          <>
+            <section className="inspector-section tab-lead">
+              <h3>Validation procedure</h3>
+              <p className="section-help">The validation plan is persisted. These execution checkmarks remain a temporary local reading aid until immutable validation results are added in T-004.</p>
+              <div className="validation-list validation-large">
+                {selected.validation.map((step, index) => {
+                  const key = `${selected.id}-${index}`;
+                  return (
+                    <label key={key}>
+                      <input
+                        type="checkbox"
+                        checked={validationChecks.has(key)}
+                        onChange={() => toggleValidation(key)}
+                      />
+                      <span>{step}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+            <section className="inspector-section">
+              <h3>History</h3>
+              {selected.statusHistory.map((entry) => (
+                <div className="history-row" key={entry.id}>
+                  <Activity aria-hidden="true" />
+                  <span>
+                    {entry.previousStatus
+                      ? `${entry.previousStatus} → ${entry.newStatus}`
+                      : `Created as ${entry.newStatus}`}
+                    {" · "}{entry.origin}
+                  </span>
+                  <time dateTime={entry.occurredAt}>
+                    {new Date(entry.occurredAt).toLocaleString()}
+                  </time>
+                </div>
+              ))}
+              {selected.statusHistory.length === 0 && (
+                <p className="section-help">No status changes have been recorded yet.</p>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+type ActionableDraft = {
+  title: string;
+  priority: Priority;
+  status: Status;
+  effort: Effort;
+  evidenceState: EvidenceState;
+  projectId: string;
+  repositoryId: string;
+  worktreeId: string;
+  finding: string;
+  description: string;
+  researchText: string;
+  validationText: string;
+  tagsText: string;
+  userSources: UserSourceReference[];
+  version: number;
+};
+
+function lines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function draftFromItem(item: ActionableDetail): ActionableDraft {
+  return {
+    title: item.title,
+    priority: item.priority,
+    status: item.status,
+    effort: item.effort,
+    evidenceState: item.evidenceState,
+    projectId: item.scope.projectId,
+    repositoryId: item.scope.repositoryId,
+    worktreeId: item.scope.worktreeId,
+    finding: item.finding,
+    description: item.description,
+    researchText: item.research.join("\n"),
+    validationText: item.validation.join("\n"),
+    tagsText: item.tags.join(", "),
+    userSources: item.userSources,
+    version: item.version,
+  };
+}
+
+function emptyDraft(scopes: ScopeOptionsResponse): ActionableDraft {
+  const project = scopes.projects[0];
+  const repository = project?.repositories[0];
+  const worktree = repository?.worktrees[0];
+  return {
+    title: "",
+    priority: "Unset",
+    status: "Inbox",
+    effort: "Unknown",
+    evidenceState: "Unclassified",
+    projectId: project?.id ?? "",
+    repositoryId: repository?.id ?? "",
+    worktreeId: worktree?.id ?? "",
+    finding: "",
+    description: "",
+    researchText: "",
+    validationText: "",
+    tagsText: "",
+    userSources: [],
+    version: 1,
+  };
+}
+
+function fieldError(errors: Record<string, string[]>, field: string) {
+  const messages = errors[field];
+  return messages ? <span className="field-error" id={`${field}-error`}>{messages.join(" ")}</span> : null;
+}
+
+function ActionableForm({
+  item,
+  scopes,
+  onClose,
+  onSaved,
+}: {
+  item?: ActionableDetail;
+  scopes: ScopeOptionsResponse;
+  onClose: () => void;
+  onSaved: (saved: ActionableDetail, created: boolean) => void;
+}) {
+  const initialDraft = useMemo(
+    () => (item ? draftFromItem(item) : emptyDraft(scopes)),
+    [item, scopes],
+  );
+  const [draft, setDraft] = useState(initialDraft);
+  const [errors, setErrors] = useState<Record<string, string[]>>({});
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<ActionableDetail | null>(null);
+  const [reviewCurrent, setReviewCurrent] = useState(false);
+  const [formNotice, setFormNotice] = useState("");
+  const titleRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const initialSnapshot = useMemo(() => JSON.stringify(initialDraft), [initialDraft]);
+  const dirty = JSON.stringify(draft) !== initialSnapshot;
+
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const backdrop = dialogRef.current?.parentElement;
+    const shell = backdrop?.parentElement;
+    if (!backdrop || !shell) return;
+    const siblings = [...shell.children].filter((element) => element !== backdrop) as HTMLElement[];
+    const previous = siblings.map((element) => ({
+      element,
+      ariaHidden: element.getAttribute("aria-hidden"),
+      inert: element.inert,
+    }));
+    for (const sibling of siblings) {
+      sibling.inert = true;
+      sibling.setAttribute("aria-hidden", "true");
+    }
+    return () => {
+      for (const state of previous) {
+        state.element.inert = state.inert;
+        if (state.ariaHidden === null) state.element.removeAttribute("aria-hidden");
+        else state.element.setAttribute("aria-hidden", state.ariaHidden);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty]);
+
+  const project = scopes.projects.find((candidate) => candidate.id === draft.projectId);
+  const repositories = project?.repositories ?? [];
+  const repository = repositories.find((candidate) => candidate.id === draft.repositoryId);
+  const worktrees = repository?.worktrees ?? [];
+
+  const update = <K extends keyof ActionableDraft>(key: K, value: ActionableDraft[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setErrors((current) => {
+      const matchingKeys = Object.keys(current).filter(
+        (errorKey) => errorKey === key || errorKey.startsWith(`${String(key)}.`),
+      );
+      if (matchingKeys.length === 0) return current;
+      const next = { ...current };
+      for (const errorKey of matchingKeys) delete next[errorKey];
+      return next;
+    });
+  };
+
+  const requestClose = () => {
+    if (dirty && !window.confirm("Discard your unsaved actionable changes?")) return;
+    onClose();
+  };
+
+  const addSource = () => {
+    update("userSources", [
+      ...draft.userSources,
+      { type: "File", locator: "", label: "" },
+    ]);
+  };
+
+  const updateSource = (
+    index: number,
+    key: keyof UserSourceReference,
+    value: string,
+  ) => {
+    const next = draft.userSources.map((source, sourceIndex) =>
+      sourceIndex === index ? { ...source, [key]: value } : source,
+    );
+    update("userSources", next);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setErrors({});
+    setConflict(null);
+    setFormNotice(item ? "Saving changes…" : "Creating actionable…");
+
+    const base: CreateActionableRequest = {
+      title: draft.title,
+      priority: draft.priority,
+      effort: draft.effort,
+      evidenceState: draft.evidenceState,
+      projectId: draft.projectId,
+      repositoryId: draft.repositoryId,
+      worktreeId: draft.worktreeId,
+      finding: draft.finding,
+      description: draft.description,
+      research: lines(draft.researchText),
+      validation: lines(draft.validationText),
+      tags: draft.tagsText.split(",").map((tag) => tag.trim()).filter(Boolean),
+      userSources: draft.userSources,
+    };
+
+    try {
+      const saved = item
+        ? await updateActionable(item.id, {
+            ...base,
+            status: draft.status,
+            version: draft.version,
+          })
+        : await createActionable(base);
+      setFormNotice(item ? "Changes saved." : "Actionable created.");
+      onSaved(saved, !item);
+    } catch (error) {
+      if (error instanceof ApiProblem) {
+        setErrors(error.problem.errors ?? {});
+        if (error.problem.code === "VERSION_CONFLICT" && error.problem.current) {
+          setConflict(error.problem.current);
+          setFormNotice("A newer saved version was found. Your draft is still here.");
+        } else {
+          setFormNotice(`${error.problem.title} Request ${error.problem.requestId}.`);
+        }
+      } else {
+        setFormNotice("The actionable could not be saved. Your draft is still here.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const errorEntries = Object.entries(errors);
+  return (
+    <div
+      className="form-backdrop"
+      role="presentation"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") requestClose();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="actionable-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="actionable-form-title"
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )].filter((element) => element.offsetParent !== null);
+          const first = controls[0];
+          const last = controls.at(-1);
+          if (!first || !last) return;
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
+        <header className="dialog-header">
+          <div>
+            <span className="dialog-eyebrow">{item ? `Version ${draft.version}` : "Neutral status: Inbox"}</span>
+            <h2 id="actionable-form-title">{item ? "Edit actionable" : "New actionable"}</h2>
+          </div>
+          <IconButton label="Close actionable form" onClick={requestClose}><X /></IconButton>
+        </header>
+
+        <form onSubmit={submit} noValidate>
+          <div className="dialog-content">
+            {errorEntries.length > 0 && (
+              <div className="error-summary" role="alert" aria-labelledby="error-summary-title">
+                <strong id="error-summary-title">Check the highlighted fields.</strong>
+                <ul>
+                  {errorEntries.map(([field, messages]) => (
+                    <li key={field}><a href={`#${field}`}>{messages.join(" ")}</a></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {conflict && (
+              <div className="conflict-panel" role="alert">
+                <strong>Someone saved version {conflict.version} while you were editing version {draft.version}.</strong>
+                <p>Your unsaved draft has not been changed or discarded.</p>
+                <div className="conflict-actions">
+                  <button type="button" onClick={() => setReviewCurrent((value) => !value)}>
+                    {reviewCurrent ? "Hide current saved version" : "Review current saved version"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(JSON.stringify(draft, null, 2));
+                      setFormNotice("Draft copied to the clipboard.");
+                    }}
+                  >
+                    Copy my draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft((current) => ({ ...current, version: conflict.version }));
+                      setConflict(null);
+                      setReviewCurrent(false);
+                      setFormNotice("Current version loaded. Your field values remain ready to reapply.");
+                    }}
+                  >
+                    Reload version and reapply draft
+                  </button>
+                </div>
+                {reviewCurrent && (
+                  <dl className="current-version">
+                    <div><dt>Title</dt><dd>{conflict.title}</dd></div>
+                    <div><dt>Status</dt><dd>{conflict.status}</dd></div>
+                    <div><dt>Updated</dt><dd>{conflict.updated}</dd></div>
+                  </dl>
+                )}
+              </div>
+            )}
+
+            <div className="form-grid">
+              <label className="form-field form-field-wide" htmlFor="title">
+                <span>Title <b aria-hidden="true">*</b></span>
+                <small>A concise outcome or next action. This is the only content required for Inbox capture.</small>
+                <input
+                  ref={titleRef}
+                  id="title"
+                  value={draft.title}
+                  onChange={(event) => update("title", event.target.value)}
+                  aria-invalid={Boolean(errors.title)}
+                  aria-describedby={errors.title ? "title-help title-error" : "title-help"}
+                />
+                <span id="title-help" className="sr-only">Required at capture time.</span>
+                {fieldError(errors, "title")}
+              </label>
+
+              <label className="form-field" htmlFor="priority">
+                <span>Priority</span>
+                <small>Leave Unset when it has not been established.</small>
+                <select id="priority" value={draft.priority} onChange={(event) => update("priority", event.target.value as Priority)}>
+                  {priorities.map((value) => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+
+              <label className="form-field" htmlFor="status">
+                <span>Workflow status</span>
+                <small>
+                  {item
+                    ? `Allowed from ${item.status}: ${[item.status, ...item.permittedTransitions].join(", ")}.`
+                    : "New manual items start in Inbox; triage after creation."}
+                </small>
+                <select
+                  id="status"
+                  value={draft.status}
+                  disabled={!item}
+                  onChange={(event) => update("status", event.target.value as Status)}
+                >
+                  {statuses.map((value) => (
+                    <option
+                      key={value}
+                      disabled={Boolean(item && value !== item.status && !item.permittedTransitions.includes(value))}
+                    >
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                {fieldError(errors, "status")}
+              </label>
+
+              <label className="form-field" htmlFor="effort">
+                <span>Likely effort</span>
+                <small>Use Unknown instead of guessing.</small>
+                <select id="effort" value={draft.effort} onChange={(event) => update("effort", event.target.value as Effort)}>
+                  {efforts.map((value) => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+
+              <label className="form-field" htmlFor="evidenceState">
+                <span>Evidence state</span>
+                <small>Describe how established the finding is.</small>
+                <select id="evidenceState" value={draft.evidenceState} onChange={(event) => update("evidenceState", event.target.value as EvidenceState)}>
+                  {evidenceStates.map((value) => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+
+              <label className="form-field" htmlFor="projectId">
+                <span>Project</span>
+                <select
+                  id="projectId"
+                  value={draft.projectId}
+                  onChange={(event) => {
+                    const nextProject = scopes.projects.find((candidate) => candidate.id === event.target.value);
+                    const nextRepository = nextProject?.repositories[0];
+                    setDraft((current) => ({
+                      ...current,
+                      projectId: event.target.value,
+                      repositoryId: nextRepository?.id ?? "",
+                      worktreeId: nextRepository?.worktrees[0]?.id ?? "",
+                    }));
+                  }}
+                >
+                  {scopes.projects.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                </select>
+                {fieldError(errors, "projectId")}
+              </label>
+
+              <label className="form-field" htmlFor="repositoryId">
+                <span>Repository</span>
+                <select
+                  id="repositoryId"
+                  value={draft.repositoryId}
+                  onChange={(event) => {
+                    const nextRepository = repositories.find((candidate) => candidate.id === event.target.value);
+                    setDraft((current) => ({
+                      ...current,
+                      repositoryId: event.target.value,
+                      worktreeId: nextRepository?.worktrees[0]?.id ?? "",
+                    }));
+                  }}
+                >
+                  {repositories.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                </select>
+                {fieldError(errors, "repositoryId")}
+              </label>
+
+              <label className="form-field" htmlFor="worktreeId">
+                <span>Worktree</span>
+                <select id="worktreeId" value={draft.worktreeId} onChange={(event) => update("worktreeId", event.target.value)}>
+                  {worktrees.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                </select>
+                {fieldError(errors, "worktreeId")}
+              </label>
+
+              <label className="form-field form-field-wide" htmlFor="finding">
+                <span>Finding</span>
+                <small>User-authored statement of what is known. Required only before Ready.</small>
+                <textarea id="finding" rows={3} value={draft.finding} onChange={(event) => update("finding", event.target.value)} />
+                {fieldError(errors, "finding")}
+              </label>
+
+              <label className="form-field form-field-wide" htmlFor="description">
+                <span>Description</span>
+                <small>Intended result or bounded next investigation. Required only before Ready.</small>
+                <textarea id="description" rows={5} value={draft.description} onChange={(event) => update("description", event.target.value)} />
+                {fieldError(errors, "description")}
+              </label>
+
+              <label className="form-field form-field-wide" htmlFor="research">
+                <span>Research notes</span>
+                <small>One Markdown note per line. Leave blank rather than inventing research.</small>
+                <textarea id="research" rows={5} value={draft.researchText} onChange={(event) => update("researchText", event.target.value)} />
+                {fieldError(errors, "research")}
+              </label>
+
+              <label className="form-field form-field-wide" htmlFor="validation">
+                <span>Validation plan</span>
+                <small>One check per line. At least one check is required before Ready.</small>
+                <textarea id="validation" rows={5} value={draft.validationText} onChange={(event) => update("validationText", event.target.value)} />
+                {fieldError(errors, "validation")}
+              </label>
+
+              <label className="form-field form-field-wide" htmlFor="tags">
+                <span>Tags</span>
+                <small>Comma-separated user-authored labels.</small>
+                <input id="tags" value={draft.tagsText} onChange={(event) => update("tagsText", event.target.value)} />
+                {fieldError(errors, "tags")}
+              </label>
+
+              <fieldset className="source-editor form-field-wide">
+                <legend>User-added source references</legend>
+                <p>Add only references you know. Imported evidence remains read-only outside this form.</p>
+                {draft.userSources.map((source, index) => (
+                  <div className="source-edit-row" key={index}>
+                    <label>
+                      <span>Type</span>
+                      <select value={source.type} onChange={(event) => updateSource(index, "type", event.target.value)}>
+                        {["File", "URL", "Command", "Commit", "Codex thread", "Text"].map((value) => <option key={value}>{value}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Locator</span>
+                      <input
+                        id={`userSources.${index}.locator`}
+                        value={source.locator}
+                        onChange={(event) => updateSource(index, "locator", event.target.value)}
+                        aria-label={`Source ${index + 1} locator`}
+                        aria-invalid={Boolean(errors[`userSources.${index}.locator`])}
+                      />
+                      {fieldError(errors, `userSources.${index}.locator`)}
+                    </label>
+                    <label>
+                      <span>Label</span>
+                      <input
+                        value={source.label ?? ""}
+                        onChange={(event) => updateSource(index, "label", event.target.value)}
+                        aria-label={`Source ${index + 1} label`}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="remove-source"
+                      onClick={() => update("userSources", draft.userSources.filter((_, sourceIndex) => sourceIndex !== index))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {fieldError(errors, "userSources")}
+                <button type="button" className="secondary-action" onClick={addSource}>Add source reference</button>
+              </fieldset>
+
+              {item?.immutableSourceEvidence.imported && (
+                <div className="immutable-reminder form-field-wide">
+                  <strong>Imported evidence is protected.</strong>
+                  <p>
+                    The original thread, file references, source ordinal, import key, hash, and raw source
+                    are not editable here and are not included in this save request.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <footer className="dialog-footer">
+            <span className="save-status" role="status" aria-live="polite">{formNotice}</span>
+            <button type="button" className="secondary-action" onClick={requestClose} disabled={saving}>Cancel</button>
+            <button type="submit" className="primary-action" disabled={saving}>
+              {saving ? "Saving…" : item ? "Save changes" : "Create actionable"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+export default function App() {
+  const queryClient = useQueryClient();
+  const listQuery = useQuery({
+    queryKey: ["actionables"],
+    queryFn: fetchActionables,
+  });
+  const scopesQuery = useQuery({
+    queryKey: ["scopes"],
+    queryFn: fetchScopeOptions,
+  });
+  const actionables = listQuery.data?.items ?? [];
+  const totalFindings = listQuery.data?.counts.total ?? 0;
+  const projectName = listQuery.data?.project.name ?? "MyStotz2023";
+  const worktreeName = listQuery.data?.worktree.name ?? "CurrentSprint";
+
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);
+    return match ? Number(match[1]) : null;
+  });
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("All");
+  const [activeTab, setActiveTab] = useState<InspectorTab>("finding");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [inspectorHidden, setInspectorHidden] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [expandedParents, setExpandedParents] = useState<Set<number>>(new Set());
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(
+    () =>
+      /^\/actionables\/\d+\/?$/.test(window.location.pathname) &&
+      window.matchMedia("(max-width: 760px)").matches,
+  );
+  const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 900px)");
+    const collapseSidebar = (event: MediaQueryListEvent | MediaQueryList) => {
+      if (event.matches) {
+        setSidebarCollapsed(true);
+      }
+    };
+
+    collapseSidebar(mobileViewport);
+    mobileViewport.addEventListener("change", collapseSidebar);
+
+    return () => mobileViewport.removeEventListener("change", collapseSidebar);
+  }, []);
+  useEffect(() => {
+    const syncSelectionFromUrl = () => {
+      const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);
+      setSelectedId(match ? Number(match[1]) : actionables[0]?.id ?? null);
+      setMobileDetailOpen(Boolean(match) && window.matchMedia("(max-width: 760px)").matches);
+    };
+    window.addEventListener("popstate", syncSelectionFromUrl);
+    return () => window.removeEventListener("popstate", syncSelectionFromUrl);
+  }, [actionables]);
+  const [validationChecks, setValidationChecks] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (selectedId === null && actionables[0]) {
+      setSelectedId(actionables[0].id);
+    }
+  }, [actionables, selectedId]);
+
+  const detailQuery = useQuery({
+    queryKey: ["actionable", selectedId],
+    queryFn: () => fetchActionable(selectedId!),
+    enabled: selectedId !== null,
+  });
+  const selected = detailQuery.data;
+
+  const visibleRows = useMemo(() => {
+    const matches = (item: ActionableSummary) => {
+      const query = search.trim().toLowerCase();
+      const matchesQuery = !query || `${item.title} ${item.finding} ${item.tags.join(" ")}`.toLowerCase().includes(query);
+      const matchesPriority = priorityFilter === "All" || item.priority === priorityFilter;
+      return matchesQuery && matchesPriority;
+    };
+
+    if (search.trim()) {
+      return actionables
+        .filter(matches)
+        .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority] || a.id - b.id);
+    }
+
+    return actionables
+      .filter((item) => !item.parentId && matches(item))
+      .sort((a, b) => a.id - b.id)
+      .flatMap((item) => {
+        if (!item.childIds || !expandedParents.has(item.id)) return [item];
+        const children = item.childIds
+          .map((id) => actionables.find((candidate) => candidate.id === id))
+          .filter((candidate): candidate is ActionableSummary => Boolean(candidate))
+          .filter(matches);
+        return [item, ...children];
+      });
+  }, [actionables, expandedParents, priorityFilter, search]);
+
+  const selectRow = (item: ActionableSummary) => {
+    setSelectedId(item.id);
+    window.history.pushState({}, "", `/actionables/${item.id}`);
+    setActiveTab("finding");
+    setInspectorHidden(false);
+    if (window.matchMedia("(max-width: 760px)").matches) setMobileDetailOpen(true);
+  };
+
+  const handleSaved = (saved: ActionableDetail, created: boolean) => {
+    queryClient.setQueryData(["actionable", saved.id], saved);
+    void queryClient.invalidateQueries({ queryKey: ["actionables"] });
+    setSelectedId(saved.id);
+    window.history.pushState({}, "", `/actionables/${saved.id}`);
+    setActiveTab("finding");
+    setInspectorHidden(false);
+    setFormMode(null);
+    setNotice(created ? "Actionable created and opened." : "Actionable changes saved.");
+  };
+
+  const toggleParent = (id: number) => {
+    setExpandedParents((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleValidation = (key: string) => {
+    setValidationChecks((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const shellClasses = [
+    "app-shell",
+    sidebarCollapsed ? "sidebar-collapsed" : "",
+    inspectorHidden ? "inspector-hidden" : "",
+    mobileDetailOpen ? "mobile-detail-open" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className={shellClasses}>
+      <aside className="sidebar" aria-label="Projects and worktrees">
+        <div className="product-bar">
+          <span>Actionables</span>
+          <IconButton label="Close project navigation" onClick={() => setSidebarCollapsed(true)}>
+            <PanelLeftClose />
+          </IconButton>
+        </div>
+
+        <div className="project-tree">
+          <div className="tree-label">Projects</div>
+          <div className="project-group">
+            <button type="button" className="project-row">
+              <ChevronDown aria-hidden="true" />
+              <span>{projectName}</span>
+              <Circle className="project-status" aria-hidden="true" />
+            </button>
+            <WorktreeRow
+              name={worktreeName}
+              count={totalFindings}
+              selected
+              onClick={() => setNotice(`Showing ${worktreeName} findings`)}
+            />
+          </div>
+
+          <div className="tree-label secondary-label">Review focus</div>
+          <button type="button" className="scope-row" onClick={() => setPriorityFilter("Critical")}>
+            <span className="scope-dot critical" />
+            Critical findings
+            <span>{actionables.filter((item) => item.priority === "Critical").length}</span>
+          </button>
+          <button type="button" className="scope-row" onClick={() => setPriorityFilter("High")}>
+            <span className="scope-dot high" />
+            High priority
+            <span>{actionables.filter((item) => item.priority === "High").length}</span>
+          </button>
+          <button type="button" className="scope-row" onClick={() => setPriorityFilter("All")}>
+            <span className="scope-dot all" />
+            All findings
+            <span>{totalFindings}</span>
+          </button>
+
+          <button type="button" className="add-project" onClick={() => setNotice("Project creation is deferred until persistence work")}>
+            <Plus aria-hidden="true" /> Add project
+          </button>
+        </div>
+
+        <div className="sidebar-status">
+          <span><CircleDot aria-hidden="true" /> Source loaded 2m ago</span>
+          <ChevronDown aria-hidden="true" />
+        </div>
+      </aside>
+
+      <header className="topbar">
+        <div className="scope-selectors">
+          <IconButton
+            label={sidebarCollapsed ? "Open project navigation" : "Close project navigation"}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            pressed={!sidebarCollapsed}
+            className="nav-toggle"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
+          </IconButton>
+          <button type="button" className="selector-button">{projectName} <ChevronDown aria-hidden="true" /></button>
+          <span className="topbar-divider" />
+          <button type="button" className="selector-button mono" title={worktreeName}>
+            <GitBranch aria-hidden="true" />{worktreeName} <ChevronDown aria-hidden="true" />
+          </button>
+        </div>
+
+        <label className="global-search">
+          <Search aria-hidden="true" />
+          <span className="shortcut">⌘K</span>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search actionables..."
+            aria-label="Search actionables"
+          />
+          {search && (
+            <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>
+              <X aria-hidden="true" />
+            </button>
+          )}
+        </label>
+
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className="primary-action"
+            onClick={() => {
+              if (scopesQuery.data) setFormMode("create");
+              else setNotice("Scope options are still loading.");
+            }}
+          >
+            <Plus aria-hidden="true" /> New actionable
+          </button>
+          <div className="filter-wrap">
+            <button type="button" className={`toolbar-button ${filterOpen ? "is-active" : ""}`} onClick={() => setFilterOpen((value) => !value)}>
+              <SlidersHorizontal aria-hidden="true" /> Filters
+              {priorityFilter !== "All" && <span className="filter-count">1</span>}
+            </button>
+            {filterOpen && (
+              <div className="filter-popover">
+                <span className="popover-label">Priority</span>
+                {(["All", "Critical", "High", "Medium", "Low"] as PriorityFilter[]).map((priority) => (
+                  <button
+                    type="button"
+                    className={priorityFilter === priority ? "is-selected" : ""}
+                    key={priority}
+                    onClick={() => {
+                      setPriorityFilter(priority);
+                      setFilterOpen(false);
+                    }}
+                  >
+                    {priority}
+                    {priorityFilter === priority && <CircleDot aria-hidden="true" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <IconButton label="List view" pressed><List /></IconButton>
+          <IconButton
+            label={inspectorHidden ? "Show inspector" : "Hide inspector"}
+            onClick={() => setInspectorHidden((value) => !value)}
+            pressed={!inspectorHidden}
+          >
+            {inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}
+          </IconButton>
+          <IconButton label="Settings" onClick={() => setNotice("Settings are not part of this design checkpoint")}><Settings /></IconButton>
+        </div>
+      </header>
+
+      <main className="findings-panel">
+        <div className="findings-heading">
+          <h1>Findings <span>{search || priorityFilter !== "All" ? visibleRows.length : totalFindings}</span></h1>
+          {priorityFilter !== "All" && (
+            <button type="button" className="active-filter" onClick={() => setPriorityFilter("All")}>
+              {priorityFilter} <X aria-hidden="true" />
+            </button>
+          )}
+        </div>
+
+        <div className="findings-table" role="table" aria-label="Actionable findings">
+          <div className="table-header table-grid" role="row">
+            <div role="columnheader">Finding</div>
+            <button type="button" role="columnheader">Priority <ChevronDown aria-hidden="true" /></button>
+            <button type="button" role="columnheader">Status <ChevronDown aria-hidden="true" /></button>
+            <button type="button" role="columnheader">Worktree <ChevronDown aria-hidden="true" /></button>
+            <button type="button" role="columnheader">Effort <ChevronDown aria-hidden="true" /></button>
+            <button type="button" role="columnheader">Updated <ChevronDown aria-hidden="true" /></button>
+          </div>
+
+          <div className="table-body" role="rowgroup">
+            {visibleRows.map((item) => {
+              const selectedRow = item.id === selectedId;
+              const isChild = Boolean(item.parentId);
+              const expanded = expandedParents.has(item.id);
+              const dependencyCount = item.blockedBy?.length ?? 0;
+
+              return (
+                <div
+                  className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`}
+                  role="row"
+                  aria-selected={selectedRow}
+                  tabIndex={0}
+                  key={item.id}
+                  onClick={() => selectRow(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") selectRow(item);
+                  }}
+                >
+                  <div className="finding-cell" role="cell">
+                    {item.childIds ? (
+                      <button
+                        type="button"
+                        className="row-expander"
+                        aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${item.title}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleParent(item.id);
+                        }}
+                      >
+                        {expanded ? <ChevronDown /> : <ChevronRight />}
+                      </button>
+                    ) : isChild ? <span className="child-guide" /> : <span className="row-spacer" />}
+                    <span
+                      className="finding-title truncate-reveal"
+                      title={item.title}
+                      data-full-text={item.title}
+                      tabIndex={0}
+                    >
+                      {item.title}
+                    </span>
+                    {item.childIds && <span className="child-count">0/{item.childIds.length}</span>}
+                    {dependencyCount > 0 && <span className="blocked-indicator" title={`Blocked by ${dependencyCount} actionable${dependencyCount > 1 ? "s" : ""}`}>⊘ {dependencyCount}</span>}
+                  </div>
+                  <div role="cell"><Badge tone={item.priority}>{item.priority}</Badge></div>
+                  <div role="cell">
+                    <Badge
+                      tone={item.status}
+                      title={item.statusProvenance.note}
+                      ariaLabel={`${item.status}. ${item.statusProvenance.note}`}
+                    >
+                      {item.status}
+                    </Badge>
+                  </div>
+                  <div
+                    role="cell"
+                    className="mono worktree-cell truncate-reveal"
+                    title={item.worktree}
+                    data-full-text={item.worktree}
+                    tabIndex={0}
+                  >
+                    {item.worktree}
+                  </div>
+                  <div role="cell" className="effort-cell">{item.effort}</div>
+                  <div role="cell" className="updated-cell">{item.updated}</div>
+                </div>
+              );
+            })}
+            {visibleRows.length === 0 && (
+              <div className="empty-state">
+                <Search aria-hidden="true" />
+                <strong>
+                  {listQuery.isPending
+                    ? "Loading findings"
+                    : listQuery.isError
+                      ? "Could not load findings"
+                      : "No matching findings"}
+                </strong>
+                <span>
+                  {listQuery.isPending
+                    ? "Reading the local Actionables database."
+                    : listQuery.isError
+                      ? "Confirm the local API is running."
+                      : "Clear the search or priority filter."}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <footer className="table-footer">
+          <span>
+            {selectedId !== null && visibleRows.some((item) => item.id === selectedId) ? "1" : "0"} selected
+            {" · "}{visibleRows.length} visible {visibleRows.length === 1 ? "row" : "rows"}
+          </span>
+          <span>{search ? `Filtered from ${totalFindings}` : `${totalFindings} total findings`}</span>
+        </footer>
+      </main>
+
+      <aside className="inspector" aria-label="Selected actionable">
+        {selected ? (
+          <Inspector
+            selected={selected}
+            actionables={actionables}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onCloseMobile={() => {
+              setMobileDetailOpen(false);
+              window.history.pushState({}, "", "/");
+            }}
+            validationChecks={validationChecks}
+            toggleValidation={toggleValidation}
+            onEdit={() => setFormMode("edit")}
+          />
+        ) : (
+          <div className="inspector-loading" role="status">
+            {detailQuery.isError ? "Could not load actionable details." : "Loading actionable details…"}
+          </div>
+        )}
+      </aside>
+
+      {sidebarCollapsed && (
+        <button type="button" className="collapsed-brand" onClick={() => setSidebarCollapsed(false)} aria-label="Open project navigation">
+          A
+        </button>
+      )}
+
+      <div className="sr-only" aria-live="polite">{notice}</div>
+      {formMode && scopesQuery.data && (formMode === "create" || selected) && (
+        <ActionableForm
+          key={formMode === "edit" && selected ? `edit-${selected.id}-${selected.version}` : "create"}
+          item={formMode === "edit" ? selected : undefined}
+          scopes={scopesQuery.data}
+          onClose={() => setFormMode(null)}
+          onSaved={handleSaved}
+        />
+      )}
+    </div>
+  );
+}

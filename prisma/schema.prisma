@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../apps/api/src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Project {
+  id           String       @id @default(cuid())
+  externalKey  String       @unique
+  name         String
+  repositories Repository[]
+  worktrees    Worktree[]
+  actionables  Actionable[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Repository {
+  id          String       @id @default(cuid())
+  externalKey String       @unique
+  name        String
+  localPath   String?
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worktrees   Worktree[]
+  actionables Actionable[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Worktree {
+  id           String       @id @default(cuid())
+  externalKey  String       @unique
+  name         String
+  localPath    String?
+  projectId    String
+  repositoryId String
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  actionables  Actionable[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Actionable {
+  id                     String     @id @default(cuid())
+  externalKey            String     @unique
+  sourceOrdinal          Int        @unique
+  title                  String
+  priority               String
+  status                 String     @default("Inbox")
+  statusProvenance       String
+  sourceStatusSuggestion String?
+  effort                 String
+  evidenceState          String     @default("Unclassified")
+  version                Int        @default(1)
+  updatedLabel           String
+  finding                String
+  description            String
+  researchJson           Json
+  validationJson         Json
+  filesJson              Json
+  tagsJson               Json
+  userSourcesJson        Json       @default("[]")
+  blockedByOrdinalsJson  Json
+  blocksOrdinalsJson     Json
+  parentOrdinal          Int?
+  childOrdinalsJson      Json
+  importProvider         String
+  sourceContainerId      String
+  sourceThread           String
+  contentHash            String
+  rawFragmentJson        Json
+  projectId              String
+  repositoryId           String
+  worktreeId             String
+  project                Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository             Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  worktree               Worktree   @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  statusHistory          ActionableStatusHistory[]
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  @@index([projectId, worktreeId, sourceOrdinal])
+  @@index([priority, status])
+}
+
+model ActionableStatusHistory {
+  id             String     @id @default(cuid())
+  actionableId   String
+  previousStatus String?
+  newStatus      String
+  origin         String
+  occurredAt     DateTime   @default(now())
+  actionable     Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
+
+  @@index([actionableId, occurredAt])
+}

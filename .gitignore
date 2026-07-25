@@ -1,0 +1,17 @@
+node_modules/
+dist/
+generated/
+.playwright-cli/
+test-results/
+playwright-report/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+apps/api/src/generated/prisma/
+apps/api/dist/
+packages/contracts/dist/
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+!data/.gitkeep
