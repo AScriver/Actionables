@@ -11,13 +11,13 @@ A local, single-user web application can be implemented without redesigning the 
 
 ## Global constraints
 
-- The current checkpoint authorizes only T-002: actionable capture, editing, server-authoritative triage transitions, immutable imported evidence, status history, and recoverable optimistic-concurrency conflicts. Do not implement hierarchy/dependency management, completion/dismiss/reopen rules, general import/export UI, authentication, or later-slice behavior, and do not mutate the representative `WWW` repository.
+- The current checkpoint authorizes only T-004. T-004 must be completed before T-003 begins. Do not implement hierarchy/dependency management, general import/export UI, authentication, or later-slice behavior, and do not mutate the representative `WWW` repository.
 - Initial use is local and single-user. Do not add authentication, accounts, permissions, collaboration, notifications, cloud infrastructure, or synchronization.
 - Optimize for long, technical, Markdown-heavy findings and a dense desktop workflow; mobile is a usable companion, not the primary authoring surface.
 - Preserve hierarchy and dependency as separate relationships with separate rules and UI.
 - Preserve source wording and evidence. Imported inferences must be visibly labeled and must not silently become facts.
 - Prefer established platform behavior and a small dependency set. Defer graph canvases, real-time integration, and speculative enterprise abstractions.
-- No Git commit was requested.
+- The user requested a plan-only commit before implementation and a focused T-004 implementation commit after validation.
 
 ## Research
 
@@ -73,6 +73,7 @@ A local, single-user web application can be implemented without redesigning the 
 ### Decision gates
 
 - Resolved 2026-07-24: the frontend checkpoint was rendered, compared, corrected, and explicitly approved. T-001 is authorized.
+- Resolved 2026-07-24: the user approved the corrected T-004-before-T-003 execution order, explicit lifecycle transition matrix, and updated task authorities. T-004 is authorized.
 
 ## 1. Product definition
 
@@ -306,6 +307,22 @@ The stored edge reads: `dependent actionable depends on prerequisite actionable`
 - Reopening a child automatically reopens a completed parent to `Ready` in the same transaction.
 - Archive only changes visibility.
 - Restore returns the item to its previous status and relationships unchanged.
+
+### MVP workflow status model and transition matrix
+
+The persisted workflow statuses are `Inbox`, `Researching`, `Ready`, `In progress`, `Blocked`, `Done`, and `Dismissed`. Archive is independent visibility state, not a workflow status. Dependency blocking is derived separately and never changes the persisted workflow status automatically.
+
+| From | Allowed persisted status targets | Owner and guard |
+| --- | --- | --- |
+| `Inbox` | `Researching`, `Ready`, `Dismissed` | T-002 owns `Researching`/`Ready`; T-004 adds dismissal with a required reason |
+| `Researching` | `Inbox`, `Ready`, `Blocked`, `Dismissed` | T-002 owns `Inbox`/`Ready`; T-004 adds manual blocking and dismissal |
+| `Ready` | `Inbox`, `Researching`, `In progress`, `Blocked`, `Dismissed` | T-002 owns `Inbox`/`Researching`; T-004 adds execution, manual blocking, and dismissal |
+| `In progress` | `Ready`, `Blocked`, `Done`, `Dismissed` | T-004; `Done` requires qualifying validation or an override reason |
+| `Blocked` | `Researching`, `Ready`, `In progress`, `Dismissed` | T-004; entry requires a blocker note and exit records the explicit destination |
+| `Done` | `Ready` | T-004 core reopen; requires a reason |
+| `Dismissed` | `Ready` | T-004 core reopen; requires a reason |
+
+Additional relationship rules belong to T-003 and consume this lifecycle model: only a `Done` prerequisite satisfies an active dependency; a dismissed prerequisite remains unsatisfied; parent completion also requires every child to be `Done` or `Dismissed`; and reopening a child automatically reopens a completed parent to `Ready` in the same transaction. T-003 does not introduce statuses or general lifecycle transitions.
 
 ## 5. Feature inventory
 
@@ -1266,8 +1283,8 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 | T-000 | None | Frontend-only interface matches the authoritative Actionables reference and is ready for design approval | None | Complete |
 | T-001 | None | Architecture proof reads real actionables through React → Fastify → SQLite | T-000 | Complete |
 | T-002 | None | Actionables can be captured, edited, and triaged | T-001 | Complete |
-| T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-002 | Pending |
-| T-004 | None | Evidence, research, validation, and history make completion trustworthy | T-002 | Pending |
+| T-004 | None | Core lifecycle, evidence, research, validation, and history make completion trustworthy | T-002 | Ready |
+| T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-004 | Pending |
 | T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Pending |
 | T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Pending |
 | T-007 | None | Responsive, accessible MVP is verified for local Windows use | T-005, T-006 | Pending |
@@ -1297,19 +1314,21 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - Verify: create and invalid-create draft preservation; edit every supported field; each valid and representative invalid transition; refresh/direct deep link; immutable imported evidence; stale-version conflict across two browser contexts with recoverable draft; keyboard/screen-reader form and error behavior; approved desktop/laptop/mobile visual regression.
 - Boundaries: no hierarchy/dependency management, completion/dismiss/reopen/archive behavior, field-by-field merge system, automatic status transitions, or general import/export workflow.
 
+### T-004 — Implement core lifecycle, provenance, and validation
+
+- Authority: execution, manual blocking, source traceability, research, validation, completion, dismissal, core reopening, and history workflows.
+- Done when: the remaining persisted lifecycle transitions in the approved matrix, blocker/dismiss/reopen reasons, source references, research, append-only validation, activity, Done gate/override, and single-actionable reopen behavior match the plan.
+- Touches: actionable transitions and completion policy, source/validation/activity schema and services, detail sections, Markdown safety, tests.
+- Verify: complete core lifecycle transition matrix including representative invalid transitions; blocker/dismiss/reopen reason requirements; safe Markdown tests; validation gate and override tests; correction/supersession; source open/copy fallback; transactional history assertions.
+- Boundaries: no hierarchy or dependency graph, derived dependency blocking, parent completion gate, or automatic parent reopening. Those relationship-specific policies belong to T-003.
+
 ### T-003 — Implement hierarchy and dependencies
 
-- Authority: explicit hierarchy/dependency distinction and integrity rules.
-- Done when: one-level subtasks and cross-scope dependency edges enforce every documented rule and expose separate manual/derived blocking.
-- Touches: hierarchy/dependency domain services, recursive query, relationship APIs/UI, dashboard/list indicators, tests.
-- Verify: self/duplicate/cycle/depth/cross-scope/waiver/reopen/completion test matrix plus keyboard interaction.
-
-### T-004 — Implement provenance and validation
-
-- Authority: source traceability, research, validation, completion, dismissal, and history workflows.
-- Done when: source references, research, append-only validation, activity, Done override, dismiss, and reopen behavior match the plan.
-- Touches: source/validation/activity schema and services, detail sections, Markdown safety, tests.
-- Verify: safe Markdown tests; validation gate tests; correction/supersession; source open/copy fallback; history assertions.
+- Authority: explicit hierarchy/dependency distinction and integrity rules, using the lifecycle statuses and core transitions delivered by T-004.
+- Done when: one-level subtasks and cross-scope dependency edges enforce every documented relationship rule; dependency satisfaction consumes `Done`; dismissed prerequisites remain unsatisfied unless the edge is waived or removed; parent completion requires terminal children; reopening a child reopens a completed parent transactionally; and manual/derived blocking remain distinct.
+- Touches: hierarchy/dependency domain services, recursive query, relationship APIs/UI, dashboard/list indicators, relationship-aware completion/reopen integration, tests.
+- Verify: self/duplicate/cycle/depth/cross-scope/waiver matrix; dependency satisfaction for `Done`, `Dismissed`, and reopened prerequisites; parent completion gate; child/parent reopen transaction; separate manual/derived blocking; keyboard interaction.
+- Boundaries: no new workflow statuses, general lifecycle transitions, validation-record workflow, Done override, dismissal workflow, or standalone reopen behavior.
 
 ### T-005 — Complete the daily-use shell
 
@@ -1355,6 +1374,8 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - 2026-07-24: Expansion authorized — the user's detailed T-002 approval explicitly includes editable research/validation plans and user-added source references, immutable imported evidence, transactional status history, and recoverable optimistic concurrency; these are part of T-002 while later completion/provenance workflows remain T-004.
 - 2026-07-24: T-002 complete — implemented accessible manual capture and full-field editing, the server-owned Inbox/Researching/Ready transition matrix, transactional status history, immutable imported-evidence separation, stable deep links, and recoverable version conflicts; no T-003 hierarchy/dependency behavior was added.
 - 2026-07-24: Deliberate visual differences — the approved dense shell is unchanged; the inspector now has an edit affordance, an explicit Finding section, and protected imported-evidence labeling, while create/edit uses a responsive modal form.
+- 2026-07-24: Narrow support — made T-004 a prerequisite of T-003 and clarified the full lifecycle matrix because T-003's dependency-satisfaction and child-reopen rules require `Done`, `Dismissed`, and core reopen behavior; T-004 owns the statuses and core transitions, while T-003 only consumes them for relationship-specific policy.
+- 2026-07-24: T-004 authorized — the user approved the corrected dependency order, workflow matrix, updated authorities, plan-only commit, and focused T-004 implementation; T-003 remains outside the authorized boundary.
 
 ## Validation log
 
@@ -1374,6 +1395,7 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - T-001: new regression screenshots were captured at 1586×990, 1280×800, and 390×844 while the approved T-000 screenshots remained unchanged.
 - T-001: desktop and laptop screenshot comparison found no unintended shell, proportion, density, typography, responsive, or interaction regression.
 - T-001: validation ran on the available Node.js 22.19.0 runtime. Node.js 24 remains the target LTS recommendation for a later fresh-install release check.
+- Planning correction: living-plan validation passed after making T-004 a prerequisite of T-003 and recording the explicit lifecycle transition matrix and task boundaries; no product code, build, test, or T-003 implementation was run.
 - T-002: `pnpm run db:setup` applied `20260724235000_capture_triage`, preserved the 32 imported records as unchanged, and `pnpm exec prisma migrate status` reported the database schema up to date.
 - T-002: `pnpm run typecheck`, `pnpm test`, and `pnpm run build` completed successfully; Vitest reported 12 passing API/domain tests covering create, every supported field, all six approved triage transitions, invalid transitions, Ready prerequisites, strict request/identifier validation, immutable imported evidence, status history, refresh reads, and stale-version conflicts.
 - T-002: `pnpm exec playwright test --reporter=list` completed with 4 passing Chromium tests covering invalid-capture draft preservation and unsaved-change warning, two-context 409 recovery and draft reapplication, mobile direct-link/list navigation, and persisted Ready triage through refresh.
@@ -1386,4 +1408,4 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - Technology stack: **Node.js 24 LTS, TypeScript, pnpm, React + Vite, React Router Declarative mode, TanStack Query, Fastify, Zod, Prisma + SQLite + `better-sqlite3`, React Hook Form, safe GFM Markdown, Tailwind CSS, Vitest/Testing Library, and Playwright**.
 - Exact MVP: the features listed in “MVP boundaries”; all listed non-goals remain excluded.
 - Current milestone: T-002 is complete; actionables can be captured, fully edited, triaged through server-authoritative transitions, refreshed from stable deep links, and recovered after stale-version conflicts without losing drafts or imported evidence.
-- Decisions needed: none for T-002. T-003 remains pending and requires explicit user continuation before hierarchy or dependency behavior is implemented.
+- Current milestone: T-004 is authorized and Ready; T-003 remains pending and requires explicit user continuation after T-004 before hierarchy or dependency behavior is implemented.
