@@ -113,7 +113,8 @@ describe("T-004 lifecycle authority", () => {
   async function prepareStatus(status: Status) {
     let item = await createItem();
     if (status === "Inbox") return item;
-    if (status === "Researching") return (await move(item, "Researching")).json().item;
+    if (status === "Researching")
+      return (await move(item, "Researching")).json().item;
     if (status === "Ready") return (await move(item, "Ready")).json().item;
     if (status === "In progress") {
       item = (await move(item, "Ready")).json().item;
@@ -121,7 +122,9 @@ describe("T-004 lifecycle authority", () => {
     }
     if (status === "Blocked") {
       item = (await move(item, "Researching")).json().item;
-      return (await move(item, "Blocked", { reason: "Waiting for test access." })).json().item;
+      return (
+        await move(item, "Blocked", { reason: "Waiting for test access." })
+      ).json().item;
     }
     if (status === "Done") {
       item = (await move(item, "Ready")).json().item;
@@ -133,7 +136,9 @@ describe("T-004 lifecycle authority", () => {
       ).json().item;
     }
     return (
-      await move(item, "Dismissed", { reason: "No longer part of the intended change." })
+      await move(item, "Dismissed", {
+        reason: "No longer part of the intended change.",
+      })
     ).json().item;
   }
 
@@ -148,7 +153,10 @@ describe("T-004 lifecycle authority", () => {
   };
 
   it("accepts every transition in the approved matrix with its server guard", async () => {
-    for (const [from, targets] of Object.entries(matrix) as [Status, Status[]][]) {
+    for (const [from, targets] of Object.entries(matrix) as [
+      Status,
+      Status[],
+    ][]) {
       for (const target of targets) {
         const item = await prepareStatus(from);
         const response = await move(item, target, {
@@ -161,10 +169,14 @@ describe("T-004 lifecycle authority", () => {
                   ? "New evidence requires another pass."
                   : undefined,
           completionOverrideReason:
-            target === "Done" ? "Fixture explicitly exercises override completion." : undefined,
+            target === "Done"
+              ? "Fixture explicitly exercises override completion."
+              : undefined,
         });
         expect(response.json().item.status).toBe(target);
-        expect(response.json().item.permittedTransitions).toEqual(matrix[target]);
+        expect(response.json().item.permittedTransitions).toEqual(
+          matrix[target],
+        );
       }
     }
   }, 30_000);
@@ -173,7 +185,9 @@ describe("T-004 lifecycle authority", () => {
     for (const status of Object.keys(matrix) as Status[]) {
       const item = await prepareStatus(status);
       const response = await move(item, status, {}, 422);
-      expect(response.json()).toMatchObject({ code: "INVALID_STATUS_TRANSITION" });
+      expect(response.json()).toMatchObject({
+        code: "INVALID_STATUS_TRANSITION",
+      });
     }
   });
 
@@ -296,7 +310,9 @@ describe("T-004 lifecycle authority", () => {
       supersedesId: originalId,
       outcome: "Partial",
     });
-    expect(item.activity.at(-1)).toMatchObject({ type: "validation-corrected" });
+    expect(item.activity.at(-1)).toMatchObject({
+      type: "validation-corrected",
+    });
     expect((await move(item, "Done", {}, 422)).json()).toMatchObject({
       code: "VALIDATION_REQUIRED",
     });
@@ -305,7 +321,8 @@ describe("T-004 lifecycle authority", () => {
   it("keeps override, dismissal, and reopening visibly distinct without deleting validation", async () => {
     let item = await prepareStatus("In progress");
     const completed = await move(item, "Done", {
-      completionOverrideReason: "Emergency local completion accepted without a passing check.",
+      completionOverrideReason:
+        "Emergency local completion accepted without a passing check.",
     });
     item = completed.json().item;
     expect(item.activity.at(-1)).toMatchObject({
@@ -315,7 +332,9 @@ describe("T-004 lifecycle authority", () => {
       },
     });
     item = (
-      await move(item, "Ready", { reason: "The override needs normal validation." })
+      await move(item, "Ready", {
+        reason: "The override needs normal validation.",
+      })
     ).json().item;
     expect(item.activity.at(-1)).toMatchObject({ type: "reopened" });
 
@@ -327,7 +346,9 @@ describe("T-004 lifecycle authority", () => {
     expect(item.activity.at(-1)).toMatchObject({ type: "dismissed" });
     const recordCount = item.validationRecords.length;
     item = (
-      await move(item, "Ready", { reason: "Requirements changed and work resumes." })
+      await move(item, "Ready", {
+        reason: "Requirements changed and work resumes.",
+      })
     ).json().item;
     expect(item.validationRecords).toHaveLength(recordCount);
     expect(item.activity.at(-1)).toMatchObject({ type: "reopened" });
@@ -337,12 +358,7 @@ describe("T-004 lifecycle authority", () => {
     let item = await prepareStatus("Ready");
     const stale = { ...item };
     item = (await move(item, "In progress")).json().item;
-    const staleTransition = await move(
-      stale,
-      "Researching",
-      {},
-      409,
-    );
+    const staleTransition = await move(stale, "Researching", {}, 409);
     expect(staleTransition.json()).toMatchObject({
       code: "VERSION_CONFLICT",
       current: { version: item.version, status: "In progress" },
@@ -415,7 +431,9 @@ describe("T-004 lifecycle authority", () => {
       }),
     ).toEqual({ version: item.version });
     expect(
-      await prisma!.validationRecord.count({ where: { actionableId: record.id } }),
+      await prisma!.validationRecord.count({
+        where: { actionableId: record.id },
+      }),
     ).toBe(0);
   });
 });

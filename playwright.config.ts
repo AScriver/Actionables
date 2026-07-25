@@ -16,11 +16,18 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env.PLAYWRIGHT_CHANNEL
+          ? {
+              channel: process.env.PLAYWRIGHT_CHANNEL as "chrome" | "msedge",
+            }
+          : {}),
+      },
     },
   ],
   webServer: {
-    command: "pnpm run dev",
+    command: "pnpm exec tsx scripts/reset-e2e-database.ts && pnpm run dev",
     url: "http://127.0.0.1:4173/api/health",
     reuseExistingServer: false,
     timeout: 120_000,

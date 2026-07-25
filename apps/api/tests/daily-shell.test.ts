@@ -75,21 +75,34 @@ beforeAll(async () => {
       data: {
         externalKey: `daily-${ordinal}`,
         sourceOrdinal: ordinal,
-        title: ordinal === 3 ? "Fix parser symbol Widget.Parse" : `Daily item ${ordinal}`,
+        title:
+          ordinal === 3
+            ? "Fix parser symbol Widget.Parse"
+            : `Daily item ${ordinal}`,
         priority: ordinal === 3 ? "Critical" : ordinal % 2 ? "High" : "Medium",
         status,
         statusProvenance: "Deterministic daily-shell fixture.",
         effort: ordinal === 3 ? "M" : "S",
         evidenceState: ordinal === 3 ? "Confirmed" : "Investigation",
         updatedLabel: "fixture",
-        manualBlockerMd: status === "Blocked" ? "Waiting on a manual decision." : null,
-        finding: ordinal === 3 ? "Parser fails in src/widget.ts" : `Finding ${ordinal}`,
+        manualBlockerMd:
+          status === "Blocked" ? "Waiting on a manual decision." : null,
+        finding:
+          ordinal === 3
+            ? "Parser fails in src/widget.ts"
+            : `Finding ${ordinal}`,
         description: `Description ${ordinal}`,
         researchJson: json([`Research note ${ordinal}`]),
         validationJson: json([`Validate ${ordinal}`]),
         filesJson: json(
           ordinal === 3
-            ? [{ path: "src/widget.ts", symbol: "Widget.Parse", lines: "10-20" }]
+            ? [
+                {
+                  path: "src/widget.ts",
+                  symbol: "Widget.Parse",
+                  lines: "10-20",
+                },
+              ]
             : [],
         ),
         tagsJson: json(ordinal === 3 ? ["parser", "backend"] : ["daily"]),
@@ -109,7 +122,9 @@ beforeAll(async () => {
             previousStatus: status === "In progress" ? "Ready" : null,
             newStatus: status,
             origin: "fixture",
-            occurredAt: new Date(`2026-07-24T${String(ordinal).padStart(2, "0")}:00:00.000Z`),
+            occurredAt: new Date(
+              `2026-07-24T${String(ordinal).padStart(2, "0")}:00:00.000Z`,
+            ),
           },
         },
         activityEvents:
@@ -125,7 +140,9 @@ beforeAll(async () => {
       },
     });
   }
-  const rows = await prisma.actionable.findMany({ orderBy: { sourceOrdinal: "asc" } });
+  const rows = await prisma.actionable.findMany({
+    orderBy: { sourceOrdinal: "asc" },
+  });
   await prisma.hierarchyRelationship.create({
     data: { parentId: rows[2]!.id, childId: rows[10]!.id },
   });
@@ -164,7 +181,14 @@ describe("daily-use shell queries and archive policy", () => {
     expect(response.statusCode).toBe(200);
     const dashboard = response.json();
     expect(dashboard.counts).toEqual({ total: 10, topLevel: 9, nested: 1 });
-    expect(Object.fromEntries(dashboard.queues.map((queue: { key: string; count: number }) => [queue.key, queue.count]))).toEqual({
+    expect(
+      Object.fromEntries(
+        dashboard.queues.map((queue: { key: string; count: number }) => [
+          queue.key,
+          queue.count,
+        ]),
+      ),
+    ).toEqual({
       inbox: 1,
       researching: 1,
       ready: 3,
@@ -177,9 +201,15 @@ describe("daily-use shell queries and archive policy", () => {
       reopened: 1,
     });
 
-    for (const queue of dashboard.queues as Array<{ count: number; query: Record<string, string> }>) {
+    for (const queue of dashboard.queues as Array<{
+      count: number;
+      query: Record<string, string>;
+    }>) {
       const params = new URLSearchParams(queue.query);
-      const list = await app.inject({ method: "GET", url: `/api/actionables?${params}` });
+      const list = await app.inject({
+        method: "GET",
+        url: `/api/actionables?${params}`,
+      });
       expect(list.statusCode).toBe(200);
       expect(list.json().result.matched).toBe(queue.count);
     }
@@ -197,9 +227,14 @@ describe("daily-use shell queries and archive policy", () => {
       q: "widget.parse",
       sort: "title",
     });
-    const response = await app.inject({ method: "GET", url: `/api/actionables?${params}` });
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/actionables?${params}`,
+    });
     expect(response.statusCode).toBe(200);
-    expect(response.json().items.map((item: { id: number }) => item.id)).toEqual([3]);
+    expect(
+      response.json().items.map((item: { id: number }) => item.id),
+    ).toEqual([3]);
 
     const pathSearch = await app.inject({
       method: "GET",
@@ -218,8 +253,13 @@ describe("daily-use shell queries and archive policy", () => {
   });
 
   it("archives and restores an actionable without changing workflow or relationships", async () => {
-    const before = (await app.inject({ method: "GET", url: "/api/actionables/3" })).json().item;
-    const impact = await app.inject({ method: "GET", url: "/api/archive-impact/actionable/3" });
+    const before = (
+      await app.inject({ method: "GET", url: "/api/actionables/3" })
+    ).json().item;
+    const impact = await app.inject({
+      method: "GET",
+      url: "/api/archive-impact/actionable/3",
+    });
     expect(impact.json()).toMatchObject({
       counts: { activeSubtasks: 1 },
       target: { name: "Fix parser symbol Widget.Parse" },
@@ -235,9 +275,18 @@ describe("daily-use shell queries and archive policy", () => {
       archiveState: { directlyArchived: true, isArchived: true },
     });
     expect(archived.json().item.relationships.subtasks).toHaveLength(1);
-    expect((await app.inject({ method: "GET", url: "/api/actionables" })).json().items.some((item: { id: number }) => item.id === 3)).toBe(false);
-    const archivedList = await app.inject({ method: "GET", url: "/api/actionables?archived=archived" });
-    expect(archivedList.json().items.some((item: { id: number }) => item.id === 3)).toBe(true);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/actionables" }))
+        .json()
+        .items.some((item: { id: number }) => item.id === 3),
+    ).toBe(false);
+    const archivedList = await app.inject({
+      method: "GET",
+      url: "/api/actionables?archived=archived",
+    });
+    expect(
+      archivedList.json().items.some((item: { id: number }) => item.id === 3),
+    ).toBe(true);
 
     const staleRestore = await app.inject({
       method: "POST",
@@ -256,11 +305,18 @@ describe("daily-use shell queries and archive policy", () => {
       status: "Ready",
       archiveState: { directlyArchived: false, isArchived: false },
     });
-    expect(restored.json().item.activity.slice(-2).map((event: { type: string }) => event.type)).toEqual(["archived", "restored"]);
+    expect(
+      restored
+        .json()
+        .item.activity.slice(-2)
+        .map((event: { type: string }) => event.type),
+    ).toEqual(["archived", "restored"]);
   });
 
   it("keeps archived unresolved prerequisites dependency-blocking", async () => {
-    const dependent = (await app.inject({ method: "GET", url: "/api/actionables/6" })).json().item;
+    const dependent = (
+      await app.inject({ method: "GET", url: "/api/actionables/6" })
+    ).json().item;
     expect(dependent).toMatchObject({
       isDependencyBlocked: true,
       unresolvedDependencyCount: 1,
@@ -274,8 +330,12 @@ describe("daily-use shell queries and archive policy", () => {
   });
 
   it("uses inherited scope archival and preserves independently archived descendants", async () => {
-    const itemSeven = (await app.inject({ method: "GET", url: "/api/actionables/7" })).json().item;
-    const scopesBefore = (await app.inject({ method: "GET", url: "/api/scopes" })).json();
+    const itemSeven = (
+      await app.inject({ method: "GET", url: "/api/actionables/7" })
+    ).json().item;
+    const scopesBefore = (
+      await app.inject({ method: "GET", url: "/api/scopes" })
+    ).json();
     const worktree = scopesBefore.projects[0].repositories[0].worktrees[0];
     const archivedScope = await app.inject({
       method: "POST",
@@ -283,7 +343,9 @@ describe("daily-use shell queries and archive policy", () => {
       payload: { version: worktree.version },
     });
     expect(archivedScope.statusCode).toBe(200);
-    const inherited = (await app.inject({ method: "GET", url: "/api/actionables/3" })).json().item;
+    const inherited = (
+      await app.inject({ method: "GET", url: "/api/actionables/3" })
+    ).json().item;
     expect(inherited.archiveState).toMatchObject({
       isArchived: true,
       directlyArchived: false,
@@ -304,14 +366,17 @@ describe("daily-use shell queries and archive policy", () => {
     });
     expect(staleScope.statusCode).toBe(409);
 
-    const currentWorktree = archivedScope.json().projects[0].repositories[0].worktrees[0];
+    const currentWorktree =
+      archivedScope.json().projects[0].repositories[0].worktrees[0];
     const restoredScope = await app.inject({
       method: "POST",
       url: `/api/scopes/worktree/${worktree.id}/restore`,
       payload: { version: currentWorktree.version },
     });
     expect(restoredScope.statusCode).toBe(200);
-    const stillDirect = (await app.inject({ method: "GET", url: "/api/actionables/7" })).json().item;
+    const stillDirect = (
+      await app.inject({ method: "GET", url: "/api/actionables/7" })
+    ).json().item;
     expect(stillDirect.archiveState).toMatchObject({
       isArchived: true,
       directlyArchived: true,

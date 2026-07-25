@@ -87,7 +87,10 @@ export async function fetchScopeOptions(): Promise<ScopeOptionsResponse> {
 }
 
 export async function fetchDashboard(
-  query: Pick<Partial<Record<keyof ActionableQuery, string>>, "project" | "repository" | "worktree">,
+  query: Pick<
+    Partial<Record<keyof ActionableQuery, string>>,
+    "project" | "repository" | "worktree"
+  >,
 ): Promise<DashboardResponse> {
   return dashboardResponseSchema.parse(
     await requestJson(`/api/dashboard${queryString(query)}`),
@@ -99,7 +102,9 @@ export async function fetchArchiveImpact(
   id: string | number,
 ): Promise<ArchiveImpactResponse> {
   return archiveImpactResponseSchema.parse(
-    await requestJson(`/api/archive-impact/${kind}/${encodeURIComponent(String(id))}`),
+    await requestJson(
+      `/api/archive-impact/${kind}/${encodeURIComponent(String(id))}`,
+    ),
   );
 }
 
@@ -109,10 +114,13 @@ export async function setActionableArchived(
   archived: boolean,
 ): Promise<ActionableDetail> {
   const response = actionableDetailResponseSchema.parse(
-    await requestJson(`/api/actionables/${id}/${archived ? "archive" : "restore"}`, {
-      method: "POST",
-      body: JSON.stringify({ version }),
-    }),
+    await requestJson(
+      `/api/actionables/${id}/${archived ? "archive" : "restore"}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ version }),
+      },
+    ),
   );
   return response.item;
 }
@@ -124,10 +132,13 @@ export async function setScopeArchived(
   archived: boolean,
 ): Promise<ScopeOptionsResponse> {
   return scopeOptionsResponseSchema.parse(
-    await requestJson(`/api/scopes/${kind}/${encodeURIComponent(id)}/${archived ? "archive" : "restore"}`, {
-      method: "POST",
-      body: JSON.stringify({ version }),
-    }),
+    await requestJson(
+      `/api/scopes/${kind}/${encodeURIComponent(id)}/${archived ? "archive" : "restore"}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ version }),
+      },
+    ),
   );
 }
 
@@ -182,7 +193,11 @@ export async function recordValidation(
   return response.item;
 }
 
-async function relationshipRequest(path: string, method: string, input: unknown) {
+async function relationshipRequest(
+  path: string,
+  method: string,
+  input: unknown,
+) {
   const response = actionableDetailResponseSchema.parse(
     await requestJson(path, { method, body: JSON.stringify(input) }),
   );
@@ -205,19 +220,34 @@ export const removeDependency = (
   id: number,
   relationshipId: string,
   input: DependencyActionRequest,
-) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}`, "DELETE", input);
+) =>
+  relationshipRequest(
+    `/api/actionables/${id}/dependencies/${relationshipId}`,
+    "DELETE",
+    input,
+  );
 
 export const waiveDependency = (
   id: number,
   relationshipId: string,
   input: DependencyActionRequest,
-) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}/waive`, "POST", input);
+) =>
+  relationshipRequest(
+    `/api/actionables/${id}/dependencies/${relationshipId}/waive`,
+    "POST",
+    input,
+  );
 
 export const restoreDependency = (
   id: number,
   relationshipId: string,
   input: DependencyActionRequest,
-) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}/restore`, "POST", input);
+) =>
+  relationshipRequest(
+    `/api/actionables/${id}/dependencies/${relationshipId}/restore`,
+    "POST",
+    input,
+  );
 
 export async function previewPortableImport(
   document: unknown,
@@ -279,8 +309,7 @@ export async function downloadPortableExport(): Promise<{
   }
   const disposition = response.headers.get("content-disposition") ?? "";
   const filename =
-    disposition.match(/filename="([^"]+)"/)?.[1] ??
-    "actionables-backup.json";
+    disposition.match(/filename="([^"]+)"/)?.[1] ?? "actionables-backup.json";
   return {
     document: (await response.json()) as PortableDocument,
     filename,

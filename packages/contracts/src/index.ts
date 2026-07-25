@@ -17,7 +17,11 @@ export const statusSchema = z.enum([
   "Done",
   "Dismissed",
 ]);
-export const sourceStatusSuggestionSchema = z.enum(["Ready", "Researching", "Blocked"]);
+export const sourceStatusSuggestionSchema = z.enum([
+  "Ready",
+  "Researching",
+  "Blocked",
+]);
 export const effortSchema = z.enum([
   "Unknown",
   "XS",
@@ -282,27 +286,27 @@ export const actionableDetailResponseSchema = z.object({
 export const scopeOptionsResponseSchema = z.object({
   projects: z.array(
     z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      version: z.number().int().positive(),
+      archivedAt: z.string().datetime().nullable(),
+      archiveState: archiveStateSchema,
+      repositories: z.array(
+        z.object({
           id: z.string().min(1),
           name: z.string().min(1),
           version: z.number().int().positive(),
           archivedAt: z.string().datetime().nullable(),
           archiveState: archiveStateSchema,
-          repositories: z.array(
+          worktrees: z.array(
             z.object({
               id: z.string().min(1),
               name: z.string().min(1),
               version: z.number().int().positive(),
               archivedAt: z.string().datetime().nullable(),
               archiveState: archiveStateSchema,
-              worktrees: z.array(
-                z.object({
-                  id: z.string().min(1),
-                  name: z.string().min(1),
-                  version: z.number().int().positive(),
-                  archivedAt: z.string().datetime().nullable(),
-                  archiveState: archiveStateSchema,
-                }),
-              ),
+            }),
+          ),
         }),
       ),
     }),
@@ -372,9 +376,11 @@ export const dashboardResponseSchema = z.object({
   queues: z.array(dashboardQueueSchema),
 });
 
-export const archiveMutationRequestSchema = z.object({
-  version: z.number().int().positive(),
-}).strict();
+export const archiveMutationRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+  })
+  .strict();
 
 export const archiveTargetKindSchema = z.enum([
   "actionable",
@@ -882,7 +888,9 @@ export type Effort = z.infer<typeof effortSchema>;
 export type EvidenceState = z.infer<typeof evidenceStateSchema>;
 export type ArchiveState = z.infer<typeof archiveStateSchema>;
 export type SourceFile = z.infer<typeof sourceFileSchema>;
-export type UserSourceReferenceInput = z.infer<typeof userSourceReferenceInputSchema>;
+export type UserSourceReferenceInput = z.infer<
+  typeof userSourceReferenceInputSchema
+>;
 export type UserSourceReference = z.infer<typeof userSourceReferenceSchema>;
 export type ValidationType = z.infer<typeof validationTypeSchema>;
 export type ValidationOutcome = z.infer<typeof validationOutcomeSchema>;
@@ -891,41 +899,65 @@ export type ActivityEvent = z.infer<typeof activityEventSchema>;
 export type RelatedActionable = z.infer<typeof relatedActionableSchema>;
 export type HierarchyRelationship = z.infer<typeof hierarchyRelationshipSchema>;
 export type DependencyState = z.infer<typeof dependencyStateSchema>;
-export type DependencyRelationship = z.infer<typeof dependencyRelationshipSchema>;
+export type DependencyRelationship = z.infer<
+  typeof dependencyRelationshipSchema
+>;
 export type StatusProvenance = z.infer<typeof statusProvenanceSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type ActionableSummary = z.infer<typeof actionableSummarySchema>;
 export type ActionableDetail = z.infer<typeof actionableDetailSchema>;
-export type ActionablesListResponse = z.infer<typeof actionablesListResponseSchema>;
+export type ActionablesListResponse = z.infer<
+  typeof actionablesListResponseSchema
+>;
 export type ScopeOptionsResponse = z.infer<typeof scopeOptionsResponseSchema>;
 export type ActionableQuery = z.infer<typeof actionableQuerySchema>;
 export type ActionableSort = z.infer<typeof actionableSortSchema>;
 export type DashboardResponse = z.infer<typeof dashboardResponseSchema>;
-export type ArchiveMutationRequest = z.infer<typeof archiveMutationRequestSchema>;
+export type ArchiveMutationRequest = z.infer<
+  typeof archiveMutationRequestSchema
+>;
 export type ArchiveTargetKind = z.infer<typeof archiveTargetKindSchema>;
 export type ArchiveImpactResponse = z.infer<typeof archiveImpactResponseSchema>;
-export type CreateActionableRequest = z.infer<typeof createActionableRequestSchema>;
-export type UpdateActionableRequest = z.infer<typeof updateActionableRequestSchema>;
-export type StatusTransitionRequest = z.infer<typeof statusTransitionRequestSchema>;
+export type CreateActionableRequest = z.infer<
+  typeof createActionableRequestSchema
+>;
+export type UpdateActionableRequest = z.infer<
+  typeof updateActionableRequestSchema
+>;
+export type StatusTransitionRequest = z.infer<
+  typeof statusTransitionRequestSchema
+>;
 export type CreateValidationRecordRequest = z.infer<
   typeof createValidationRecordRequestSchema
 >;
 export type CreateSubtaskRequest = z.infer<typeof createSubtaskRequestSchema>;
 export type SetParentRequest = z.infer<typeof setParentRequestSchema>;
 export type DetachParentRequest = z.infer<typeof detachParentRequestSchema>;
-export type CreateDependencyRequest = z.infer<typeof createDependencyRequestSchema>;
-export type DependencyActionRequest = z.infer<typeof dependencyActionRequestSchema>;
+export type CreateDependencyRequest = z.infer<
+  typeof createDependencyRequestSchema
+>;
+export type DependencyActionRequest = z.infer<
+  typeof dependencyActionRequestSchema
+>;
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>;
-export type ActionableDetailResponse = z.infer<typeof actionableDetailResponseSchema>;
+export type ActionableDetailResponse = z.infer<
+  typeof actionableDetailResponseSchema
+>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type SeedDocument = z.infer<typeof seedDocumentSchema>;
 export type PortableDocument = z.infer<typeof portableDocumentSchema>;
 export type PortableActionable = PortableDocument["actionables"][number];
-export type RelationshipSuggestion = z.infer<typeof relationshipSuggestionSchema>;
+export type RelationshipSuggestion = z.infer<
+  typeof relationshipSuggestionSchema
+>;
 export type ImportClassification = z.infer<typeof importClassificationSchema>;
 export type ImportPreviewItem = z.infer<typeof importPreviewItemSchema>;
 export type ImportPreviewResponse = z.infer<typeof importPreviewResponseSchema>;
-export type PrepareImportCommitRequest = z.infer<typeof prepareImportCommitRequestSchema>;
-export type PrepareImportCommitResponse = z.infer<typeof prepareImportCommitResponseSchema>;
+export type PrepareImportCommitRequest = z.infer<
+  typeof prepareImportCommitRequestSchema
+>;
+export type PrepareImportCommitResponse = z.infer<
+  typeof prepareImportCommitResponseSchema
+>;
 export type CommitImportRequest = z.infer<typeof commitImportRequestSchema>;
 export type ImportCommitResponse = z.infer<typeof importCommitResponseSchema>;

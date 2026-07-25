@@ -32,10 +32,20 @@ beforeAll(async () => {
   prisma = createPrismaClient(databaseUrl);
   const document = await readReviewedSeed();
   const firstImport = await importReviewedSeed(prisma, document);
-  expect(firstImport).toEqual({ created: 32, updated: 0, unchanged: 0, total: 32 });
+  expect(firstImport).toEqual({
+    created: 32,
+    updated: 0,
+    unchanged: 0,
+    total: 32,
+  });
 
   const secondImport = await importReviewedSeed(prisma, document);
-  expect(secondImport).toEqual({ created: 0, updated: 0, unchanged: 32, total: 32 });
+  expect(secondImport).toEqual({
+    created: 0,
+    updated: 0,
+    unchanged: 32,
+    total: 32,
+  });
 
   app = buildApp({ prisma });
   const project = await prisma.project.findFirstOrThrow({
@@ -96,13 +106,20 @@ describe("Actionables API", () => {
   });
 
   it("lists all 32 findings and labels the 28 collapsed top-level rows", async () => {
-    const response = await app!.inject({ method: "GET", url: "/api/actionables" });
+    const response = await app!.inject({
+      method: "GET",
+      url: "/api/actionables",
+    });
     const payload = response.json();
 
     expect(response.statusCode).toBe(200);
     expect(payload.counts).toEqual({ total: 32, topLevel: 28 });
     expect(payload.items).toHaveLength(32);
-    expect(payload.items.every((item: { status: string }) => item.status === "Inbox")).toBe(true);
+    expect(
+      payload.items.every(
+        (item: { status: string }) => item.status === "Inbox",
+      ),
+    ).toBe(true);
     expect(payload.items[0].statusProvenance).toMatchObject({
       kind: "neutral-import",
       suggestedStatus: "Ready",
@@ -110,7 +127,10 @@ describe("Actionables API", () => {
   });
 
   it("returns a real persisted detail record", async () => {
-    const response = await app!.inject({ method: "GET", url: "/api/actionables/1" });
+    const response = await app!.inject({
+      method: "GET",
+      url: "/api/actionables/1",
+    });
     const payload = response.json();
 
     expect(response.statusCode).toBe(200);
@@ -125,7 +145,10 @@ describe("Actionables API", () => {
   });
 
   it("returns 404 for an unknown actionable", async () => {
-    const response = await app!.inject({ method: "GET", url: "/api/actionables/999" });
+    const response = await app!.inject({
+      method: "GET",
+      url: "/api/actionables/999",
+    });
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({
       code: "NOT_FOUND",
@@ -134,7 +157,10 @@ describe("Actionables API", () => {
   });
 
   it("validates malformed identifiers and exposes scope options", async () => {
-    const invalid = await app!.inject({ method: "GET", url: "/api/actionables/not-an-id" });
+    const invalid = await app!.inject({
+      method: "GET",
+      url: "/api/actionables/not-an-id",
+    });
     expect(invalid.statusCode).toBe(400);
     expect(invalid.json()).toMatchObject({
       code: "INVALID_ID",
@@ -143,7 +169,9 @@ describe("Actionables API", () => {
 
     const scopes = await app!.inject({ method: "GET", url: "/api/scopes" });
     expect(scopes.statusCode).toBe(200);
-    expect(scopes.json().projects[0].repositories[0].worktrees[0]).toMatchObject({
+    expect(
+      scopes.json().projects[0].repositories[0].worktrees[0],
+    ).toMatchObject({
       id: scope.worktreeId,
       name: "CurrentSprint",
     });
@@ -400,7 +428,9 @@ describe("Actionables API", () => {
         research: detail.research,
         validation: detail.validation,
         tags: detail.tags,
-        userSources: [{ type: "URL", locator: "https://example.test/evidence" }],
+        userSources: [
+          { type: "URL", locator: "https://example.test/evidence" },
+        ],
       },
     });
     expect(response.statusCode).toBe(200);

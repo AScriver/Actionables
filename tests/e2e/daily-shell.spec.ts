@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("dashboard queues open the equivalent URL-backed actionable list", async ({ page }) => {
+test("dashboard queues open the equivalent URL-backed actionable list", async ({
+  page,
+}) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -9,44 +11,74 @@ test("dashboard queues open the equivalent URL-backed actionable list", async ({
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await expect(page.getByLabel("Actionable totals")).toContainText("total");
   await page.setViewportSize({ width: 1586, height: 990 });
-  await page.screenshot({ path: "output/playwright/t005-dashboard-desktop.png", fullPage: true });
+  await page.screenshot({
+    path: "output/playwright/t005-dashboard-desktop.png",
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.screenshot({ path: "output/playwright/t005-dashboard-laptop.png", fullPage: true });
+  await page.screenshot({
+    path: "output/playwright/t005-dashboard-laptop.png",
+    fullPage: true,
+  });
   const queue = page.getByRole("button", { name: /Inbox requiring triage/ });
   await expect(queue).toBeVisible();
   await queue.click();
   await expect(page).toHaveURL(/status=Inbox/);
-  await expect(page.getByRole("heading", { name: /Actionables/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /status: Inbox/ })).toBeVisible();
-  await page.screenshot({ path: "output/playwright/t005-actionables-laptop.png", fullPage: true });
+  await expect(
+    page.getByRole("heading", { name: /Actionables/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /status: Inbox/ }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "output/playwright/t005-actionables-laptop.png",
+    fullPage: true,
+  });
 
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: "output/playwright/t005-dashboard-mobile.png", fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "output/playwright/t005-dashboard-mobile.png",
+    fullPage: true,
+  });
   expect(consoleErrors).toEqual([]);
 });
 
-test("filters, search, sort, selection, refresh, and history are URL-backed", async ({ page }) => {
+test("filters, search, sort, selection, refresh, and history are URL-backed", async ({
+  page,
+}) => {
   await page.goto("/?priority=urgent&sort=random&q=Startup.cs");
   await expect(page).toHaveURL(/\/\?q=Startup\.cs$/);
   await expect(page.getByLabel("Search actionables")).toHaveValue("Startup.cs");
-  await expect(page.getByRole("row", { name: /Protect generated and downloaded/ })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /Protect generated and downloaded/ }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: /Filters/ }).click();
   await page.getByLabel("Priority").selectOption("Critical");
   await expect(page).toHaveURL(/priority=Critical/);
 
-  const row = page.getByRole("row", { name: /Protect generated and downloaded/ });
+  const row = page.getByRole("row", {
+    name: /Protect generated and downloaded/,
+  });
   await row.press("Enter");
   await expect(page).toHaveURL(/\/actionables\/1\?/);
   const deepLink = page.url();
   await page.reload();
   await expect(page).toHaveURL(deepLink);
-  await expect(page.getByRole("heading", { name: "Protect generated and downloaded files from anonymous static access" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Protect generated and downloaded files from anonymous static access",
+    }),
+  ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/priority=Critical/);
   await expect(page.getByLabel("Search actionables")).toHaveValue("Startup.cs");
@@ -54,7 +86,9 @@ test("filters, search, sort, selection, refresh, and history are URL-backed", as
   await expect(page).toHaveURL(deepLink);
 });
 
-test("actionable archive and restore preserve status and support archived deep links", async ({ page }) => {
+test("actionable archive and restore preserve status and support archived deep links", async ({
+  page,
+}) => {
   const scopes = await (await page.request.get("/api/scopes")).json();
   const project = scopes.projects[0];
   const repository = project.repositories[0];
@@ -82,11 +116,15 @@ test("actionable archive and restore preserve status and support archived deep l
 
   await page.goto(`/actionables/${created.id}`);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
-  const archiveButton = page.getByRole("button", { name: "Archive actionable" });
+  const archiveButton = page.getByRole("button", {
+    name: "Archive actionable",
+  });
   await archiveButton.focus();
   await archiveButton.press("Enter");
   const archiveDialog = page.getByRole("dialog", { name: `Archive ${title}?` });
-  await expect(archiveDialog).toContainText("Workflow status and relationships are preserved");
+  await expect(archiveDialog).toContainText(
+    "Workflow status and relationships are preserved",
+  );
   await archiveDialog.press("Escape");
   await expect(archiveButton).toBeFocused();
   await archiveButton.press("Enter");
@@ -101,14 +139,19 @@ test("actionable archive and restore preserve status and support archived deep l
   await page.getByRole("row", { name: new RegExp(title) }).press("Enter");
   await expect(page).toHaveURL(new RegExp(`/actionables/${created.id}`));
   await expect(page.getByText("Archived actionable")).toBeVisible();
-  await page.locator(".archived-banner").getByRole("button", { name: "Restore" }).click();
+  await page
+    .locator(".archived-banner")
+    .getByRole("button", { name: "Restore" })
+    .click();
   const restoreDialog = page.getByRole("dialog", { name: `Restore ${title}?` });
   await restoreDialog.getByRole("button", { name: `Restore ${title}` }).click();
   await expect(page.getByText("Archived actionable")).toHaveCount(0);
   await expect(page.getByLabel(/^Inbox\./)).toBeVisible();
 });
 
-test("loading and API failure states preserve a retry path", async ({ page }) => {
+test("loading and API failure states preserve a retry path", async ({
+  page,
+}) => {
   await page.route("**/api/actionables*", async (route) => {
     await route.fulfill({
       status: 500,
@@ -123,7 +166,9 @@ test("loading and API failure states preserve a retry path", async ({ page }) =>
     });
   });
   await page.goto("/");
-  await expect(page.getByRole("alert")).toContainText("Could not load actionables");
+  await expect(
+    page.getByRole("cell").filter({ hasText: "Could not load actionables" }),
+  ).toBeVisible();
   await expect(page.getByText(/e2e-request-id/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });

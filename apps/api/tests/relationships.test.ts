@@ -32,7 +32,11 @@ beforeAll(async () => {
     data: { externalKey: "test-primary", name: "Primary" },
   });
   const repository = await prisma.repository.create({
-    data: { externalKey: "test-primary-repo", name: "PrimaryRepo", projectId: project.id },
+    data: {
+      externalKey: "test-primary-repo",
+      name: "PrimaryRepo",
+      projectId: project.id,
+    },
   });
   const worktree = await prisma.worktree.create({
     data: {
@@ -51,7 +55,11 @@ beforeAll(async () => {
     data: { externalKey: "test-other", name: "Other" },
   });
   const otherRepository = await prisma.repository.create({
-    data: { externalKey: "test-other-repo", name: "OtherRepo", projectId: otherProject.id },
+    data: {
+      externalKey: "test-other-repo",
+      name: "OtherRepo",
+      projectId: otherProject.id,
+    },
   });
   const otherWorktree = await prisma.worktree.create({
     data: {
@@ -73,7 +81,11 @@ afterAll(async () => {
   await app?.close();
   await prisma?.$disconnect();
   if (databasePath) {
-    await Promise.all(["", "-journal", "-shm", "-wal"].map((suffix) => rm(`${databasePath}${suffix}`, { force: true })));
+    await Promise.all(
+      ["", "-journal", "-shm", "-wal"].map((suffix) =>
+        rm(`${databasePath}${suffix}`, { force: true }),
+      ),
+    );
   }
 });
 
@@ -92,13 +104,19 @@ const body = (title: string, selectedScope = scope) => ({
 });
 
 async function create(title: string, selectedScope = scope) {
-  const response = await app.inject({ method: "POST", url: "/api/actionables", payload: body(title, selectedScope) });
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/actionables",
+    payload: body(title, selectedScope),
+  });
   expect(response.statusCode).toBe(201);
   return response.json().item;
 }
 
 async function get(id: number) {
-  return (await app.inject({ method: "GET", url: `/api/actionables/${id}` })).json().item;
+  return (
+    await app.inject({ method: "GET", url: `/api/actionables/${id}` })
+  ).json().item;
 }
 
 async function move(
@@ -125,7 +143,11 @@ describe("hierarchy relationships", () => {
     const attached = await app.inject({
       method: "PUT",
       url: `/api/actionables/${child.id}/parent`,
-      payload: { version: child.version, parentId: parent.id, parentVersion: parent.version },
+      payload: {
+        version: child.version,
+        parentId: parent.id,
+        parentVersion: parent.version,
+      },
     });
     expect(attached.statusCode).toBe(200);
     child = attached.json().item;
@@ -136,21 +158,33 @@ describe("hierarchy relationships", () => {
     const self = await app.inject({
       method: "PUT",
       url: `/api/actionables/${child.id}/parent`,
-      payload: { version: child.version, parentId: child.id, parentVersion: child.version },
+      payload: {
+        version: child.version,
+        parentId: child.id,
+        parentVersion: child.version,
+      },
     });
     expect(self.json().code).toBe("SELF_HIERARCHY");
 
     const depth = await app.inject({
       method: "PUT",
       url: `/api/actionables/${parent.id}/parent`,
-      payload: { version: parent.version, parentId: replacement.id, parentVersion: replacement.version },
+      payload: {
+        version: parent.version,
+        parentId: replacement.id,
+        parentVersion: replacement.version,
+      },
     });
     expect(depth.json().code).toBe("HIERARCHY_DEPTH_EXCEEDED");
 
     const crossScope = await app.inject({
       method: "PUT",
       url: `/api/actionables/${other.id}/parent`,
-      payload: { version: other.version, parentId: parent.id, parentVersion: parent.version },
+      payload: {
+        version: other.version,
+        parentId: parent.id,
+        parentVersion: parent.version,
+      },
     });
     expect(crossScope.json().code).toBe("HIERARCHY_SCOPE_MISMATCH");
 
@@ -169,12 +203,19 @@ describe("hierarchy relationships", () => {
     child = reassigned.json().item;
     replacement = await get(replacement.id);
     expect(child.relationships.parent.parent.id).toBe(replacement.id);
-    expect(child.activity.some((event: { type: string }) => event.type === "hierarchy-reassigned")).toBe(true);
+    expect(
+      child.activity.some(
+        (event: { type: string }) => event.type === "hierarchy-reassigned",
+      ),
+    ).toBe(true);
 
     const staleDetach = await app.inject({
       method: "DELETE",
       url: `/api/actionables/${child.id}/parent`,
-      payload: { version: child.version - 1, parentVersion: replacement.version },
+      payload: {
+        version: child.version - 1,
+        parentVersion: replacement.version,
+      },
     });
     expect(staleDetach.statusCode).toBe(409);
     expect(staleDetach.json().current.version).toBe(child.version);
@@ -186,7 +227,13 @@ describe("hierarchy relationships", () => {
     });
     expect(detached.statusCode).toBe(200);
     expect(detached.json().item.relationships.parent).toBeNull();
-    expect(detached.json().item.activity.some((event: { type: string }) => event.type === "hierarchy-detached")).toBe(true);
+    expect(
+      detached
+        .json()
+        .item.activity.some(
+          (event: { type: string }) => event.type === "hierarchy-detached",
+        ),
+    ).toBe(true);
   });
 });
 
@@ -210,7 +257,10 @@ describe("dependency relationships", () => {
     prerequisite = await get(prerequisite.id);
     const edge = dependent.relationships.blockedBy[0];
     expect(edge.state).toBe("unresolved");
-    expect(dependent).toMatchObject({ isDependencyBlocked: true, unresolvedDependencyCount: 1 });
+    expect(dependent).toMatchObject({
+      isDependencyBlocked: true,
+      unresolvedDependencyCount: 1,
+    });
 
     const duplicate = await app.inject({
       method: "POST",
@@ -235,13 +285,19 @@ describe("dependency relationships", () => {
     expect(waived.statusCode).toBe(200);
     dependent = waived.json().item;
     prerequisite = await get(prerequisite.id);
-    expect(dependent.relationships.blockedBy[0]).toMatchObject({ state: "waived", isSatisfied: true });
+    expect(dependent.relationships.blockedBy[0]).toMatchObject({
+      state: "waived",
+      isSatisfied: true,
+    });
     expect(dependent.isDependencyBlocked).toBe(false);
 
     const restored = await app.inject({
       method: "POST",
       url: `/api/actionables/${dependent.id}/dependencies/${edge.id}/restore`,
-      payload: { version: dependent.version, prerequisiteVersion: prerequisite.version },
+      payload: {
+        version: dependent.version,
+        prerequisiteVersion: prerequisite.version,
+      },
     });
     expect(restored.statusCode).toBe(200);
     dependent = restored.json().item;
@@ -277,7 +333,8 @@ describe("dependency relationships", () => {
     prerequisite = await move(prerequisite, "Ready");
     prerequisite = await move(prerequisite, "In progress");
     prerequisite = await move(prerequisite, "Done", {
-      completionOverrideReason: "Verified externally for this relationship test",
+      completionOverrideReason:
+        "Verified externally for this relationship test",
     });
     dependent = await get(dependent.id);
     expect(dependent.relationships.blockedBy[0].state).toBe("satisfied");
@@ -295,13 +352,21 @@ describe("dependency relationships", () => {
     });
     expect(removed.statusCode).toBe(200);
     expect(removed.json().item.relationships.blockedBy).toHaveLength(0);
-    expect(removed.json().item.activity.some((event: { type: string }) => event.type === "dependency-removed")).toBe(true);
+    expect(
+      removed
+        .json()
+        .item.activity.some(
+          (event: { type: string }) => event.type === "dependency-removed",
+        ),
+    ).toBe(true);
   });
 
   it("treats Dismissed as unresolved and prevents concurrent opposite edges from committing a cycle", async () => {
     let dependent = await create("Dismissed prerequisite dependent");
     let dismissed = await create("Dismissed prerequisite");
-    dismissed = await move(dismissed, "Dismissed", { reason: "This work is no longer intended" });
+    dismissed = await move(dismissed, "Dismissed", {
+      reason: "This work is no longer intended",
+    });
     const edge = await app.inject({
       method: "POST",
       url: `/api/actionables/${dependent.id}/dependencies`,
@@ -341,8 +406,16 @@ describe("dependency relationships", () => {
         },
       }),
     ]);
-    expect([leftResult.statusCode, rightResult.statusCode].filter((status) => status === 200)).toHaveLength(1);
-    expect([leftResult.statusCode, rightResult.statusCode].every((status) => status === 200 || status === 409 || status === 422)).toBe(true);
+    expect(
+      [leftResult.statusCode, rightResult.statusCode].filter(
+        (status) => status === 200,
+      ),
+    ).toHaveLength(1);
+    expect(
+      [leftResult.statusCode, rightResult.statusCode].every(
+        (status) => status === 200 || status === 409 || status === 422,
+      ),
+    ).toBe(true);
     const committed = await prisma.dependencyRelationship.count({
       where: {
         removedAt: null,
@@ -363,7 +436,11 @@ describe("parent lifecycle integration", () => {
     const attached = await app.inject({
       method: "PUT",
       url: `/api/actionables/${child.id}/parent`,
-      payload: { version: child.version, parentId: parent.id, parentVersion: parent.version },
+      payload: {
+        version: child.version,
+        parentId: parent.id,
+        parentVersion: parent.version,
+      },
     });
     child = attached.json().item;
     parent = await get(parent.id);
@@ -405,8 +482,12 @@ describe("parent lifecycle integration", () => {
     expect(reopened.statusCode).toBe(200);
     parent = await get(parent.id);
     expect(parent.status).toBe("Ready");
-    expect(parent.activity.some((event: { type: string; context: Record<string, string> }) =>
-      event.type === "parent-auto-reopened" && event.context.reason === "A regression requires more work",
-    )).toBe(true);
+    expect(
+      parent.activity.some(
+        (event: { type: string; context: Record<string, string> }) =>
+          event.type === "parent-auto-reopened" &&
+          event.context.reason === "A regression requires more work",
+      ),
+    ).toBe(true);
   });
 });

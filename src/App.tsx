@@ -17,6 +17,7 @@ import {
   GitBranch,
   LayoutDashboard,
   List,
+  Keyboard,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -51,7 +52,7 @@ import {
   type ValidationType,
 } from "@actionables/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ApiProblem,
   createDependency,
@@ -83,6 +84,43 @@ import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 type InspectorTab = "finding" | "research" | "validation";
 type PriorityFilter = "All" | Priority;
 
+function blocksGlobalShortcut(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      'input, textarea, select, button, a, [role="dialog"], [contenteditable="true"]',
+    ) || target.isContentEditable,
+  );
+}
+
+function useModalIsolation(dialogRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const backdrop = dialogRef.current?.parentElement;
+    const shell = backdrop?.parentElement;
+    if (!backdrop || !shell) return;
+    const siblings = [...shell.children].filter(
+      (element) => element !== backdrop,
+    ) as HTMLElement[];
+    const previous = siblings.map((element) => ({
+      element,
+      ariaHidden: element.getAttribute("aria-hidden"),
+      inert: element.inert,
+    }));
+    for (const sibling of siblings) {
+      sibling.inert = true;
+      sibling.setAttribute("aria-hidden", "true");
+    }
+    return () => {
+      for (const state of previous) {
+        state.element.inert = state.inert;
+        if (state.ariaHidden === null)
+          state.element.removeAttribute("aria-hidden");
+        else state.element.setAttribute("aria-hidden", state.ariaHidden);
+      }
+    };
+  }, [dialogRef]);
+}
+
 const priorityOrder: Record<Priority, number> = {
   Unset: 5,
   Critical: 0,
@@ -92,8 +130,25 @@ const priorityOrder: Record<Priority, number> = {
   Backlog: 4,
 };
 
-const priorities: Priority[] = ["Unset", "Critical", "High", "Medium", "Low", "Backlog"];
-const efforts: Effort[] = ["Unknown", "XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL"];
+const priorities: Priority[] = [
+  "Unset",
+  "Critical",
+  "High",
+  "Medium",
+  "Low",
+  "Backlog",
+];
+const efforts: Effort[] = [
+  "Unknown",
+  "XS",
+  "S",
+  "S–M",
+  "M",
+  "M–L",
+  "L",
+  "L–XL",
+  "XL",
+];
 const evidenceStates: EvidenceState[] = [
   "Unclassified",
   "Confirmed",
@@ -173,7 +228,10 @@ function WorktreeRow({
       <GitBranch aria-hidden="true" />
       <span className="worktree-name">{name}</span>
       {count !== undefined && <span className="tree-count">{count}</span>}
-      <span className={`tree-status ${selected ? "is-active" : ""}`} aria-hidden="true" />
+      <span
+        className={`tree-status ${selected ? "is-active" : ""}`}
+        aria-hidden="true"
+      />
     </button>
   );
 }
@@ -215,7 +273,12 @@ function SourceActions({
           <ExternalLink aria-hidden="true" />
         </a>
       )}
-      <button type="button" onClick={copy} aria-label="Copy source locator" title="Copy source locator">
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="Copy source locator"
+        title="Copy source locator"
+      >
         <Copy aria-hidden="true" />
       </button>
     </span>
@@ -234,26 +297,40 @@ function SourceHistory({
     <section className="inspector-section">
       <h3>{imported ? "Imported source evidence" : "Source references"}</h3>
       <div className="source-history">
-        <div className={`source-evidence-notice ${imported ? "is-imported" : ""}`}>
-          <strong>{imported ? "Read-only imported evidence" : "No imported evidence"}</strong>
+        <div
+          className={`source-evidence-notice ${imported ? "is-imported" : ""}`}
+        >
+          <strong>
+            {imported ? "Read-only imported evidence" : "No imported evidence"}
+          </strong>
           <p>{selected.immutableSourceEvidence.note}</p>
         </div>
-        {imported && selected.immutableSourceEvidence.sourceFiles.map((file) => (
-          <div className="source-event" key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}>
-            <div className="source-event-meta">
-              <span className="source-label">imported</span>
-              <span>{file.lines ?? file.symbol ?? "file"}</span>
-              <span>original evidence</span>
+        {imported &&
+          selected.immutableSourceEvidence.sourceFiles.map((file) => (
+            <div
+              className="source-event"
+              key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}
+            >
+              <div className="source-event-meta">
+                <span className="source-label">imported</span>
+                <span>{file.lines ?? file.symbol ?? "file"}</span>
+                <span>original evidence</span>
+              </div>
+              <p>
+                <code>{file.path}</code>
+                <SourceActions
+                  locator={file.path}
+                  openUrl={null}
+                  onNotice={onNotice}
+                />
+              </p>
             </div>
-            <p>
-              <code>{file.path}</code>
-              <SourceActions locator={file.path} openUrl={null} onNotice={onNotice} />
-            </p>
-          </div>
-        ))}
+          ))}
         <div className="source-event">
           <div className="source-event-meta">
-            <span className="source-label">{imported ? "import" : "manual"}</span>
+            <span className="source-label">
+              {imported ? "import" : "manual"}
+            </span>
             <span>now</span>
             <span>status provenance</span>
           </div>
@@ -266,7 +343,10 @@ function SourceHistory({
           </p>
         </div>
         {selected.userSources.map((source, index) => (
-          <div className="source-event user-source" key={`${source.type}-${source.locator}-${index}`}>
+          <div
+            className="source-event user-source"
+            key={`${source.type}-${source.locator}-${index}`}
+          >
             <div className="source-event-meta">
               <span className="source-label">user-added</span>
               <span>{source.type}</span>
@@ -281,7 +361,8 @@ function SourceHistory({
               />
             </p>
             <time dateTime={source.createdAt}>
-              Added {new Date(source.createdAt).toLocaleString()} · {source.provenance}
+              Added {new Date(source.createdAt).toLocaleString()} ·{" "}
+              {source.provenance}
             </time>
           </div>
         ))}
@@ -328,7 +409,8 @@ function RelationshipSection({
   const options = (items: ActionableSummary[]) =>
     items.map((item) => (
       <option key={item.id} value={item.id}>
-        {item.id} · {item.title} — {item.scope.projectName}/{item.scope.worktreeName}
+        {item.id} · {item.title} — {item.scope.projectName}/
+        {item.scope.worktreeName}
       </option>
     ));
   const run = async (work: () => Promise<ActionableDetail>, notice: string) => {
@@ -338,8 +420,16 @@ function RelationshipSection({
       onMutated(await work(), notice);
     } catch (caught) {
       if (caught instanceof ApiProblem) {
-        setError(Object.values(caught.problem.errors ?? {}).flat().join(" ") || caught.problem.title);
-        if (caught.problem.current) onMutated(caught.problem.current, "The saved version changed; relationship action was not applied.");
+        setError(
+          Object.values(caught.problem.errors ?? {})
+            .flat()
+            .join(" ") || caught.problem.title,
+        );
+        if (caught.problem.current)
+          onMutated(
+            caught.problem.current,
+            "The saved version changed; relationship action was not applied.",
+          );
       } else setError("The relationship change could not be completed.");
     } finally {
       setSaving(false);
@@ -348,7 +438,10 @@ function RelationshipSection({
   const selectedParent = selected.relationships.parent?.parent;
 
   return (
-    <section className="inspector-section relationships" aria-label="Relationships">
+    <section
+      className="inspector-section relationships"
+      aria-label="Relationships"
+    >
       {selectedParent && (
         <div className="relationship-parent">
           <span>Parent</span>
@@ -358,23 +451,31 @@ function RelationshipSection({
           <button
             type="button"
             disabled={saving}
-            onClick={() => void run(
-              () => detachParent(selected.id, {
-                version: selected.version,
-                parentVersion: selectedParent.version,
-              }),
-              "Subtask detached; the relationship remains in activity history.",
-            )}
+            onClick={() =>
+              void run(
+                () =>
+                  detachParent(selected.id, {
+                    version: selected.version,
+                    parentVersion: selectedParent.version,
+                  }),
+                "Subtask detached; the relationship remains in activity history.",
+              )
+            }
           >
             Detach
           </button>
         </div>
       )}
       <div className="relationship-group">
-        <h3>Subtasks <span>{selected.relationships.subtasks.length}</span></h3>
+        <h3>
+          Subtasks <span>{selected.relationships.subtasks.length}</span>
+        </h3>
         {selected.relationships.subtasks.map((relationship) => (
           <div className="relationship-row" key={relationship.id}>
-            <button type="button" onClick={() => onNavigate(relationship.child.id)}>
+            <button
+              type="button"
+              onClick={() => onNavigate(relationship.child.id)}
+            >
               {relationship.child.id} · {relationship.child.title}
             </button>
             <span>{relationship.child.status}</span>
@@ -386,35 +487,61 @@ function RelationshipSection({
             event.preventDefault();
             if (!subtaskTitle.trim()) return;
             void run(
-              () => createSubtask(selected.id, { version: selected.version, title: subtaskTitle }),
+              () =>
+                createSubtask(selected.id, {
+                  version: selected.version,
+                  title: subtaskTitle,
+                }),
               "Subtask created and attached.",
             ).then(() => setSubtaskTitle(""));
           }}
         >
-          <input value={subtaskTitle} onChange={(event) => setSubtaskTitle(event.target.value)} placeholder="New subtask name" aria-label="New subtask name" />
-          <button disabled={saving || !subtaskTitle.trim()} type="submit">Create</button>
+          <input
+            value={subtaskTitle}
+            onChange={(event) => setSubtaskTitle(event.target.value)}
+            placeholder="New subtask name"
+            aria-label="New subtask name"
+          />
+          <button disabled={saving || !subtaskTitle.trim()} type="submit">
+            Create
+          </button>
         </form>
         {!selected.parentId && (
           <div className="relationship-add">
-            <select value={childId} onChange={(event) => setChildId(event.target.value)} aria-label="Existing subtask">
+            <select
+              value={childId}
+              onChange={(event) => setChildId(event.target.value)}
+              aria-label="Existing subtask"
+            >
               <option value="">Link existing subtask…</option>
-              {options(hierarchyCandidates.filter((item) => !item.childIds?.length && item.id !== selected.id))}
+              {options(
+                hierarchyCandidates.filter(
+                  (item) => !item.childIds?.length && item.id !== selected.id,
+                ),
+              )}
             </select>
             <button
               type="button"
               disabled={saving || !childId}
               onClick={() => {
-                const child = actionables.find((item) => item.id === Number(childId));
-                const oldParent = child?.parentId ? actionables.find((item) => item.id === child.parentId) : undefined;
+                const child = actionables.find(
+                  (item) => item.id === Number(childId),
+                );
+                const oldParent = child?.parentId
+                  ? actionables.find((item) => item.id === child.parentId)
+                  : undefined;
                 if (!child) return;
                 void run(
-                  () => setParent(child.id, {
-                    version: child.version,
-                    parentId: selected.id,
-                    parentVersion: selected.version,
-                    currentParentVersion: oldParent?.version,
-                  }),
-                  oldParent ? "Subtask reassigned with both relationship changes recorded." : "Existing actionable attached as a subtask.",
+                  () =>
+                    setParent(child.id, {
+                      version: child.version,
+                      parentId: selected.id,
+                      parentVersion: selected.version,
+                      currentParentVersion: oldParent?.version,
+                    }),
+                  oldParent
+                    ? "Subtask reassigned with both relationship changes recorded."
+                    : "Existing actionable attached as a subtask.",
                 ).then(() => setChildId(""));
               }}
             >
@@ -424,23 +551,34 @@ function RelationshipSection({
         )}
         {selectedParent && (
           <div className="relationship-add">
-            <select value={parentId} onChange={(event) => setParentId(event.target.value)} aria-label="Replacement parent">
+            <select
+              value={parentId}
+              onChange={(event) => setParentId(event.target.value)}
+              aria-label="Replacement parent"
+            >
               <option value="">Change parent…</option>
-              {options(hierarchyCandidates.filter((item) => !item.parentId && !item.childIds?.length))}
+              {options(
+                hierarchyCandidates.filter(
+                  (item) => !item.parentId && !item.childIds?.length,
+                ),
+              )}
             </select>
             <button
               type="button"
               disabled={saving || !parentId}
               onClick={() => {
-                const parent = actionables.find((item) => item.id === Number(parentId));
+                const parent = actionables.find(
+                  (item) => item.id === Number(parentId),
+                );
                 if (!parent) return;
                 void run(
-                  () => setParent(selected.id, {
-                    version: selected.version,
-                    parentId: parent.id,
-                    parentVersion: parent.version,
-                    currentParentVersion: selectedParent.version,
-                  }),
+                  () =>
+                    setParent(selected.id, {
+                      version: selected.version,
+                      parentId: parent.id,
+                      parentVersion: parent.version,
+                      currentParentVersion: selectedParent.version,
+                    }),
                   "Subtask reassigned and detach/attach history recorded.",
                 ).then(() => setParentId(""));
               }}
@@ -451,24 +589,37 @@ function RelationshipSection({
         )}
       </div>
       <div className="relationship-group">
-        <h3>Blocked by <span>{selected.relationships.blockedBy.length}</span></h3>
+        <h3>
+          Blocked by <span>{selected.relationships.blockedBy.length}</span>
+        </h3>
         {selected.relationships.blockedBy.map((relationship) => (
-          <div className="relationship-row dependency-row" key={relationship.id}>
-            <button type="button" onClick={() => onNavigate(relationship.prerequisite.id)}>
+          <div
+            className="relationship-row dependency-row"
+            key={relationship.id}
+          >
+            <button
+              type="button"
+              onClick={() => onNavigate(relationship.prerequisite.id)}
+            >
               {relationship.prerequisite.id} · {relationship.prerequisite.title}
             </button>
-            <span className={`dependency-state is-${relationship.state}`}>{relationship.state}</span>
+            <span className={`dependency-state is-${relationship.state}`}>
+              {relationship.state}
+            </span>
             {relationship.state === "waived" ? (
               <button
                 type="button"
                 disabled={saving}
-                onClick={() => void run(
-                  () => restoreDependency(selected.id, relationship.id, {
-                    version: selected.version,
-                    prerequisiteVersion: relationship.prerequisite.version,
-                  }),
-                  "Dependency restored; derived blocking recalculated.",
-                )}
+                onClick={() =>
+                  void run(
+                    () =>
+                      restoreDependency(selected.id, relationship.id, {
+                        version: selected.version,
+                        prerequisiteVersion: relationship.prerequisite.version,
+                      }),
+                    "Dependency restored; derived blocking recalculated.",
+                  )
+                }
               >
                 Restore
               </button>
@@ -477,15 +628,20 @@ function RelationshipSection({
                 type="button"
                 disabled={saving}
                 onClick={() => {
-                  const reason = window.prompt("Why is this dependency being waived?");
-                  if (reason?.trim()) void run(
-                    () => waiveDependency(selected.id, relationship.id, {
-                      version: selected.version,
-                      prerequisiteVersion: relationship.prerequisite.version,
-                      reason,
-                    }),
-                    "Dependency waived with its reason recorded.",
+                  const reason = window.prompt(
+                    "Why is this dependency being waived?",
                   );
+                  if (reason?.trim())
+                    void run(
+                      () =>
+                        waiveDependency(selected.id, relationship.id, {
+                          version: selected.version,
+                          prerequisiteVersion:
+                            relationship.prerequisite.version,
+                          reason,
+                        }),
+                      "Dependency waived with its reason recorded.",
+                    );
                 }}
               >
                 Waive
@@ -495,15 +651,19 @@ function RelationshipSection({
               type="button"
               disabled={saving}
               onClick={() => {
-                const reason = window.prompt("Why is this dependency being removed?");
-                if (reason?.trim()) void run(
-                  () => removeDependency(selected.id, relationship.id, {
-                    version: selected.version,
-                    prerequisiteVersion: relationship.prerequisite.version,
-                    reason,
-                  }),
-                  "Dependency removed; the relationship remains auditable.",
+                const reason = window.prompt(
+                  "Why is this dependency being removed?",
                 );
+                if (reason?.trim())
+                  void run(
+                    () =>
+                      removeDependency(selected.id, relationship.id, {
+                        version: selected.version,
+                        prerequisiteVersion: relationship.prerequisite.version,
+                        reason,
+                      }),
+                    "Dependency removed; the relationship remains auditable.",
+                  );
               }}
             >
               Remove
@@ -511,7 +671,11 @@ function RelationshipSection({
           </div>
         ))}
         <div className="relationship-add">
-          <select value={prerequisiteId} onChange={(event) => setPrerequisiteId(event.target.value)} aria-label="Prerequisite actionable">
+          <select
+            value={prerequisiteId}
+            onChange={(event) => setPrerequisiteId(event.target.value)}
+            aria-label="Prerequisite actionable"
+          >
             <option value="">Add prerequisite…</option>
             {options(actionables.filter((item) => item.id !== selected.id))}
           </select>
@@ -519,14 +683,17 @@ function RelationshipSection({
             type="button"
             disabled={saving || !prerequisiteId}
             onClick={() => {
-              const prerequisite = actionables.find((item) => item.id === Number(prerequisiteId));
+              const prerequisite = actionables.find(
+                (item) => item.id === Number(prerequisiteId),
+              );
               if (!prerequisite) return;
               void run(
-                () => createDependency(selected.id, {
-                  version: selected.version,
-                  prerequisiteId: prerequisite.id,
-                  prerequisiteVersion: prerequisite.version,
-                }),
+                () =>
+                  createDependency(selected.id, {
+                    version: selected.version,
+                    prerequisiteId: prerequisite.id,
+                    prerequisiteVersion: prerequisite.version,
+                  }),
                 "Dependency added; derived blocking recalculated.",
               ).then(() => setPrerequisiteId(""));
             }}
@@ -536,17 +703,28 @@ function RelationshipSection({
         </div>
       </div>
       <div className="relationship-group">
-        <h3>Blocks <span>{selected.relationships.blocks.length}</span></h3>
+        <h3>
+          Blocks <span>{selected.relationships.blocks.length}</span>
+        </h3>
         {selected.relationships.blocks.map((relationship) => (
           <div className="relationship-row" key={relationship.id}>
-            <button type="button" onClick={() => onNavigate(relationship.dependent.id)}>
+            <button
+              type="button"
+              onClick={() => onNavigate(relationship.dependent.id)}
+            >
               {relationship.dependent.id} · {relationship.dependent.title}
             </button>
-            <span className={`dependency-state is-${relationship.state}`}>{relationship.state}</span>
+            <span className={`dependency-state is-${relationship.state}`}>
+              {relationship.state}
+            </span>
           </div>
         ))}
         <div className="relationship-add">
-          <select value={dependentId} onChange={(event) => setDependentId(event.target.value)} aria-label="Dependent actionable">
+          <select
+            value={dependentId}
+            onChange={(event) => setDependentId(event.target.value)}
+            aria-label="Dependent actionable"
+          >
             <option value="">Link dependent…</option>
             {options(actionables.filter((item) => item.id !== selected.id))}
           </select>
@@ -554,14 +732,17 @@ function RelationshipSection({
             type="button"
             disabled={saving || !dependentId}
             onClick={() => {
-              const dependent = actionables.find((item) => item.id === Number(dependentId));
+              const dependent = actionables.find(
+                (item) => item.id === Number(dependentId),
+              );
               if (!dependent) return;
               void run(
-                () => createDependency(dependent.id, {
-                  version: dependent.version,
-                  prerequisiteId: selected.id,
-                  prerequisiteVersion: selected.version,
-                }),
+                () =>
+                  createDependency(dependent.id, {
+                    version: dependent.version,
+                    prerequisiteId: selected.id,
+                    prerequisiteVersion: selected.version,
+                  }),
                 "Dependent linked; derived blocking recalculated.",
               ).then(() => setDependentId(""));
             }}
@@ -570,7 +751,11 @@ function RelationshipSection({
           </button>
         </div>
       </div>
-      {error && <p className="relationship-error" role="alert">{error}</p>}
+      {error && (
+        <p className="relationship-error" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -603,7 +788,9 @@ function LifecycleControls({
         status: target,
         reason: needsReason ? reason : undefined,
         completionOverrideReason:
-          target === "Done" && overrideReason.trim() ? overrideReason : undefined,
+          target === "Done" && overrideReason.trim()
+            ? overrideReason
+            : undefined,
         origin: "user",
       });
       const notice =
@@ -617,10 +804,14 @@ function LifecycleControls({
     } catch (caught) {
       if (caught instanceof ApiProblem) {
         setError(
-          Object.values(caught.problem.errors ?? {}).flat().join(" ") ||
-            caught.problem.title,
+          Object.values(caught.problem.errors ?? {})
+            .flat()
+            .join(" ") || caught.problem.title,
         );
-        if (caught.problem.code === "VERSION_CONFLICT" && caught.problem.current) {
+        if (
+          caught.problem.code === "VERSION_CONFLICT" &&
+          caught.problem.current
+        ) {
           onMutated(
             caught.problem.current,
             "This lifecycle action was stale and was not applied. The current version is loaded; your reason remains available.",
@@ -664,9 +855,15 @@ function LifecycleControls({
         ))}
       </div>
       {target && (
-        <div className="lifecycle-confirm" role="group" aria-label={`Move to ${target}`}>
+        <div
+          className="lifecycle-confirm"
+          role="group"
+          aria-label={`Move to ${target}`}
+        >
           <div>
-            <strong>{selected.status} → {target}</strong>
+            <strong>
+              {selected.status} → {target}
+            </strong>
             {target === "Done" && (
               <p>
                 {selected.completionEligibility.qualifyingValidationRecordId
@@ -681,7 +878,8 @@ function LifecycleControls({
               (selected.status === "Done" || selected.status === "Dismissed") &&
               selected.relationships.parent?.parent.status === "Done" && (
                 <p>
-                  Reopening this subtask will also reopen its Done parent to Ready in the same transaction.
+                  Reopening this subtask will also reopen its Done parent to
+                  Ready in the same transaction.
                 </p>
               )}
           </div>
@@ -716,12 +914,25 @@ function LifecycleControls({
               />
             </label>
           )}
-          {error && <p className="inline-error" role="alert">{error}</p>}
+          {error && (
+            <p className="inline-error" role="alert">
+              {error}
+            </p>
+          )}
           <div className="lifecycle-confirm-actions">
-            <button type="button" onClick={() => setTarget(null)} disabled={saving}>
+            <button
+              type="button"
+              onClick={() => setTarget(null)}
+              disabled={saving}
+            >
               Cancel
             </button>
-            <button type="button" className="primary-action" onClick={submit} disabled={saving}>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={submit}
+              disabled={saving}
+            >
               {saving
                 ? "Saving…"
                 : target === "Done" && overrideReason.trim()
@@ -785,10 +996,14 @@ function ValidationRecords({
     } catch (caught) {
       if (caught instanceof ApiProblem) {
         setError(
-          Object.values(caught.problem.errors ?? {}).flat().join(" ") ||
-            caught.problem.title,
+          Object.values(caught.problem.errors ?? {})
+            .flat()
+            .join(" ") || caught.problem.title,
         );
-        if (caught.problem.code === "VERSION_CONFLICT" && caught.problem.current) {
+        if (
+          caught.problem.code === "VERSION_CONFLICT" &&
+          caught.problem.current
+        ) {
           onMutated(
             caught.problem.current,
             "This validation save was stale and was not applied. The current version is loaded; your evidence remains in the form.",
@@ -807,7 +1022,9 @@ function ValidationRecords({
       <div className="section-title-row">
         <div>
           <h3>Validation records</h3>
-          <p className="section-help">{selected.completionEligibility.policy}</p>
+          <p className="section-help">
+            {selected.completionEligibility.policy}
+          </p>
         </div>
         <button
           type="button"
@@ -829,7 +1046,9 @@ function ValidationRecords({
             <Badge tone={record.outcome}>{record.outcome}</Badge>
             <strong>{record.type}</strong>
             {record.qualifiesForCompletion && (
-              <span className="qualifying-label"><CheckCircle2 aria-hidden="true" /> Qualifying</span>
+              <span className="qualifying-label">
+                <CheckCircle2 aria-hidden="true" /> Qualifying
+              </span>
             )}
             {record.supersededById && <span>Superseded</span>}
           </header>
@@ -864,43 +1083,88 @@ function ValidationRecords({
         </article>
       ))}
       {selected.validationRecords.length === 0 && (
-        <p className="section-help">No validation results have been recorded.</p>
+        <p className="section-help">
+          No validation results have been recorded.
+        </p>
       )}
       {open && (
         <form className="validation-form" onSubmit={submit}>
-          <strong>{supersedesId ? "Append validation correction" : "Record validation result"}</strong>
+          <strong>
+            {supersedesId
+              ? "Append validation correction"
+              : "Record validation result"}
+          </strong>
           {supersedesId && (
-            <p>The prior record remains unchanged and this record will point to it.</p>
+            <p>
+              The prior record remains unchanged and this record will point to
+              it.
+            </p>
           )}
           <div className="validation-form-grid">
             <label>
               <span>Type</span>
-              <select value={type} onChange={(event) => setType(event.target.value as ValidationType)}>
-                {["Automated test", "Manual test", "Command", "Review", "Document"].map((value) => (
+              <select
+                value={type}
+                onChange={(event) =>
+                  setType(event.target.value as ValidationType)
+                }
+              >
+                {[
+                  "Automated test",
+                  "Manual test",
+                  "Command",
+                  "Review",
+                  "Document",
+                ].map((value) => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
             </label>
             <label>
               <span>Outcome</span>
-              <select value={outcome} onChange={(event) => setOutcome(event.target.value as ValidationOutcome)}>
-                {["Passed", "Failed", "Partial"].map((value) => <option key={value}>{value}</option>)}
+              <select
+                value={outcome}
+                onChange={(event) =>
+                  setOutcome(event.target.value as ValidationOutcome)
+                }
+              >
+                {["Passed", "Failed", "Partial"].map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
               </select>
             </label>
           </div>
           <label>
             <span>Notes</span>
-            <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
           </label>
           <label>
             <span>Evidence</span>
-            <textarea rows={3} value={evidence} onChange={(event) => setEvidence(event.target.value)} />
+            <textarea
+              rows={3}
+              value={evidence}
+              onChange={(event) => setEvidence(event.target.value)}
+            />
           </label>
-          {error && <p className="inline-error" role="alert">{error}</p>}
+          {error && (
+            <p className="inline-error" role="alert">
+              {error}
+            </p>
+          )}
           <div className="lifecycle-confirm-actions">
-            <button type="button" onClick={reset} disabled={saving}>Cancel</button>
+            <button type="button" onClick={reset} disabled={saving}>
+              Cancel
+            </button>
             <button type="submit" className="primary-action" disabled={saving}>
-              {saving ? "Saving…" : supersedesId ? "Append correction" : "Record result"}
+              {saving
+                ? "Saving…"
+                : supersedesId
+                  ? "Append correction"
+                  : "Record result"}
             </button>
           </div>
         </form>
@@ -916,12 +1180,16 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
       {selected.activity.map((event) => (
         <article
           key={event.id}
-          className={event.type === "completion-overridden" ? "is-override" : ""}
+          className={
+            event.type === "completion-overridden" ? "is-override" : ""
+          }
         >
           <Activity aria-hidden="true" />
           <div>
             <strong>{event.summary}</strong>
-            {event.context.reason && <Markdown>{event.context.reason}</Markdown>}
+            {event.context.reason && (
+              <Markdown>{event.context.reason}</Markdown>
+            )}
             <time dateTime={event.occurredAt}>
               {new Date(event.occurredAt).toLocaleString()}
             </time>
@@ -968,12 +1236,18 @@ function Inspector({
           </button>
           <h2>{selected.title}</h2>
           <div className="inspector-actions">
-            <IconButton label="Edit actionable" onClick={onEdit}><Pencil /></IconButton>
+            <IconButton label="Edit actionable" onClick={onEdit}>
+              <Pencil />
+            </IconButton>
             {!selected.archiveState.isArchived && (
-              <IconButton label="Archive actionable" onClick={onArchive}><Archive /></IconButton>
+              <IconButton label="Archive actionable" onClick={onArchive}>
+                <Archive />
+              </IconButton>
             )}
             {selected.archiveState.directlyArchived && (
-              <IconButton label="Restore actionable" onClick={onArchive}><ArchiveRestore /></IconButton>
+              <IconButton label="Restore actionable" onClick={onArchive}>
+                <ArchiveRestore />
+              </IconButton>
             )}
           </div>
         </div>
@@ -987,11 +1261,19 @@ function Inspector({
             {selected.status}
           </Badge>
           <span className="metadata-divider" />
-          <span className="mono metadata-item"><GitBranch aria-hidden="true" />{selected.worktree}</span>
+          <span className="mono metadata-item">
+            <GitBranch aria-hidden="true" />
+            {selected.worktree}
+          </span>
           <span className="metadata-divider" />
-          <span className="metadata-item"><span className="effort-mark">{selected.effort}</span></span>
+          <span className="metadata-item">
+            <span className="effort-mark">{selected.effort}</span>
+          </span>
           <span className="metadata-divider" />
-          <span className="metadata-item"><Clock3 aria-hidden="true" />{selected.updated}</span>
+          <span className="metadata-item">
+            <Clock3 aria-hidden="true" />
+            {selected.updated}
+          </span>
         </div>
       </header>
 
@@ -1007,28 +1289,44 @@ function Inspector({
             </span>
           </div>
           {selected.archiveState.directlyArchived && (
-            <button type="button" onClick={onArchive}>Restore</button>
+            <button type="button" onClick={onArchive}>
+              Restore
+            </button>
           )}
         </div>
       )}
 
       {!selected.archiveState.isArchived && (
-        <LifecycleControls key={`lifecycle-${selected.id}`} selected={selected} onMutated={onMutated} />
+        <LifecycleControls
+          key={`lifecycle-${selected.id}`}
+          selected={selected}
+          onMutated={onMutated}
+        />
       )}
 
-      <nav className="inspector-tabs" aria-label="Actionable detail">
-        {(["finding", "research", "validation"] as InspectorTab[]).map((tab) => (
-          <button
-            type="button"
-            key={tab}
-            className={activeTab === tab ? "is-active" : ""}
-            aria-selected={activeTab === tab}
-            role="tab"
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab === "finding" ? "Finding" : tab === "research" ? "Research notes" : "Validation"}
-          </button>
-        ))}
+      <nav
+        className="inspector-tabs"
+        aria-label="Actionable detail"
+        role="tablist"
+      >
+        {(["finding", "research", "validation"] as InspectorTab[]).map(
+          (tab) => (
+            <button
+              type="button"
+              key={tab}
+              className={activeTab === tab ? "is-active" : ""}
+              aria-selected={activeTab === tab}
+              role="tab"
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === "finding"
+                ? "Finding"
+                : tab === "research"
+                  ? "Research notes"
+                  : "Validation"}
+            </button>
+          ),
+        )}
       </nav>
 
       <div className="inspector-content">
@@ -1036,22 +1334,29 @@ function Inspector({
           <>
             <section className="inspector-section">
               <h3>Finding</h3>
-              {selected.finding
-                ? <Markdown>{selected.finding}</Markdown>
-                : <p>No finding has been written yet.</p>}
+              {selected.finding ? (
+                <Markdown>{selected.finding}</Markdown>
+              ) : (
+                <p>No finding has been written yet.</p>
+              )}
             </section>
             <section className="inspector-section">
               <h3>Description</h3>
-              {selected.description
-                ? <Markdown>{selected.description}</Markdown>
-                : <p>No intended result has been written yet.</p>}
+              {selected.description ? (
+                <Markdown>{selected.description}</Markdown>
+              ) : (
+                <p>No intended result has been written yet.</p>
+              )}
             </section>
 
             <section className="inspector-section">
               <h3>Files and symbols</h3>
               <div className="file-list">
                 {selected.files.map((file) => (
-                  <div className="file-row" key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}>
+                  <div
+                    className="file-row"
+                    key={`${file.path}-${file.lines ?? file.symbol ?? ""}`}
+                  >
                     <FileCode2 aria-hidden="true" />
                     <code>{file.path}</code>
                     <span>{file.symbol ?? file.lines ?? "reference"}</span>
@@ -1062,30 +1367,45 @@ function Inspector({
 
             <section className="inspector-section">
               <h3>Research notes</h3>
-              {selected.research.length > 0
-                ? <div className="research-list">{selected.research.map((note) => <Markdown key={note}>{note}</Markdown>)}</div>
-                : <p>No research notes yet.</p>}
+              {selected.research.length > 0 ? (
+                <div className="research-list">
+                  {selected.research.map((note) => (
+                    <Markdown key={note}>{note}</Markdown>
+                  ))}
+                </div>
+              ) : (
+                <p>No research notes yet.</p>
+              )}
             </section>
 
             <section className="inspector-section">
               <h3>Validation</h3>
-              {selected.validation.length > 0 ? <div className="validation-list">
-                {selected.validation.map((step, index) => {
-                  const key = `${selected.id}-${index}`;
-                  return (
-                    <label key={key}>
-                      <input
-                        type="checkbox"
-                        checked={validationChecks.has(key)}
-                        onChange={() => toggleValidation(key)}
-                      />
-                      <Markdown inline>{step}</Markdown>
-                    </label>
-                  );
-                })}
-              </div> : <p>No validation plan yet.</p>}
+              {selected.validation.length > 0 ? (
+                <div className="validation-list">
+                  {selected.validation.map((step, index) => {
+                    const key = `${selected.id}-${index}`;
+                    return (
+                      <label key={key}>
+                        <input
+                          type="checkbox"
+                          checked={validationChecks.has(key)}
+                          onChange={() => toggleValidation(key)}
+                        />
+                        <Markdown inline>{step}</Markdown>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p>No validation plan yet.</p>
+              )}
             </section>
-            <RelationshipSection selected={selected} actionables={actionables} onNavigate={onNavigate} onMutated={onMutated} />
+            <RelationshipSection
+              selected={selected}
+              actionables={actionables}
+              onNavigate={onNavigate}
+              onMutated={onMutated}
+            />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -1094,12 +1414,21 @@ function Inspector({
           <>
             <section className="inspector-section tab-lead">
               <h3>Research notes</h3>
-              <div className="finding-callout"><Markdown>{selected.finding}</Markdown></div>
+              <div className="finding-callout">
+                <Markdown>{selected.finding}</Markdown>
+              </div>
               <div className="research-list expanded">
-                {selected.research.map((note) => <Markdown key={note}>{note}</Markdown>)}
+                {selected.research.map((note) => (
+                  <Markdown key={note}>{note}</Markdown>
+                ))}
               </div>
             </section>
-            <RelationshipSection selected={selected} actionables={actionables} onNavigate={onNavigate} onMutated={onMutated} />
+            <RelationshipSection
+              selected={selected}
+              actionables={actionables}
+              onNavigate={onNavigate}
+              onMutated={onMutated}
+            />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -1108,7 +1437,10 @@ function Inspector({
           <>
             <section className="inspector-section tab-lead">
               <h3>Validation procedure</h3>
-              <p className="section-help">This is the editable plan. Completion uses the append-only records below, not these local reading checkmarks.</p>
+              <p className="section-help">
+                This is the editable plan. Completion uses the append-only
+                records below, not these local reading checkmarks.
+              </p>
               <div className="validation-list validation-large">
                 {selected.validation.map((step, index) => {
                   const key = `${selected.id}-${index}`;
@@ -1125,7 +1457,11 @@ function Inspector({
                 })}
               </div>
             </section>
-            <ValidationRecords key={`validation-${selected.id}`} selected={selected} onMutated={onMutated} />
+            <ValidationRecords
+              key={`validation-${selected.id}`}
+              selected={selected}
+              onMutated={onMutated}
+            />
             <ActivityTimeline selected={selected} />
           </>
         )}
@@ -1208,7 +1544,11 @@ function emptyDraft(scopes: ScopeOptionsResponse): ActionableDraft {
 
 function fieldError(errors: Record<string, string[]>, field: string) {
   const messages = errors[field];
-  return messages ? <span className="field-error" id={`${field}-error`}>{messages.join(" ")}</span> : null;
+  return messages ? (
+    <span className="field-error" id={`${field}-error`}>
+      {messages.join(" ")}
+    </span>
+  ) : null;
 }
 
 function ActionableForm({
@@ -1234,35 +1574,17 @@ function ActionableForm({
   const [formNotice, setFormNotice] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
-  const initialSnapshot = useMemo(() => JSON.stringify(initialDraft), [initialDraft]);
+  const initialSnapshot = useMemo(
+    () => JSON.stringify(initialDraft),
+    [initialDraft],
+  );
   const dirty = JSON.stringify(draft) !== initialSnapshot;
 
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const backdrop = dialogRef.current?.parentElement;
-    const shell = backdrop?.parentElement;
-    if (!backdrop || !shell) return;
-    const siblings = [...shell.children].filter((element) => element !== backdrop) as HTMLElement[];
-    const previous = siblings.map((element) => ({
-      element,
-      ariaHidden: element.getAttribute("aria-hidden"),
-      inert: element.inert,
-    }));
-    for (const sibling of siblings) {
-      sibling.inert = true;
-      sibling.setAttribute("aria-hidden", "true");
-    }
-    return () => {
-      for (const state of previous) {
-        state.element.inert = state.inert;
-        if (state.ariaHidden === null) state.element.removeAttribute("aria-hidden");
-        else state.element.setAttribute("aria-hidden", state.ariaHidden);
-      }
-    };
-  }, []);
+  useModalIsolation(dialogRef);
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1274,16 +1596,24 @@ function ActionableForm({
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [dirty]);
 
-  const project = scopes.projects.find((candidate) => candidate.id === draft.projectId);
+  const project = scopes.projects.find(
+    (candidate) => candidate.id === draft.projectId,
+  );
   const repositories = project?.repositories ?? [];
-  const repository = repositories.find((candidate) => candidate.id === draft.repositoryId);
+  const repository = repositories.find(
+    (candidate) => candidate.id === draft.repositoryId,
+  );
   const worktrees = repository?.worktrees ?? [];
 
-  const update = <K extends keyof ActionableDraft>(key: K, value: ActionableDraft[K]) => {
+  const update = <K extends keyof ActionableDraft>(
+    key: K,
+    value: ActionableDraft[K],
+  ) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setErrors((current) => {
       const matchingKeys = Object.keys(current).filter(
-        (errorKey) => errorKey === key || errorKey.startsWith(`${String(key)}.`),
+        (errorKey) =>
+          errorKey === key || errorKey.startsWith(`${String(key)}.`),
       );
       if (matchingKeys.length === 0) return current;
       const next = { ...current };
@@ -1293,7 +1623,8 @@ function ActionableForm({
   };
 
   const requestClose = () => {
-    if (dirty && !window.confirm("Discard your unsaved actionable changes?")) return;
+    if (dirty && !window.confirm("Discard your unsaved actionable changes?"))
+      return;
     onClose();
   };
 
@@ -1334,7 +1665,10 @@ function ActionableForm({
       description: draft.description,
       research: lines(draft.researchText),
       validation: lines(draft.validationText),
-      tags: draft.tagsText.split(",").map((tag) => tag.trim()).filter(Boolean),
+      tags: draft.tagsText
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
       userSources: draft.userSources,
     };
 
@@ -1351,14 +1685,23 @@ function ActionableForm({
     } catch (error) {
       if (error instanceof ApiProblem) {
         setErrors(error.problem.errors ?? {});
-        if (error.problem.code === "VERSION_CONFLICT" && error.problem.current) {
+        if (
+          error.problem.code === "VERSION_CONFLICT" &&
+          error.problem.current
+        ) {
           setConflict(error.problem.current);
-          setFormNotice("A newer saved version was found. Your draft is still here.");
+          setFormNotice(
+            "A newer saved version was found. Your draft is still here.",
+          );
         } else {
-          setFormNotice(`${error.problem.title} Request ${error.problem.requestId}.`);
+          setFormNotice(
+            `${error.problem.title} Request ${error.problem.requestId}.`,
+          );
         }
       } else {
-        setFormNotice("The actionable could not be saved. Your draft is still here.");
+        setFormNotice(
+          "The actionable could not be saved. Your draft is still here.",
+        );
       }
     } finally {
       setSaving(false);
@@ -1382,9 +1725,11 @@ function ActionableForm({
         aria-labelledby="actionable-form-title"
         onKeyDown={(event) => {
           if (event.key !== "Tab") return;
-          const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
-            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-          )].filter((element) => element.offsetParent !== null);
+          const controls = [
+            ...event.currentTarget.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ].filter((element) => element.offsetParent !== null);
           const first = controls[0];
           const last = controls.at(-1);
           if (!first || !last) return;
@@ -1399,20 +1744,34 @@ function ActionableForm({
       >
         <header className="dialog-header">
           <div>
-            <span className="dialog-eyebrow">{item ? `Version ${draft.version}` : "Neutral status: Inbox"}</span>
-            <h2 id="actionable-form-title">{item ? "Edit actionable" : "New actionable"}</h2>
+            <span className="dialog-eyebrow">
+              {item ? `Version ${draft.version}` : "Neutral status: Inbox"}
+            </span>
+            <h2 id="actionable-form-title">
+              {item ? "Edit actionable" : "New actionable"}
+            </h2>
           </div>
-          <IconButton label="Close actionable form" onClick={requestClose}><X /></IconButton>
+          <IconButton label="Close actionable form" onClick={requestClose}>
+            <X />
+          </IconButton>
         </header>
 
         <form onSubmit={submit} noValidate>
           <div className="dialog-content">
             {errorEntries.length > 0 && (
-              <div className="error-summary" role="alert" aria-labelledby="error-summary-title">
-                <strong id="error-summary-title">Check the highlighted fields.</strong>
+              <div
+                className="error-summary"
+                role="alert"
+                aria-labelledby="error-summary-title"
+              >
+                <strong id="error-summary-title">
+                  Check the highlighted fields.
+                </strong>
                 <ul>
                   {errorEntries.map(([field, messages]) => (
-                    <li key={field}><a href={`#${field}`}>{messages.join(" ")}</a></li>
+                    <li key={field}>
+                      <a href={`#${field}`}>{messages.join(" ")}</a>
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -1420,16 +1779,26 @@ function ActionableForm({
 
             {conflict && (
               <div className="conflict-panel" role="alert">
-                <strong>Someone saved version {conflict.version} while you were editing version {draft.version}.</strong>
+                <strong>
+                  Someone saved version {conflict.version} while you were
+                  editing version {draft.version}.
+                </strong>
                 <p>Your unsaved draft has not been changed or discarded.</p>
                 <div className="conflict-actions">
-                  <button type="button" onClick={() => setReviewCurrent((value) => !value)}>
-                    {reviewCurrent ? "Hide current saved version" : "Review current saved version"}
+                  <button
+                    type="button"
+                    onClick={() => setReviewCurrent((value) => !value)}
+                  >
+                    {reviewCurrent
+                      ? "Hide current saved version"
+                      : "Review current saved version"}
                   </button>
                   <button
                     type="button"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(JSON.stringify(draft, null, 2));
+                      await navigator.clipboard.writeText(
+                        JSON.stringify(draft, null, 2),
+                      );
                       setFormNotice("Draft copied to the clipboard.");
                     }}
                   >
@@ -1438,10 +1807,15 @@ function ActionableForm({
                   <button
                     type="button"
                     onClick={() => {
-                      setDraft((current) => ({ ...current, version: conflict.version }));
+                      setDraft((current) => ({
+                        ...current,
+                        version: conflict.version,
+                      }));
                       setConflict(null);
                       setReviewCurrent(false);
-                      setFormNotice("Current version loaded. Your field values remain ready to reapply.");
+                      setFormNotice(
+                        "Current version loaded. Your field values remain ready to reapply.",
+                      );
                     }}
                   >
                     Reload version and reapply draft
@@ -1449,9 +1823,18 @@ function ActionableForm({
                 </div>
                 {reviewCurrent && (
                   <dl className="current-version">
-                    <div><dt>Title</dt><dd>{conflict.title}</dd></div>
-                    <div><dt>Status</dt><dd>{conflict.status}</dd></div>
-                    <div><dt>Updated</dt><dd>{conflict.updated}</dd></div>
+                    <div>
+                      <dt>Title</dt>
+                      <dd>{conflict.title}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{conflict.status}</dd>
+                    </div>
+                    <div>
+                      <dt>Updated</dt>
+                      <dd>{conflict.updated}</dd>
+                    </div>
                   </dl>
                 )}
               </div>
@@ -1459,25 +1842,42 @@ function ActionableForm({
 
             <div className="form-grid">
               <label className="form-field form-field-wide" htmlFor="title">
-                <span>Title <b aria-hidden="true">*</b></span>
-                <small>A concise outcome or next action. This is the only content required for Inbox capture.</small>
+                <span>
+                  Title <b aria-hidden="true">*</b>
+                </span>
+                <small>
+                  A concise outcome or next action. This is the only content
+                  required for Inbox capture.
+                </small>
                 <input
                   ref={titleRef}
                   id="title"
                   value={draft.title}
                   onChange={(event) => update("title", event.target.value)}
                   aria-invalid={Boolean(errors.title)}
-                  aria-describedby={errors.title ? "title-help title-error" : "title-help"}
+                  aria-describedby={
+                    errors.title ? "title-help title-error" : "title-help"
+                  }
                 />
-                <span id="title-help" className="sr-only">Required at capture time.</span>
+                <span id="title-help" className="sr-only">
+                  Required at capture time.
+                </span>
                 {fieldError(errors, "title")}
               </label>
 
               <label className="form-field" htmlFor="priority">
                 <span>Priority</span>
                 <small>Leave Unset when it has not been established.</small>
-                <select id="priority" value={draft.priority} onChange={(event) => update("priority", event.target.value as Priority)}>
-                  {priorities.map((value) => <option key={value}>{value}</option>)}
+                <select
+                  id="priority"
+                  value={draft.priority}
+                  onChange={(event) =>
+                    update("priority", event.target.value as Priority)
+                  }
+                >
+                  {priorities.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
                 </select>
               </label>
 
@@ -1502,16 +1902,32 @@ function ActionableForm({
               <label className="form-field" htmlFor="effort">
                 <span>Likely effort</span>
                 <small>Use Unknown instead of guessing.</small>
-                <select id="effort" value={draft.effort} onChange={(event) => update("effort", event.target.value as Effort)}>
-                  {efforts.map((value) => <option key={value}>{value}</option>)}
+                <select
+                  id="effort"
+                  value={draft.effort}
+                  onChange={(event) =>
+                    update("effort", event.target.value as Effort)
+                  }
+                >
+                  {efforts.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
                 </select>
               </label>
 
               <label className="form-field" htmlFor="evidenceState">
                 <span>Evidence state</span>
                 <small>Describe how established the finding is.</small>
-                <select id="evidenceState" value={draft.evidenceState} onChange={(event) => update("evidenceState", event.target.value as EvidenceState)}>
-                  {evidenceStates.map((value) => <option key={value}>{value}</option>)}
+                <select
+                  id="evidenceState"
+                  value={draft.evidenceState}
+                  onChange={(event) =>
+                    update("evidenceState", event.target.value as EvidenceState)
+                  }
+                >
+                  {evidenceStates.map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
                 </select>
               </label>
 
@@ -1521,7 +1937,9 @@ function ActionableForm({
                   id="projectId"
                   value={draft.projectId}
                   onChange={(event) => {
-                    const nextProject = scopes.projects.find((candidate) => candidate.id === event.target.value);
+                    const nextProject = scopes.projects.find(
+                      (candidate) => candidate.id === event.target.value,
+                    );
                     const nextRepository = nextProject?.repositories[0];
                     setDraft((current) => ({
                       ...current,
@@ -1531,7 +1949,11 @@ function ActionableForm({
                     }));
                   }}
                 >
-                  {scopes.projects.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                  {scopes.projects.map((value) => (
+                    <option key={value.id} value={value.id}>
+                      {value.name}
+                    </option>
+                  ))}
                 </select>
                 {fieldError(errors, "projectId")}
               </label>
@@ -1542,7 +1964,9 @@ function ActionableForm({
                   id="repositoryId"
                   value={draft.repositoryId}
                   onChange={(event) => {
-                    const nextRepository = repositories.find((candidate) => candidate.id === event.target.value);
+                    const nextRepository = repositories.find(
+                      (candidate) => candidate.id === event.target.value,
+                    );
                     setDraft((current) => ({
                       ...current,
                       repositoryId: event.target.value,
@@ -1550,63 +1974,140 @@ function ActionableForm({
                     }));
                   }}
                 >
-                  {repositories.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                  {repositories.map((value) => (
+                    <option key={value.id} value={value.id}>
+                      {value.name}
+                    </option>
+                  ))}
                 </select>
                 {fieldError(errors, "repositoryId")}
               </label>
 
               <label className="form-field" htmlFor="worktreeId">
                 <span>Worktree</span>
-                <select id="worktreeId" value={draft.worktreeId} onChange={(event) => update("worktreeId", event.target.value)}>
-                  {worktrees.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+                <select
+                  id="worktreeId"
+                  value={draft.worktreeId}
+                  onChange={(event) => update("worktreeId", event.target.value)}
+                >
+                  {worktrees.map((value) => (
+                    <option key={value.id} value={value.id}>
+                      {value.name}
+                    </option>
+                  ))}
                 </select>
                 {fieldError(errors, "worktreeId")}
               </label>
 
               <label className="form-field form-field-wide" htmlFor="finding">
                 <span>Finding</span>
-                <small>User-authored statement of what is known. Required only before Ready.</small>
-                <textarea id="finding" rows={3} value={draft.finding} onChange={(event) => update("finding", event.target.value)} />
+                <small>
+                  User-authored statement of what is known. Required only before
+                  Ready.
+                </small>
+                <textarea
+                  id="finding"
+                  rows={3}
+                  value={draft.finding}
+                  onChange={(event) => update("finding", event.target.value)}
+                />
                 {fieldError(errors, "finding")}
               </label>
 
-              <label className="form-field form-field-wide" htmlFor="description">
+              <label
+                className="form-field form-field-wide"
+                htmlFor="description"
+              >
                 <span>Description</span>
-                <small>Intended result or bounded next investigation. Required only before Ready.</small>
-                <textarea id="description" rows={5} value={draft.description} onChange={(event) => update("description", event.target.value)} />
+                <small>
+                  Intended result or bounded next investigation. Required only
+                  before Ready.
+                </small>
+                <textarea
+                  id="description"
+                  rows={5}
+                  value={draft.description}
+                  onChange={(event) =>
+                    update("description", event.target.value)
+                  }
+                />
                 {fieldError(errors, "description")}
               </label>
 
               <label className="form-field form-field-wide" htmlFor="research">
                 <span>Research notes</span>
-                <small>One Markdown note per line. Leave blank rather than inventing research.</small>
-                <textarea id="research" rows={5} value={draft.researchText} onChange={(event) => update("researchText", event.target.value)} />
+                <small>
+                  One Markdown note per line. Leave blank rather than inventing
+                  research.
+                </small>
+                <textarea
+                  id="research"
+                  rows={5}
+                  value={draft.researchText}
+                  onChange={(event) =>
+                    update("researchText", event.target.value)
+                  }
+                />
                 {fieldError(errors, "research")}
               </label>
 
-              <label className="form-field form-field-wide" htmlFor="validation">
+              <label
+                className="form-field form-field-wide"
+                htmlFor="validation"
+              >
                 <span>Validation plan</span>
-                <small>One check per line. At least one check is required before Ready.</small>
-                <textarea id="validation" rows={5} value={draft.validationText} onChange={(event) => update("validationText", event.target.value)} />
+                <small>
+                  One check per line. At least one check is required before
+                  Ready.
+                </small>
+                <textarea
+                  id="validation"
+                  rows={5}
+                  value={draft.validationText}
+                  onChange={(event) =>
+                    update("validationText", event.target.value)
+                  }
+                />
                 {fieldError(errors, "validation")}
               </label>
 
               <label className="form-field form-field-wide" htmlFor="tags">
                 <span>Tags</span>
                 <small>Comma-separated user-authored labels.</small>
-                <input id="tags" value={draft.tagsText} onChange={(event) => update("tagsText", event.target.value)} />
+                <input
+                  id="tags"
+                  value={draft.tagsText}
+                  onChange={(event) => update("tagsText", event.target.value)}
+                />
                 {fieldError(errors, "tags")}
               </label>
 
               <fieldset className="source-editor form-field-wide">
                 <legend>User-added source references</legend>
-                <p>Add only references you know. Imported evidence remains read-only outside this form.</p>
+                <p>
+                  Add only references you know. Imported evidence remains
+                  read-only outside this form.
+                </p>
                 {draft.userSources.map((source, index) => (
                   <div className="source-edit-row" key={index}>
                     <label>
                       <span>Type</span>
-                      <select value={source.type} onChange={(event) => updateSource(index, "type", event.target.value)}>
-                        {["File", "URL", "Command", "Commit", "Codex thread", "Text"].map((value) => <option key={value}>{value}</option>)}
+                      <select
+                        value={source.type}
+                        onChange={(event) =>
+                          updateSource(index, "type", event.target.value)
+                        }
+                      >
+                        {[
+                          "File",
+                          "URL",
+                          "Command",
+                          "Commit",
+                          "Codex thread",
+                          "Text",
+                        ].map((value) => (
+                          <option key={value}>{value}</option>
+                        ))}
                       </select>
                     </label>
                     <label>
@@ -1614,9 +2115,13 @@ function ActionableForm({
                       <input
                         id={`userSources.${index}.locator`}
                         value={source.locator}
-                        onChange={(event) => updateSource(index, "locator", event.target.value)}
+                        onChange={(event) =>
+                          updateSource(index, "locator", event.target.value)
+                        }
                         aria-label={`Source ${index + 1} locator`}
-                        aria-invalid={Boolean(errors[`userSources.${index}.locator`])}
+                        aria-invalid={Boolean(
+                          errors[`userSources.${index}.locator`],
+                        )}
                       />
                       {fieldError(errors, `userSources.${index}.locator`)}
                     </label>
@@ -1624,29 +2129,45 @@ function ActionableForm({
                       <span>Label</span>
                       <input
                         value={source.label ?? ""}
-                        onChange={(event) => updateSource(index, "label", event.target.value)}
+                        onChange={(event) =>
+                          updateSource(index, "label", event.target.value)
+                        }
                         aria-label={`Source ${index + 1} label`}
                       />
                     </label>
                     <button
                       type="button"
                       className="remove-source"
-                      onClick={() => update("userSources", draft.userSources.filter((_, sourceIndex) => sourceIndex !== index))}
+                      onClick={() =>
+                        update(
+                          "userSources",
+                          draft.userSources.filter(
+                            (_, sourceIndex) => sourceIndex !== index,
+                          ),
+                        )
+                      }
                     >
                       Remove
                     </button>
                   </div>
                 ))}
                 {fieldError(errors, "userSources")}
-                <button type="button" className="secondary-action" onClick={addSource}>Add source reference</button>
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={addSource}
+                >
+                  Add source reference
+                </button>
               </fieldset>
 
               {item?.immutableSourceEvidence.imported && (
                 <div className="immutable-reminder form-field-wide">
                   <strong>Imported evidence is protected.</strong>
                   <p>
-                    The original thread, file references, source ordinal, import key, hash, and raw source
-                    are not editable here and are not included in this save request.
+                    The original thread, file references, source ordinal, import
+                    key, hash, and raw source are not editable here and are not
+                    included in this save request.
                   </p>
                 </div>
               )}
@@ -1654,8 +2175,17 @@ function ActionableForm({
           </div>
 
           <footer className="dialog-footer">
-            <span className="save-status" role="status" aria-live="polite">{formNotice}</span>
-            <button type="button" className="secondary-action" onClick={requestClose} disabled={saving}>Cancel</button>
+            <span className="save-status" role="status" aria-live="polite">
+              {formNotice}
+            </span>
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={requestClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
             <button type="submit" className="primary-action" disabled={saving}>
               {saving ? "Saving…" : item ? "Save changes" : "Create actionable"}
             </button>
@@ -1693,7 +2223,11 @@ function LegacyApp() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
     try {
-      return new Set<number>(JSON.parse(sessionStorage.getItem("expanded-actionable-parents") ?? "[]"));
+      return new Set<number>(
+        JSON.parse(
+          sessionStorage.getItem("expanded-actionable-parents") ?? "[]",
+        ),
+      );
     } catch {
       return new Set<number>();
     }
@@ -1719,18 +2253,25 @@ function LegacyApp() {
     return () => mobileViewport.removeEventListener("change", collapseSidebar);
   }, []);
   useEffect(() => {
-    sessionStorage.setItem("expanded-actionable-parents", JSON.stringify([...expandedParents]));
+    sessionStorage.setItem(
+      "expanded-actionable-parents",
+      JSON.stringify([...expandedParents]),
+    );
   }, [expandedParents]);
   useEffect(() => {
     const syncSelectionFromUrl = () => {
       const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);
-      setSelectedId(match ? Number(match[1]) : actionables[0]?.id ?? null);
-      setMobileDetailOpen(Boolean(match) && window.matchMedia("(max-width: 760px)").matches);
+      setSelectedId(match ? Number(match[1]) : (actionables[0]?.id ?? null));
+      setMobileDetailOpen(
+        Boolean(match) && window.matchMedia("(max-width: 760px)").matches,
+      );
     };
     window.addEventListener("popstate", syncSelectionFromUrl);
     return () => window.removeEventListener("popstate", syncSelectionFromUrl);
   }, [actionables]);
-  const [validationChecks, setValidationChecks] = useState<Set<string>>(new Set());
+  const [validationChecks, setValidationChecks] = useState<Set<string>>(
+    new Set(),
+  );
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -1749,15 +2290,24 @@ function LegacyApp() {
   const visibleRows = useMemo(() => {
     const matches = (item: ActionableSummary) => {
       const query = search.trim().toLowerCase();
-      const matchesQuery = !query || `${item.title} ${item.finding} ${item.tags.join(" ")}`.toLowerCase().includes(query);
-      const matchesPriority = priorityFilter === "All" || item.priority === priorityFilter;
+      const matchesQuery =
+        !query ||
+        `${item.title} ${item.finding} ${item.tags.join(" ")}`
+          .toLowerCase()
+          .includes(query);
+      const matchesPriority =
+        priorityFilter === "All" || item.priority === priorityFilter;
       return matchesQuery && matchesPriority;
     };
 
     if (search.trim()) {
       return actionables
         .filter(matches)
-        .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority] || a.id - b.id);
+        .sort(
+          (a, b) =>
+            priorityOrder[a.priority] - priorityOrder[b.priority] ||
+            a.id - b.id,
+        );
     }
 
     return actionables
@@ -1767,7 +2317,9 @@ function LegacyApp() {
         if (!item.childIds || !expandedParents.has(item.id)) return [item];
         const children = item.childIds
           .map((id) => actionables.find((candidate) => candidate.id === id))
-          .filter((candidate): candidate is ActionableSummary => Boolean(candidate))
+          .filter((candidate): candidate is ActionableSummary =>
+            Boolean(candidate),
+          )
           .filter(matches);
         return [item, ...children];
       });
@@ -1778,7 +2330,8 @@ function LegacyApp() {
     window.history.pushState({}, "", `/actionables/${item.id}`);
     setActiveTab("finding");
     setInspectorHidden(false);
-    if (window.matchMedia("(max-width: 760px)").matches) setMobileDetailOpen(true);
+    if (window.matchMedia("(max-width: 760px)").matches)
+      setMobileDetailOpen(true);
   };
 
   const handleSaved = (saved: ActionableDetail, created: boolean) => {
@@ -1789,7 +2342,9 @@ function LegacyApp() {
     setActiveTab("finding");
     setInspectorHidden(false);
     setFormMode(null);
-    setNotice(created ? "Actionable created and opened." : "Actionable changes saved.");
+    setNotice(
+      created ? "Actionable created and opened." : "Actionable changes saved.",
+    );
   };
 
   const handleMutated = (saved: ActionableDetail, mutationNotice: string) => {
@@ -1822,14 +2377,19 @@ function LegacyApp() {
     sidebarCollapsed ? "sidebar-collapsed" : "",
     inspectorHidden ? "inspector-hidden" : "",
     mobileDetailOpen ? "mobile-detail-open" : "",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={shellClasses}>
       <aside className="sidebar" aria-label="Projects and worktrees">
         <div className="product-bar">
           <span>Actionables</span>
-          <IconButton label="Close project navigation" onClick={() => setSidebarCollapsed(true)}>
+          <IconButton
+            label="Close project navigation"
+            onClick={() => setSidebarCollapsed(true)}
+          >
             <PanelLeftClose />
           </IconButton>
         </div>
@@ -1851,29 +2411,56 @@ function LegacyApp() {
           </div>
 
           <div className="tree-label secondary-label">Review focus</div>
-          <button type="button" className="scope-row" onClick={() => setPriorityFilter("Critical")}>
+          <button
+            type="button"
+            className="scope-row"
+            onClick={() => setPriorityFilter("Critical")}
+          >
             <span className="scope-dot critical" />
             Critical findings
-            <span>{actionables.filter((item) => item.priority === "Critical").length}</span>
+            <span>
+              {
+                actionables.filter((item) => item.priority === "Critical")
+                  .length
+              }
+            </span>
           </button>
-          <button type="button" className="scope-row" onClick={() => setPriorityFilter("High")}>
+          <button
+            type="button"
+            className="scope-row"
+            onClick={() => setPriorityFilter("High")}
+          >
             <span className="scope-dot high" />
             High priority
-            <span>{actionables.filter((item) => item.priority === "High").length}</span>
+            <span>
+              {actionables.filter((item) => item.priority === "High").length}
+            </span>
           </button>
-          <button type="button" className="scope-row" onClick={() => setPriorityFilter("All")}>
+          <button
+            type="button"
+            className="scope-row"
+            onClick={() => setPriorityFilter("All")}
+          >
             <span className="scope-dot all" />
             All findings
             <span>{totalFindings}</span>
           </button>
 
-          <button type="button" className="add-project" onClick={() => setNotice("Project creation is deferred until persistence work")}>
+          <button
+            type="button"
+            className="add-project"
+            onClick={() =>
+              setNotice("Project creation is deferred until persistence work")
+            }
+          >
             <Plus aria-hidden="true" /> Add project
           </button>
         </div>
 
         <div className="sidebar-status">
-          <span><CircleDot aria-hidden="true" /> Source loaded 2m ago</span>
+          <span>
+            <CircleDot aria-hidden="true" /> Source loaded 2m ago
+          </span>
           <ChevronDown aria-hidden="true" />
         </div>
       </aside>
@@ -1881,17 +2468,28 @@ function LegacyApp() {
       <header className="topbar">
         <div className="scope-selectors">
           <IconButton
-            label={sidebarCollapsed ? "Open project navigation" : "Close project navigation"}
+            label={
+              sidebarCollapsed
+                ? "Open project navigation"
+                : "Close project navigation"
+            }
             onClick={() => setSidebarCollapsed((value) => !value)}
             pressed={!sidebarCollapsed}
             className="nav-toggle"
           >
             {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
           </IconButton>
-          <button type="button" className="selector-button">{projectName} <ChevronDown aria-hidden="true" /></button>
+          <button type="button" className="selector-button">
+            {projectName} <ChevronDown aria-hidden="true" />
+          </button>
           <span className="topbar-divider" />
-          <button type="button" className="selector-button mono" title={worktreeName}>
-            <GitBranch aria-hidden="true" />{worktreeName} <ChevronDown aria-hidden="true" />
+          <button
+            type="button"
+            className="selector-button mono"
+            title={worktreeName}
+          >
+            <GitBranch aria-hidden="true" />
+            {worktreeName} <ChevronDown aria-hidden="true" />
           </button>
         </div>
 
@@ -1905,7 +2503,11 @@ function LegacyApp() {
             aria-label="Search actionables"
           />
           {search && (
-            <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+            >
               <X aria-hidden="true" />
             </button>
           )}
@@ -1923,14 +2525,28 @@ function LegacyApp() {
             <Plus aria-hidden="true" /> New actionable
           </button>
           <div className="filter-wrap">
-            <button type="button" className={`toolbar-button ${filterOpen ? "is-active" : ""}`} onClick={() => setFilterOpen((value) => !value)}>
+            <button
+              type="button"
+              className={`toolbar-button ${filterOpen ? "is-active" : ""}`}
+              onClick={() => setFilterOpen((value) => !value)}
+            >
               <SlidersHorizontal aria-hidden="true" /> Filters
-              {priorityFilter !== "All" && <span className="filter-count">1</span>}
+              {priorityFilter !== "All" && (
+                <span className="filter-count">1</span>
+              )}
             </button>
             {filterOpen && (
               <div className="filter-popover">
                 <span className="popover-label">Priority</span>
-                {(["All", "Critical", "High", "Medium", "Low"] as PriorityFilter[]).map((priority) => (
+                {(
+                  [
+                    "All",
+                    "Critical",
+                    "High",
+                    "Medium",
+                    "Low",
+                  ] as PriorityFilter[]
+                ).map((priority) => (
                   <button
                     type="button"
                     className={priorityFilter === priority ? "is-selected" : ""}
@@ -1941,13 +2557,17 @@ function LegacyApp() {
                     }}
                   >
                     {priority}
-                    {priorityFilter === priority && <CircleDot aria-hidden="true" />}
+                    {priorityFilter === priority && (
+                      <CircleDot aria-hidden="true" />
+                    )}
                   </button>
                 ))}
               </div>
             )}
           </div>
-          <IconButton label="List view" pressed><List /></IconButton>
+          <IconButton label="List view" pressed>
+            <List />
+          </IconButton>
           <IconButton
             label={inspectorHidden ? "Show inspector" : "Hide inspector"}
             onClick={() => setInspectorHidden((value) => !value)}
@@ -1955,28 +2575,70 @@ function LegacyApp() {
           >
             {inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}
           </IconButton>
-          <IconButton label="Settings" onClick={() => setNotice("Settings are not part of this design checkpoint")}><Settings /></IconButton>
+          <IconButton
+            label="Settings"
+            onClick={() =>
+              setNotice("Settings are not part of this design checkpoint")
+            }
+          >
+            <Settings />
+          </IconButton>
         </div>
       </header>
 
       <main className="findings-panel">
         <div className="findings-heading">
-          <h1>Findings <span>{search || priorityFilter !== "All" ? visibleRows.length : totalFindings}</span></h1>
+          <h1>
+            Findings{" "}
+            <span>
+              {search || priorityFilter !== "All"
+                ? visibleRows.length
+                : totalFindings}
+            </span>
+          </h1>
           {priorityFilter !== "All" && (
-            <button type="button" className="active-filter" onClick={() => setPriorityFilter("All")}>
+            <button
+              type="button"
+              className="active-filter"
+              onClick={() => setPriorityFilter("All")}
+            >
               {priorityFilter} <X aria-hidden="true" />
             </button>
           )}
         </div>
 
-        <div className="findings-table" role="table" aria-label="Actionable findings">
+        <div
+          className="findings-table"
+          role="table"
+          aria-label="Actionable findings"
+        >
           <div className="table-header table-grid" role="row">
             <div role="columnheader">Finding</div>
-            <button type="button" role="columnheader">Priority <ChevronDown aria-hidden="true" /></button>
-            <button type="button" role="columnheader">Status <ChevronDown aria-hidden="true" /></button>
-            <button type="button" role="columnheader">Worktree <ChevronDown aria-hidden="true" /></button>
-            <button type="button" role="columnheader">Effort <ChevronDown aria-hidden="true" /></button>
-            <button type="button" role="columnheader">Updated <ChevronDown aria-hidden="true" /></button>
+            <div role="columnheader">
+              <button type="button">
+                Priority <ChevronDown aria-hidden="true" />
+              </button>
+            </div>
+            <div role="columnheader">
+              <button type="button">
+                Status <ChevronDown aria-hidden="true" />
+              </button>
+            </div>
+            <div role="columnheader">
+              <button type="button">
+                Worktree <ChevronDown aria-hidden="true" />
+              </button>
+            </div>
+            <div role="columnheader">
+              <button type="button">
+                Effort <ChevronDown aria-hidden="true" />
+              </button>
+            </div>
+            <div role="columnheader">
+              <button type="button">
+                Updated <ChevronDown aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           <div className="table-body" role="rowgroup">
@@ -2011,7 +2673,11 @@ function LegacyApp() {
                       >
                         {expanded ? <ChevronDown /> : <ChevronRight />}
                       </button>
-                    ) : isChild ? <span className="child-guide" /> : <span className="row-spacer" />}
+                    ) : isChild ? (
+                      <span className="child-guide" />
+                    ) : (
+                      <span className="row-spacer" />
+                    )}
                     <span
                       className="finding-title truncate-reveal"
                       title={item.title}
@@ -2020,11 +2686,29 @@ function LegacyApp() {
                     >
                       {item.title}
                     </span>
-                    {item.childCompletion && <span className="child-count">{item.childCompletion.terminal}/{item.childCompletion.total}</span>}
-                    {dependencyCount > 0 && <span className="blocked-indicator" title={`Derived block: ${dependencyCount} unresolved prerequisite${dependencyCount > 1 ? "s" : ""}`}>Blocked by {dependencyCount}</span>}
-                    {item.blocksCount > 0 && <span className="blocks-indicator">Blocks {item.blocksCount}</span>}
+                    {item.childCompletion && (
+                      <span className="child-count">
+                        {item.childCompletion.terminal}/
+                        {item.childCompletion.total}
+                      </span>
+                    )}
+                    {dependencyCount > 0 && (
+                      <span
+                        className="blocked-indicator"
+                        title={`Derived block: ${dependencyCount} unresolved prerequisite${dependencyCount > 1 ? "s" : ""}`}
+                      >
+                        Blocked by {dependencyCount}
+                      </span>
+                    )}
+                    {item.blocksCount > 0 && (
+                      <span className="blocks-indicator">
+                        Blocks {item.blocksCount}
+                      </span>
+                    )}
                   </div>
-                  <div role="cell"><Badge tone={item.priority}>{item.priority}</Badge></div>
+                  <div role="cell">
+                    <Badge tone={item.priority}>{item.priority}</Badge>
+                  </div>
                   <div role="cell">
                     <Badge
                       tone={item.status}
@@ -2043,8 +2727,12 @@ function LegacyApp() {
                   >
                     {item.worktree}
                   </div>
-                  <div role="cell" className="effort-cell">{item.effort}</div>
-                  <div role="cell" className="updated-cell">{item.updated}</div>
+                  <div role="cell" className="effort-cell">
+                    {item.effort}
+                  </div>
+                  <div role="cell" className="updated-cell">
+                    {item.updated}
+                  </div>
                 </div>
               );
             })}
@@ -2072,10 +2760,20 @@ function LegacyApp() {
 
         <footer className="table-footer">
           <span>
-            {selectedId !== null && visibleRows.some((item) => item.id === selectedId) ? "1" : "0"} selected
-            {" · "}{visibleRows.length} visible {visibleRows.length === 1 ? "row" : "rows"}
+            {selectedId !== null &&
+            visibleRows.some((item) => item.id === selectedId)
+              ? "1"
+              : "0"}{" "}
+            selected
+            {" · "}
+            {visibleRows.length} visible{" "}
+            {visibleRows.length === 1 ? "row" : "rows"}
           </span>
-          <span>{search ? `Filtered from ${totalFindings}` : `${totalFindings} total findings`}</span>
+          <span>
+            {search
+              ? `Filtered from ${totalFindings}`
+              : `${totalFindings} total findings`}
+          </span>
         </footer>
       </main>
 
@@ -2099,25 +2797,40 @@ function LegacyApp() {
               if (item) selectRow(item);
             }}
             onNotice={setNotice}
-            onArchive={() => setNotice("Archive is available in the daily-use shell.")}
+            onArchive={() =>
+              setNotice("Archive is available in the daily-use shell.")
+            }
           />
         ) : (
           <div className="inspector-loading" role="status">
-            {detailQuery.isError ? "Could not load actionable details." : "Loading actionable details…"}
+            {detailQuery.isError
+              ? "Could not load actionable details."
+              : "Loading actionable details…"}
           </div>
         )}
       </aside>
 
       {sidebarCollapsed && (
-        <button type="button" className="collapsed-brand" onClick={() => setSidebarCollapsed(false)} aria-label="Open project navigation">
+        <button
+          type="button"
+          className="collapsed-brand"
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="Open project navigation"
+        >
           A
         </button>
       )}
 
-      <div className="sr-only" aria-live="polite">{notice}</div>
+      <div className="sr-only" aria-live="polite">
+        {notice}
+      </div>
       {formMode && scopesQuery.data && (formMode === "create" || selected) && (
         <ActionableForm
-          key={formMode === "edit" && selected ? `edit-${selected.id}-${selected.version}` : "create"}
+          key={
+            formMode === "edit" && selected
+              ? `edit-${selected.id}-${selected.version}`
+              : "create"
+          }
           item={formMode === "edit" ? selected : undefined}
           scopes={scopesQuery.data}
           onClose={() => setFormMode(null)}
@@ -2191,7 +2904,11 @@ function searchFor(query: QueryState) {
   return text ? `?${text}` : "";
 }
 
-function routeFor(view: ViewMode, selectedId: number | null, query: QueryState) {
+function routeFor(
+  view: ViewMode,
+  selectedId: number | null,
+  query: QueryState,
+) {
   const path =
     selectedId !== null
       ? `/actionables/${selectedId}`
@@ -2201,7 +2918,7 @@ function routeFor(view: ViewMode, selectedId: number | null, query: QueryState) 
           ? "/archive"
           : view === "data"
             ? "/data"
-          : "/";
+            : "/";
   return `${path}${searchFor(query)}`;
 }
 
@@ -2209,7 +2926,9 @@ function errorMessage(error: unknown) {
   if (error instanceof ApiProblem) {
     return `${error.problem.title} · Request ${error.problem.requestId}`;
   }
-  return error instanceof Error ? error.message : "The request could not be completed.";
+  return error instanceof Error
+    ? error.message
+    : "The request could not be completed.";
 }
 
 function DashboardPanel({
@@ -2228,7 +2947,12 @@ function DashboardPanel({
   onOpenItem: (item: ActionableSummary) => void;
 }) {
   if (pending) {
-    return <div className="dashboard-state" role="status"><RefreshCw className="spin" />Loading operational queues…</div>;
+    return (
+      <div className="dashboard-state" role="status">
+        <RefreshCw className="spin" />
+        Loading operational queues…
+      </div>
+    );
   }
   if (error || !data) {
     return (
@@ -2236,7 +2960,9 @@ function DashboardPanel({
         <AlertTriangle />
         <strong>Could not load the dashboard</strong>
         <span>{errorMessage(error)}</span>
-        <button type="button" onClick={onRetry}>Retry</button>
+        <button type="button" onClick={onRetry}>
+          Retry
+        </button>
       </div>
     );
   }
@@ -2245,7 +2971,10 @@ function DashboardPanel({
       <div className="dashboard-state">
         <CircleDot />
         <strong>No actionables yet</strong>
-        <span>Capture an actionable or import reviewed findings to start the daily queue.</span>
+        <span>
+          Capture an actionable or import reviewed findings to start the daily
+          queue.
+        </span>
       </div>
     );
   }
@@ -2254,18 +2983,31 @@ function DashboardPanel({
       <header className="dashboard-heading">
         <div>
           <h1 id="dashboard-title">Dashboard</h1>
-          <p>Operational queues derived from current workflow, validation, hierarchy, and dependency state.</p>
+          <p>
+            Operational queues derived from current workflow, validation,
+            hierarchy, and dependency state.
+          </p>
         </div>
         <div className="dashboard-counts" aria-label="Actionable totals">
-          <span><strong>{data.counts.total}</strong> total</span>
-          <span><strong>{data.counts.topLevel}</strong> top-level</span>
-          <span><strong>{data.counts.nested}</strong> subtasks</span>
+          <span>
+            <strong>{data.counts.total}</strong> total
+          </span>
+          <span>
+            <strong>{data.counts.topLevel}</strong> top-level
+          </span>
+          <span>
+            <strong>{data.counts.nested}</strong> subtasks
+          </span>
         </div>
       </header>
       <div className="queue-grid">
         {data.queues.map((queue) => (
           <section className="queue-panel" key={queue.key}>
-            <button type="button" className="queue-heading" onClick={() => onOpenQueue(queue.query)}>
+            <button
+              type="button"
+              className="queue-heading"
+              onClick={() => onOpenQueue(queue.query)}
+            >
               <span>{queue.label}</span>
               <strong>{queue.count}</strong>
               <ChevronRight aria-hidden="true" />
@@ -2278,7 +3020,9 @@ function DashboardPanel({
                     <button type="button" onClick={() => onOpenItem(item)}>
                       <Badge tone={item.priority}>{item.priority}</Badge>
                       <span>{item.title}</span>
-                      {item.isDependencyBlocked && <span className="queue-blocked">blocked</span>}
+                      {item.isDependencyBlocked && (
+                        <span className="queue-blocked">blocked</span>
+                      )}
                     </button>
                   </li>
                 ))}
@@ -2302,10 +3046,16 @@ function DataPanel({
 }) {
   const [fileName, setFileName] = useState("");
   const [preview, setPreview] = useState<ImportPreviewResponse | null>(null);
-  const [prepared, setPrepared] = useState<Awaited<ReturnType<typeof preparePortableImport>> | null>(null);
+  const [prepared, setPrepared] = useState<Awaited<
+    ReturnType<typeof preparePortableImport>
+  > | null>(null);
   const [committed, setCommitted] = useState<ImportCommitResponse | null>(null);
-  const [acceptedSuggestions, setAcceptedSuggestions] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState<"preview" | "prepare" | "commit" | "export" | null>(null);
+  const [acceptedSuggestions, setAcceptedSuggestions] = useState<Set<string>>(
+    new Set(),
+  );
+  const [busy, setBusy] = useState<
+    "preview" | "prepare" | "commit" | "export" | null
+  >(null);
   const [error, setError] = useState("");
 
   const resetAfterSelection = () => {
@@ -2394,9 +3144,12 @@ function DataPanel({
     setError("");
     try {
       const exported = await downloadPortableExport();
-      const blob = new Blob([`${JSON.stringify(exported.document, null, 2)}\n`], {
-        type: "application/json",
-      });
+      const blob = new Blob(
+        [`${JSON.stringify(exported.document, null, 2)}\n`],
+        {
+          type: "application/json",
+        },
+      );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -2410,35 +3163,58 @@ function DataPanel({
     }
   };
 
-  const conflicts = preview?.items.filter((item) => item.classification === "conflict") ?? [];
-  const invalid = preview?.items.filter((item) =>
-    ["invalid", "missing-reference", "integrity-failure"].includes(item.classification),
-  ) ?? [];
-  const suggestions = preview?.items.filter((item) => item.classification === "suggestion") ?? [];
-  const changed = preview?.items.filter((item) =>
-    ["create", "safe-update", "conflict"].includes(item.classification),
-  ) ?? [];
+  const conflicts =
+    preview?.items.filter((item) => item.classification === "conflict") ?? [];
+  const invalid =
+    preview?.items.filter((item) =>
+      ["invalid", "missing-reference", "integrity-failure"].includes(
+        item.classification,
+      ),
+    ) ?? [];
+  const suggestions =
+    preview?.items.filter((item) => item.classification === "suggestion") ?? [];
+  const changed =
+    preview?.items.filter((item) =>
+      ["create", "safe-update", "conflict"].includes(item.classification),
+    ) ?? [];
 
   return (
     <section className="data-panel" aria-labelledby="data-title">
       <header className="data-heading">
         <div>
           <h1 id="data-title">Data</h1>
-          <p>Preview and reconcile a versioned portable backup, or export the complete local domain state.</p>
+          <p>
+            Preview and reconcile a versioned portable backup, or export the
+            complete local domain state.
+          </p>
         </div>
-        <button type="button" className="toolbar-button" onClick={() => void download()} disabled={busy !== null}>
-          <Download aria-hidden="true" />{busy === "export" ? "Preparing…" : "Export backup"}
+        <button
+          type="button"
+          className="toolbar-button"
+          onClick={() => void download()}
+          disabled={busy !== null}
+        >
+          <Download aria-hidden="true" />
+          {busy === "export" ? "Preparing…" : "Export backup"}
         </button>
       </header>
       <div className="sensitive-warning" role="note">
         <AlertTriangle aria-hidden="true" />
-        Exports can contain technical paths, research notes, source wording, and other sensitive project information.
+        Exports can contain technical paths, research notes, source wording, and
+        other sensitive project information.
       </div>
-      {error && <div className="inline-error" role="alert">{error}</div>}
+      {error && (
+        <div className="inline-error" role="alert">
+          {error}
+        </div>
+      )}
       <section className="data-section" aria-labelledby="import-file-title">
         <div>
           <h2 id="import-file-title">1. Select JSON file</h2>
-          <p>Files are treated as untrusted data. The app never reads paths contained in JSON.</p>
+          <p>
+            Files are treated as untrusted data. The app never reads paths
+            contained in JSON.
+          </p>
         </div>
         <label className="file-picker">
           <Upload aria-hidden="true" />
@@ -2450,7 +3226,11 @@ function DataPanel({
             disabled={busy !== null}
           />
         </label>
-        {busy === "preview" && <span role="status">Parsing and building a non-mutating preview…</span>}
+        {busy === "preview" && (
+          <span role="status">
+            Parsing and building a non-mutating preview…
+          </span>
+        )}
       </section>
       {preview && (
         <>
@@ -2460,27 +3240,74 @@ function DataPanel({
               <p>{preview.compatibility}</p>
             </div>
             <dl className="preview-totals">
-              <div><dt>Creates</dt><dd>{preview.totals.creates}</dd></div>
-              <div><dt>Safe updates</dt><dd>{preview.totals.safeUpdates}</dd></div>
-              <div><dt>No-ops</dt><dd>{preview.totals.noOps}</dd></div>
-              <div><dt>Conflicts</dt><dd>{preview.totals.conflicts}</dd></div>
-              <div><dt>Invalid</dt><dd>{preview.totals.invalid + preview.totals.missingReferences + preview.totals.integrityFailures}</dd></div>
-              <div><dt>Suggestions</dt><dd>{preview.totals.suggestions}</dd></div>
+              <div>
+                <dt>Creates</dt>
+                <dd>{preview.totals.creates}</dd>
+              </div>
+              <div>
+                <dt>Safe updates</dt>
+                <dd>{preview.totals.safeUpdates}</dd>
+              </div>
+              <div>
+                <dt>No-ops</dt>
+                <dd>{preview.totals.noOps}</dd>
+              </div>
+              <div>
+                <dt>Conflicts</dt>
+                <dd>{preview.totals.conflicts}</dd>
+              </div>
+              <div>
+                <dt>Invalid</dt>
+                <dd>
+                  {preview.totals.invalid +
+                    preview.totals.missingReferences +
+                    preview.totals.integrityFailures}
+                </dd>
+              </div>
+              <div>
+                <dt>Suggestions</dt>
+                <dd>{preview.totals.suggestions}</dd>
+              </div>
             </dl>
             {(changed.length > 0 || invalid.length > 0) && (
               <div className="preview-details">
                 {[...invalid, ...changed].map((item) => (
-                  <details key={item.id} open={item.classification === "conflict" || invalid.includes(item)}>
+                  <details
+                    key={item.id}
+                    open={
+                      item.classification === "conflict" ||
+                      invalid.includes(item)
+                    }
+                  >
                     <summary>
-                      <Badge tone={item.classification}>{item.classification}</Badge>
+                      <Badge tone={item.classification}>
+                        {item.classification}
+                      </Badge>
                       <span>{item.display}</span>
                       <small>{item.recordType}</small>
                     </summary>
-                    {item.errors.length > 0 && <ul>{item.errors.map((message) => <li key={message}>{message}</li>)}</ul>}
-                    {item.changes.length > 0 && (
-                      <ul>{item.changes.map((change) => <li key={`${item.id}-${change.field}`}><strong>{change.field}</strong>: {change.reason}</li>)}</ul>
+                    {item.errors.length > 0 && (
+                      <ul>
+                        {item.errors.map((message) => (
+                          <li key={message}>{message}</li>
+                        ))}
+                      </ul>
                     )}
-                    {item.classification === "conflict" && <p>Resolution: skip conflicting fields and preserve local values.</p>}
+                    {item.changes.length > 0 && (
+                      <ul>
+                        {item.changes.map((change) => (
+                          <li key={`${item.id}-${change.field}`}>
+                            <strong>{change.field}</strong>: {change.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {item.classification === "conflict" && (
+                      <p>
+                        Resolution: skip conflicting fields and preserve local
+                        values.
+                      </p>
+                    )}
                   </details>
                 ))}
               </div>
@@ -2488,8 +3315,13 @@ function DataPanel({
           </section>
           <section className="data-section" aria-labelledby="suggestions-title">
             <div>
-              <h2 id="suggestions-title">3. Confirm relationship suggestions</h2>
-              <p>Unconfirmed suggestions do not create hierarchy or dependency facts.</p>
+              <h2 id="suggestions-title">
+                3. Confirm relationship suggestions
+              </h2>
+              <p>
+                Unconfirmed suggestions do not create hierarchy or dependency
+                facts.
+              </p>
             </div>
             {suggestions.length ? (
               <ul className="suggestion-list">
@@ -2514,7 +3346,9 @@ function DataPanel({
                   </li>
                 ))}
               </ul>
-            ) : <p>No inferred relationships require confirmation.</p>}
+            ) : (
+              <p>No inferred relationships require confirmation.</p>
+            )}
             <button
               type="button"
               className="toolbar-button"
@@ -2527,7 +3361,10 @@ function DataPanel({
           <section className="data-section" aria-labelledby="commit-title">
             <div>
               <h2 id="commit-title">4. Commit explicitly</h2>
-              <p>The commit is atomic and rejects stale data, changed selections, changed content, and replay.</p>
+              <p>
+                The commit is atomic and rejects stale data, changed selections,
+                changed content, and replay.
+              </p>
             </div>
             <button
               type="button"
@@ -2542,13 +3379,25 @@ function DataPanel({
                 <CheckCircle2 aria-hidden="true" />
                 <div>
                   <strong>Import committed</strong>
-                  <p>{committed.summary.creates} creates, {committed.summary.safeUpdates} safe updates, {committed.summary.noOps} no-ops, {committed.summary.conflicts} skipped conflicts.</p>
+                  <p>
+                    {committed.summary.creates} creates,{" "}
+                    {committed.summary.safeUpdates} safe updates,{" "}
+                    {committed.summary.noOps} no-ops,{" "}
+                    {committed.summary.conflicts} skipped conflicts.
+                  </p>
                   {committed.affectedActionables.length > 0 && (
-                    <ul>{committed.affectedActionables.map((item) => (
-                      <li key={item.portableId}>
-                        <button type="button" onClick={() => onOpenActionable(item.id)}>{item.title}</button>
-                      </li>
-                    ))}</ul>
+                    <ul>
+                      {committed.affectedActionables.map((item) => (
+                        <li key={item.portableId}>
+                          <button
+                            type="button"
+                            onClick={() => onOpenActionable(item.id)}
+                          >
+                            {item.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               </div>
@@ -2578,44 +3427,89 @@ function ArchiveDialog({
   onConfirm: () => void;
 }) {
   const action = target.archived ? "Restore" : "Archive";
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalIsolation(dialogRef);
   return (
     <div className="modal-backdrop" role="presentation">
       <section
         className="archive-dialog"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="archive-dialog-title"
         onKeyDown={(event) => {
-          if (event.key === "Escape" && !saving) onClose();
+          if (event.key === "Escape" && !saving) {
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          );
+          if (!controls?.length) return;
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
         }}
       >
-        <header>
+        <div className="archive-dialog-header">
           <Archive aria-hidden="true" />
           <div>
-            <h2 id="archive-dialog-title">{action} {target.name}?</h2>
+            <h2 id="archive-dialog-title">
+              {action} {target.name}?
+            </h2>
             <p>
               {target.archived
                 ? "Restoring preserves its prior workflow, validation, hierarchy, dependencies, and history."
                 : "Archiving changes visibility only. Workflow status and relationships are preserved."}
             </p>
           </div>
-        </header>
+        </div>
         {pending ? (
-          <div className="archive-impact" role="status">Checking impact…</div>
+          <div className="archive-impact" role="status">
+            Checking impact…
+          </div>
         ) : impact ? (
           <div className="archive-impact">
             <strong>Impact</strong>
             {impact.warnings.length ? (
-              <ul>{impact.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+              <ul>
+                {impact.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
             ) : (
               <p>No related active work will be hidden.</p>
             )}
           </div>
         ) : null}
-        {error && <div className="inline-error" role="alert">{error}</div>}
+        {error && (
+          <div className="inline-error" role="alert">
+            {error}
+          </div>
+        )}
         <footer>
-          <button type="button" onClick={onClose} disabled={saving} autoFocus>Cancel</button>
-          <button type="button" className="primary-action" onClick={onConfirm} disabled={pending || saving}>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={onClose}
+            disabled={saving}
+            autoFocus
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={onConfirm}
+            disabled={pending || saving}
+          >
             {saving ? `${action}ing…` : `${action} ${target.name}`}
           </button>
         </footer>
@@ -2629,40 +3523,60 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(viewFromLocation);
   const [query, setQuery] = useState<QueryState>(() => {
     const initial = queryFromLocation();
-    return viewFromLocation() === "archive" ? { ...initial, archived: "archived" } : initial;
+    return viewFromLocation() === "archive"
+      ? { ...initial, archived: "archived" }
+      : initial;
   });
-  const [selectedId, setSelectedId] = useState<number | null>(selectedFromLocation);
-  const [searchInput, setSearchInput] = useState(() => queryFromLocation().q ?? "");
+  const [selectedId, setSelectedId] = useState<number | null>(
+    selectedFromLocation,
+  );
+  const [searchInput, setSearchInput] = useState(
+    () => queryFromLocation().q ?? "",
+  );
   const [activeTab, setActiveTab] = useState<InspectorTab>("finding");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorHidden, setInspectorHidden] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
     try {
-      return new Set<number>(JSON.parse(sessionStorage.getItem("expanded-actionable-parents") ?? "[]"));
+      return new Set<number>(
+        JSON.parse(
+          sessionStorage.getItem("expanded-actionable-parents") ?? "[]",
+        ),
+      );
     } catch {
       return new Set<number>();
     }
   });
   const [mobileDetailOpen, setMobileDetailOpen] = useState(
-    () => selectedFromLocation() !== null && window.matchMedia("(max-width: 760px)").matches,
+    () =>
+      selectedFromLocation() !== null &&
+      window.matchMedia("(max-width: 760px)").matches,
   );
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
-  const [validationChecks, setValidationChecks] = useState<Set<string>>(new Set());
+  const [validationChecks, setValidationChecks] = useState<Set<string>>(
+    new Set(),
+  );
   const [notice, setNotice] = useState("");
   const [online, setOnline] = useState(navigator.onLine);
-  const [archiveTarget, setArchiveTarget] = useState<ArchiveDialogTarget | null>(null);
+  const [archiveTarget, setArchiveTarget] =
+    useState<ArchiveDialogTarget | null>(null);
   const [archiveSaving, setArchiveSaving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
   const archiveReturnFocus = useRef<HTMLElement | null>(null);
   const tableBodyRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const listQuery = useQuery({
     queryKey: ["actionables", query],
     queryFn: () => fetchActionables(query),
     enabled: view !== "dashboard" || selectedId !== null,
   });
-  const scopesQuery = useQuery({ queryKey: ["scopes"], queryFn: fetchScopeOptions });
+  const scopesQuery = useQuery({
+    queryKey: ["scopes"],
+    queryFn: fetchScopeOptions,
+  });
   const dashboardScope = {
     project: query.project,
     repository: query.repository,
@@ -2687,11 +3601,15 @@ export default function App() {
   const actionables = listQuery.data?.items ?? [];
   const selected = detailQuery.data;
   const scopes = scopesQuery.data?.projects ?? [];
-  const activeProject = scopes.find((item) => item.id === query.project) ?? scopes[0];
+  const activeProject =
+    scopes.find((item) => item.id === query.project) ?? scopes[0];
   const repositories = activeProject?.repositories ?? [];
-  const activeRepository = repositories.find((item) => item.id === query.repository) ?? repositories[0];
+  const activeRepository =
+    repositories.find((item) => item.id === query.repository) ??
+    repositories[0];
   const worktrees = activeRepository?.worktrees ?? [];
-  const activeWorktree = worktrees.find((item) => item.id === query.worktree) ?? worktrees[0];
+  const activeWorktree =
+    worktrees.find((item) => item.id === query.worktree) ?? worktrees[0];
 
   const replaceLocation = (
     nextView: ViewMode,
@@ -2709,7 +3627,12 @@ export default function App() {
   const patchQuery = (patch: QueryState, nextView = view) => {
     const next = { ...query };
     Object.entries(patch).forEach(([key, value]) => {
-      if (!value || value === "all" || (key === "archived" && value === "active") || (key === "sort" && value === "priority")) {
+      if (
+        !value ||
+        value === "all" ||
+        (key === "archived" && value === "active") ||
+        (key === "sort" && value === "priority")
+      ) {
         delete next[key as keyof ActionableQuery];
       } else {
         next[key as keyof ActionableQuery] = value;
@@ -2729,7 +3652,10 @@ export default function App() {
       setSearchInput(nextQuery.q ?? "");
       const nextSelected = selectedFromLocation();
       setSelectedId(nextSelected);
-      setMobileDetailOpen(nextSelected !== null && window.matchMedia("(max-width: 760px)").matches);
+      setMobileDetailOpen(
+        nextSelected !== null &&
+          window.matchMedia("(max-width: 760px)").matches,
+      );
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -2742,7 +3668,12 @@ export default function App() {
       const next = { ...query };
       if (searchInput.trim()) next.q = searchInput.trim();
       else delete next.q;
-      replaceLocation(view === "dashboard" ? "actionables" : view, null, next, true);
+      replaceLocation(
+        view === "dashboard" ? "actionables" : view,
+        null,
+        next,
+        true,
+      );
     }, 220);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
@@ -2780,12 +3711,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    sessionStorage.setItem("expanded-actionable-parents", JSON.stringify([...expandedParents]));
+    sessionStorage.setItem(
+      "expanded-actionable-parents",
+      JSON.stringify([...expandedParents]),
+    );
   }, [expandedParents]);
 
   useEffect(() => {
     if (!listQuery.data || !tableBodyRef.current) return;
-    const saved = Number(sessionStorage.getItem("actionables-scroll-position") ?? "0");
+    const saved = Number(
+      sessionStorage.getItem("actionables-scroll-position") ?? "0",
+    );
     if (Number.isFinite(saved)) tableBodyRef.current.scrollTop = saved;
   }, [listQuery.data, view]);
 
@@ -2798,11 +3734,13 @@ export default function App() {
 
   const discoveryActive = queryKeys.some(
     (key) =>
-      !["project", "repository", "worktree", "sort", "archived"].includes(key) &&
-      Boolean(query[key]),
+      !["project", "repository", "worktree", "sort", "archived"].includes(
+        key,
+      ) && Boolean(query[key]),
   );
   const visibleRows = useMemo(() => {
-    if (discoveryActive || query.parent || query.archived === "archived") return actionables;
+    if (discoveryActive || query.parent || query.archived === "archived")
+      return actionables;
     const byId = new Map(actionables.map((item) => [item.id, item]));
     return actionables
       .filter((item) => !item.parentId)
@@ -2810,14 +3748,106 @@ export default function App() {
         if (!item.childIds || !expandedParents.has(item.id)) return [item];
         return [item, ...item.childIds.flatMap((id) => byId.get(id) ?? [])];
       });
-  }, [actionables, discoveryActive, expandedParents, query.parent, query.archived]);
+  }, [
+    actionables,
+    discoveryActive,
+    expandedParents,
+    query.parent,
+    query.archived,
+  ]);
 
   const selectRow = (item: ActionableSummary) => {
     replaceLocation("actionables", item.id, query);
     setActiveTab("finding");
     setInspectorHidden(false);
-    if (window.matchMedia("(max-width: 760px)").matches) setMobileDetailOpen(true);
+    if (window.matchMedia("(max-width: 760px)").matches)
+      setMobileDetailOpen(true);
   };
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        blocksGlobalShortcut(event.target) ||
+        formMode !== null ||
+        archiveTarget !== null
+      ) {
+        return;
+      }
+
+      if (event.key === "/" && view !== "data") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (event.key.toLowerCase() === "c" && view !== "data") {
+        event.preventDefault();
+        if (scopesQuery.data) setFormMode("create");
+        else setNotice("Scope options are still loading.");
+        return;
+      }
+      if (event.key.toLowerCase() === "e" && selected) {
+        event.preventDefault();
+        setFormMode("edit");
+        return;
+      }
+      if (
+        (event.key === "j" || event.key === "k") &&
+        view === "actionables" &&
+        visibleRows.length
+      ) {
+        event.preventDefault();
+        const currentIndex = visibleRows.findIndex(
+          (item) => item.id === selectedId,
+        );
+        const delta = event.key === "j" ? 1 : -1;
+        const nextIndex =
+          currentIndex < 0
+            ? delta > 0
+              ? 0
+              : visibleRows.length - 1
+            : Math.min(
+                Math.max(currentIndex + delta, 0),
+                visibleRows.length - 1,
+              );
+        const item = visibleRows[nextIndex];
+        replaceLocation("actionables", item.id, query, true);
+        setActiveTab("finding");
+        setInspectorHidden(false);
+        window.requestAnimationFrame(() => {
+          document
+            .querySelector<HTMLElement>(`[data-actionable-id="${item.id}"]`)
+            ?.focus();
+        });
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        selectedId !== null &&
+        view === "actionables" &&
+        !document.activeElement?.closest('[role="row"]')
+      ) {
+        event.preventDefault();
+        setInspectorHidden(false);
+        if (window.matchMedia("(max-width: 760px)").matches)
+          setMobileDetailOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [
+    archiveTarget,
+    formMode,
+    query,
+    scopesQuery.data,
+    selected,
+    selectedId,
+    view,
+    visibleRows,
+  ]);
 
   const invalidateDailyUse = async () => {
     await Promise.all([
@@ -2835,7 +3865,9 @@ export default function App() {
     setActiveTab("finding");
     setInspectorHidden(false);
     setFormMode(null);
-    setNotice(created ? "Actionable created and opened." : "Actionable changes saved.");
+    setNotice(
+      created ? "Actionable created and opened." : "Actionable changes saved.",
+    );
   };
 
   const handleMutated = (saved: ActionableDetail, mutationNotice: string) => {
@@ -2852,7 +3884,9 @@ export default function App() {
     archived: boolean,
   ) => {
     archiveReturnFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     setArchiveError("");
     setArchiveTarget({ kind, id: String(id), name, version, archived });
   };
@@ -2882,7 +3916,9 @@ export default function App() {
           !archiveTarget.archived,
         );
       }
-      setNotice(`${archiveTarget.name} ${archiveTarget.archived ? "restored" : "archived"}.`);
+      setNotice(
+        `${archiveTarget.name} ${archiveTarget.archived ? "restored" : "archived"}.`,
+      );
       closeArchive();
       await invalidateDailyUse();
     } catch (error) {
@@ -2908,7 +3944,8 @@ export default function App() {
       !["project", "repository", "worktree"].includes(key) &&
       !(key === "archived" && view === "archive"),
   );
-  const projectName = activeProject?.name ?? listQuery.data?.project.name ?? "All projects";
+  const projectName =
+    activeProject?.name ?? listQuery.data?.project.name ?? "All projects";
   const worktreeName = activeWorktree?.name ?? "All worktrees";
   const totalFindings =
     listQuery.data?.counts.total ?? dashboardQuery.data?.counts.total ?? 0;
@@ -2919,32 +3956,60 @@ export default function App() {
     mobileDetailOpen ? "mobile-detail-open" : "",
     view === "dashboard" && selectedId === null ? "dashboard-mode" : "",
     view === "data" && selectedId === null ? "data-mode" : "",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={shellClasses}>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <aside className="sidebar" aria-label="Projects and worktrees">
         <div className="product-bar">
           <span>Actionables</span>
-          <IconButton label="Close project navigation" onClick={() => setSidebarCollapsed(true)}>
+          <IconButton
+            label="Close project navigation"
+            onClick={() => setSidebarCollapsed(true)}
+          >
             <PanelLeftClose />
           </IconButton>
         </div>
         <nav className="primary-navigation" aria-label="Primary">
-          <button type="button" className={view === "dashboard" ? "is-selected" : ""} onClick={() => replaceLocation("dashboard", null, {
-            ...(query.project ? { project: query.project } : {}),
-            ...(query.repository ? { repository: query.repository } : {}),
-            ...(query.worktree ? { worktree: query.worktree } : {}),
-          })}>
+          <button
+            type="button"
+            className={view === "dashboard" ? "is-selected" : ""}
+            onClick={() =>
+              replaceLocation("dashboard", null, {
+                ...(query.project ? { project: query.project } : {}),
+                ...(query.repository ? { repository: query.repository } : {}),
+                ...(query.worktree ? { worktree: query.worktree } : {}),
+              })
+            }
+          >
             <LayoutDashboard /> Dashboard
           </button>
-          <button type="button" className={view === "actionables" ? "is-selected" : ""} onClick={() => replaceLocation("actionables", null, query)}>
+          <button
+            type="button"
+            className={view === "actionables" ? "is-selected" : ""}
+            onClick={() => replaceLocation("actionables", null, query)}
+          >
             <List /> Actionables
           </button>
-          <button type="button" className={view === "archive" ? "is-selected" : ""} onClick={() => replaceLocation("archive", null, { archived: "archived" })}>
+          <button
+            type="button"
+            className={view === "archive" ? "is-selected" : ""}
+            onClick={() =>
+              replaceLocation("archive", null, { archived: "archived" })
+            }
+          >
             <Archive /> Archive
           </button>
-          <button type="button" className={view === "data" ? "is-selected" : ""} onClick={() => replaceLocation("data", null, query)}>
+          <button
+            type="button"
+            className={view === "data" ? "is-selected" : ""}
+            onClick={() => replaceLocation("data", null, query)}
+          >
             <Database /> Data
           </button>
         </nav>
@@ -2953,14 +4018,31 @@ export default function App() {
           {scopes.map((project) => (
             <div className="project-group" key={project.id}>
               <div className="scope-action-row">
-                <button type="button" className="project-row" onClick={() => patchQuery({ project: project.id, repository: "", worktree: "" }, "actionables")}>
+                <button
+                  type="button"
+                  className="project-row"
+                  onClick={() =>
+                    patchQuery(
+                      { project: project.id, repository: "", worktree: "" },
+                      "actionables",
+                    )
+                  }
+                >
                   <ChevronDown aria-hidden="true" />
                   <span>{project.name}</span>
                   {project.archivedAt && <Archive aria-label="Archived" />}
                 </button>
                 <IconButton
                   label={`${project.archivedAt ? "Restore" : "Archive"} project ${project.name}`}
-                  onClick={() => openArchive("project", project.id, project.name, project.version, Boolean(project.archivedAt))}
+                  onClick={() =>
+                    openArchive(
+                      "project",
+                      project.id,
+                      project.name,
+                      project.version,
+                      Boolean(project.archivedAt),
+                    )
+                  }
                 >
                   {project.archivedAt ? <ArchiveRestore /> : <Archive />}
                 </IconButton>
@@ -2968,12 +4050,32 @@ export default function App() {
               {project.repositories.map((repository) => (
                 <div key={repository.id} className="repository-group">
                   <div className="scope-action-row repository-row">
-                    <button type="button" onClick={() => patchQuery({ project: project.id, repository: repository.id, worktree: "" }, "actionables")}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        patchQuery(
+                          {
+                            project: project.id,
+                            repository: repository.id,
+                            worktree: "",
+                          },
+                          "actionables",
+                        )
+                      }
+                    >
                       <GitBranch /> {repository.name}
                     </button>
                     <IconButton
                       label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
-                      onClick={() => openArchive("repository", repository.id, repository.name, repository.version, Boolean(repository.archivedAt))}
+                      onClick={() =>
+                        openArchive(
+                          "repository",
+                          repository.id,
+                          repository.name,
+                          repository.version,
+                          Boolean(repository.archivedAt),
+                        )
+                      }
                     >
                       {repository.archivedAt ? <ArchiveRestore /> : <Archive />}
                     </IconButton>
@@ -2982,13 +4084,36 @@ export default function App() {
                     <div className="scope-action-row" key={worktree.id}>
                       <WorktreeRow
                         name={worktree.name}
-                        count={project.id === activeProject?.id && repository.id === activeRepository?.id && worktree.id === activeWorktree?.id ? listQuery.data?.result.scopeTotal : undefined}
+                        count={
+                          project.id === activeProject?.id &&
+                          repository.id === activeRepository?.id &&
+                          worktree.id === activeWorktree?.id
+                            ? listQuery.data?.result.scopeTotal
+                            : undefined
+                        }
                         selected={query.worktree === worktree.id}
-                        onClick={() => patchQuery({ project: project.id, repository: repository.id, worktree: worktree.id }, "actionables")}
+                        onClick={() =>
+                          patchQuery(
+                            {
+                              project: project.id,
+                              repository: repository.id,
+                              worktree: worktree.id,
+                            },
+                            "actionables",
+                          )
+                        }
                       />
                       <IconButton
                         label={`${worktree.archivedAt ? "Restore" : "Archive"} worktree ${worktree.name}`}
-                        onClick={() => openArchive("worktree", worktree.id, worktree.name, worktree.version, Boolean(worktree.archivedAt))}
+                        onClick={() =>
+                          openArchive(
+                            "worktree",
+                            worktree.id,
+                            worktree.name,
+                            worktree.version,
+                            Boolean(worktree.archivedAt),
+                          )
+                        }
                       >
                         {worktree.archivedAt ? <ArchiveRestore /> : <Archive />}
                       </IconButton>
@@ -2998,71 +4123,294 @@ export default function App() {
               ))}
             </div>
           ))}
-          <button type="button" className="scope-row" onClick={() => replaceLocation("actionables", null, {})}>
-            <span className="scope-dot all" /> All actionables <span>{totalFindings}</span>
+          <button
+            type="button"
+            className="scope-row"
+            onClick={() => replaceLocation("actionables", null, {})}
+          >
+            <span className="scope-dot all" /> All actionables{" "}
+            <span>{totalFindings}</span>
           </button>
         </div>
         <div className="sidebar-status">
-          <span><CircleDot aria-hidden="true" />{online ? "Local API" : "Offline"}</span>
-          <span>{listQuery.isFetching && !listQuery.isPending ? "Refreshing…" : "Ready"}</span>
+          <span>
+            <CircleDot aria-hidden="true" />
+            {online ? "Local API" : "Offline"}
+          </span>
+          <span>
+            {listQuery.isFetching && !listQuery.isPending
+              ? "Refreshing…"
+              : "Ready"}
+          </span>
         </div>
       </aside>
 
       <header className="topbar">
         <div className="scope-selectors">
           <IconButton
-            label={sidebarCollapsed ? "Open project navigation" : "Close project navigation"}
+            label={
+              sidebarCollapsed
+                ? "Open project navigation"
+                : "Close project navigation"
+            }
             onClick={() => setSidebarCollapsed((value) => !value)}
             pressed={!sidebarCollapsed}
             className="nav-toggle"
           >
             {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
           </IconButton>
-          <button type="button" className="selector-button" onClick={() => replaceLocation("actionables", null, query)}>
+          <button
+            type="button"
+            className="selector-button"
+            onClick={() => replaceLocation("actionables", null, query)}
+          >
             {projectName} <ChevronDown aria-hidden="true" />
           </button>
           <span className="topbar-divider" />
-          <button type="button" className="selector-button mono" title={worktreeName} onClick={() => replaceLocation("actionables", null, query)}>
-            <GitBranch aria-hidden="true" />{worktreeName} <ChevronDown aria-hidden="true" />
+          <button
+            type="button"
+            className="selector-button mono"
+            title={worktreeName}
+            onClick={() => replaceLocation("actionables", null, query)}
+          >
+            <GitBranch aria-hidden="true" />
+            {worktreeName} <ChevronDown aria-hidden="true" />
           </button>
         </div>
-        {view !== "data" ? <label className="global-search">
-          <Search aria-hidden="true" />
-          <span className="shortcut">⌘K</span>
-          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search titles, findings, notes, tags, paths, symbols…" aria-label="Search actionables" />
-          {searchInput && <button type="button" aria-label="Clear search" onClick={() => setSearchInput("")}><X /></button>}
-        </label> : <div className="data-context"><Database aria-hidden="true" /> Import / Export</div>}
+        {view !== "data" ? (
+          <label className="global-search">
+            <Search aria-hidden="true" />
+            <kbd className="shortcut">/</kbd>
+            <input
+              ref={searchInputRef}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search titles, findings, notes, tags, paths, symbols…"
+              aria-label="Search actionables"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearchInput("")}
+              >
+                <X />
+              </button>
+            )}
+          </label>
+        ) : (
+          <div className="data-context">
+            <Database aria-hidden="true" /> Import / Export
+          </div>
+        )}
         <div className="topbar-actions">
-          {view !== "data" && <button type="button" className="primary-action" onClick={() => scopesQuery.data ? setFormMode("create") : setNotice("Scope options are still loading.")}>
-            <Plus /> New actionable
-          </button>}
+          <div className="shortcut-help-wrap">
+            <button
+              type="button"
+              className="toolbar-button shortcut-help-button"
+              aria-expanded={shortcutHelpOpen}
+              aria-controls="shortcut-help"
+              onClick={() => setShortcutHelpOpen((open) => !open)}
+              title="Keyboard shortcuts"
+            >
+              <Keyboard aria-hidden="true" /> Shortcuts
+            </button>
+            {shortcutHelpOpen && (
+              <div id="shortcut-help" className="shortcut-help" role="status">
+                <span>
+                  <kbd>/</kbd> search
+                </span>
+                <span>
+                  <kbd>j</kbd>/<kbd>k</kbd> move
+                </span>
+                <span>
+                  <kbd>Enter</kbd> open
+                </span>
+                <span>
+                  <kbd>e</kbd> edit
+                </span>
+                <span>
+                  <kbd>c</kbd> create
+                </span>
+              </div>
+            )}
+          </div>
+          {view !== "data" && (
+            <button
+              type="button"
+              className="primary-action"
+              disabled={!scopesQuery.data}
+              onClick={() =>
+                scopesQuery.data
+                  ? setFormMode("create")
+                  : setNotice("Scope options are still loading.")
+              }
+            >
+              <Plus /> New actionable
+            </button>
+          )}
           {(view === "actionables" || view === "archive") && (
             <div className="filter-wrap">
-              <button type="button" className={`toolbar-button ${filterOpen ? "is-active" : ""}`} onClick={() => setFilterOpen((value) => !value)} aria-expanded={filterOpen}>
-                <SlidersHorizontal /> Filters {activeFilters.length > 0 && <span className="filter-count">{activeFilters.length}</span>}
+              <button
+                type="button"
+                className={`toolbar-button ${filterOpen ? "is-active" : ""}`}
+                onClick={() => setFilterOpen((value) => !value)}
+                aria-expanded={filterOpen}
+              >
+                <SlidersHorizontal /> Filters{" "}
+                {activeFilters.length > 0 && (
+                  <span className="filter-count">{activeFilters.length}</span>
+                )}
               </button>
               {filterOpen && (
                 <div className="filter-popover advanced-filters">
-                  <label>Status<select value={query.status ?? ""} onChange={(event) => patchQuery({ status: event.target.value })}><option value="">All</option>{["Inbox", "Researching", "Ready", "In progress", "Blocked", "Done", "Dismissed"].map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label>Manual blocking<select value={query.manualBlocked ?? ""} onChange={(event) => patchQuery({ manualBlocked: event.target.value })}><option value="">All</option><option value="yes">Blocked</option><option value="no">Not manually blocked</option></select></label>
-                  <label>Dependency blocking<select value={query.dependencyBlocked ?? ""} onChange={(event) => patchQuery({ dependencyBlocked: event.target.value })}><option value="">All</option><option value="yes">Blocked</option><option value="no">Unblocked</option></select></label>
-                  <label>Priority<select value={query.priority ?? ""} onChange={(event) => patchQuery({ priority: event.target.value })}><option value="">All</option>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label>Effort<select value={query.effort ?? ""} onChange={(event) => patchQuery({ effort: event.target.value })}><option value="">All</option>{efforts.map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label>Evidence<select value={query.evidence ?? ""} onChange={(event) => patchQuery({ evidence: event.target.value })}><option value="">All</option>{evidenceStates.map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label>Hierarchy<select value={query.parent ?? ""} onChange={(event) => patchQuery({ parent: event.target.value })}><option value="">All</option><option value="top-level">Top-level</option><option value="subtasks">Subtasks</option></select></label>
-                  <label>Validation<select value={query.validation ?? ""} onChange={(event) => patchQuery({ validation: event.target.value })}><option value="">All</option><option value="yes">Qualifying</option><option value="no">Awaiting</option></select></label>
-                  <label>Tag<input value={query.tag ?? ""} onChange={(event) => patchQuery({ tag: event.target.value })} placeholder="Exact tag" /></label>
-                  <button type="button" onClick={clearFilters}>Clear all</button>
+                  <label>
+                    Status
+                    <select
+                      value={query.status ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ status: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      {[
+                        "Inbox",
+                        "Researching",
+                        "Ready",
+                        "In progress",
+                        "Blocked",
+                        "Done",
+                        "Dismissed",
+                      ].map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Manual blocking
+                    <select
+                      value={query.manualBlocked ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ manualBlocked: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      <option value="yes">Blocked</option>
+                      <option value="no">Not manually blocked</option>
+                    </select>
+                  </label>
+                  <label>
+                    Dependency blocking
+                    <select
+                      value={query.dependencyBlocked ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ dependencyBlocked: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      <option value="yes">Blocked</option>
+                      <option value="no">Unblocked</option>
+                    </select>
+                  </label>
+                  <label>
+                    Priority
+                    <select
+                      value={query.priority ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ priority: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      {priorities.map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Effort
+                    <select
+                      value={query.effort ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ effort: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      {efforts.map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Evidence
+                    <select
+                      value={query.evidence ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ evidence: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      {evidenceStates.map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Hierarchy
+                    <select
+                      value={query.parent ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ parent: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      <option value="top-level">Top-level</option>
+                      <option value="subtasks">Subtasks</option>
+                    </select>
+                  </label>
+                  <label>
+                    Validation
+                    <select
+                      value={query.validation ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ validation: event.target.value })
+                      }
+                    >
+                      <option value="">All</option>
+                      <option value="yes">Qualifying</option>
+                      <option value="no">Awaiting</option>
+                    </select>
+                  </label>
+                  <label>
+                    Tag
+                    <input
+                      value={query.tag ?? ""}
+                      onChange={(event) =>
+                        patchQuery({ tag: event.target.value })
+                      }
+                      placeholder="Exact tag"
+                    />
+                  </label>
+                  <button type="button" onClick={clearFilters}>
+                    Clear all
+                  </button>
                 </div>
               )}
             </div>
           )}
-          {(view === "actionables" || view === "archive") && <IconButton label={inspectorHidden ? "Show inspector" : "Hide inspector"} onClick={() => setInspectorHidden((value) => !value)} pressed={!inspectorHidden}>{inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}</IconButton>}
+          {(view === "actionables" || view === "archive") && (
+            <IconButton
+              label={inspectorHidden ? "Show inspector" : "Hide inspector"}
+              onClick={() => setInspectorHidden((value) => !value)}
+              pressed={!inspectorHidden}
+            >
+              {inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}
+            </IconButton>
+          )}
         </div>
       </header>
 
       {view === "data" && selectedId === null ? (
-        <main className="findings-panel">
+        <main className="findings-panel" id="main-content" tabIndex={-1}>
           <DataPanel
             onCommitted={invalidateDailyUse}
             onOpenActionable={(id) => {
@@ -3072,7 +4420,7 @@ export default function App() {
           />
         </main>
       ) : view === "dashboard" && selectedId === null ? (
-        <main className="findings-panel">
+        <main className="findings-panel" id="main-content" tabIndex={-1}>
           <DashboardPanel
             data={dashboardQuery.data}
             pending={dashboardQuery.isPending}
@@ -3086,31 +4434,95 @@ export default function App() {
           />
         </main>
       ) : (
-        <main className="findings-panel">
+        <main className="findings-panel" id="main-content" tabIndex={-1}>
           <div className="findings-heading">
-            <h1>{view === "archive" ? "Archive" : "Actionables"} <span>{listQuery.data?.result.matched ?? 0}</span></h1>
+            <h1>
+              {view === "archive" ? "Archive" : "Actionables"}{" "}
+              <span>{listQuery.data?.result.matched ?? 0}</span>
+            </h1>
             <div className="filter-chips">
               {activeFilters.map((key) => (
-                <button type="button" className="active-filter" key={key} onClick={() => {
-                  if (key === "q") setSearchInput("");
-                  patchQuery({ [key]: "" });
-                }}>
+                <button
+                  type="button"
+                  className="active-filter"
+                  key={key}
+                  onClick={() => {
+                    if (key === "q") setSearchInput("");
+                    patchQuery({ [key]: "" });
+                  }}
+                >
                   {key}: {query[key]} <X />
                 </button>
               ))}
-              {activeFilters.length > 1 && <button type="button" className="clear-filters" onClick={clearFilters}>Clear all</button>}
+              {activeFilters.length > 1 && (
+                <button
+                  type="button"
+                  className="clear-filters"
+                  onClick={clearFilters}
+                >
+                  Clear all
+                </button>
+              )}
             </div>
           </div>
-          {!online && <div className="connection-banner" role="status">Local API unreachable. Existing context is preserved; reconnect and retry.</div>}
-          {listQuery.isFetching && !listQuery.isPending && <div className="background-refresh" role="status">Refreshing results…</div>}
-          <div className="findings-table" role="table" aria-label="Actionable findings">
+          {!online && (
+            <div className="connection-banner" role="status">
+              Local API unreachable. Existing context is preserved; reconnect
+              and retry.
+            </div>
+          )}
+          {listQuery.isFetching && !listQuery.isPending && (
+            <div className="background-refresh" role="status">
+              Refreshing results…
+            </div>
+          )}
+          <div
+            className="findings-table"
+            role="table"
+            aria-label="Actionable findings"
+          >
             <div className="table-header table-grid" role="row">
-              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "title" })}>Finding</button>
-              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "priority" })}>Priority <ChevronDown /></button>
-              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "status" })}>Status <ChevronDown /></button>
+              <div role="columnheader">
+                <button
+                  type="button"
+                  onClick={() => patchQuery({ sort: "title" })}
+                >
+                  Finding
+                </button>
+              </div>
+              <div role="columnheader">
+                <button
+                  type="button"
+                  onClick={() => patchQuery({ sort: "priority" })}
+                >
+                  Priority <ChevronDown />
+                </button>
+              </div>
+              <div role="columnheader">
+                <button
+                  type="button"
+                  onClick={() => patchQuery({ sort: "status" })}
+                >
+                  Status <ChevronDown />
+                </button>
+              </div>
               <div role="columnheader">Worktree</div>
-              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "effort" })}>Effort <ChevronDown /></button>
-              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "updated-desc" })}>Updated <ChevronDown /></button>
+              <div role="columnheader">
+                <button
+                  type="button"
+                  onClick={() => patchQuery({ sort: "effort" })}
+                >
+                  Effort <ChevronDown />
+                </button>
+              </div>
+              <div role="columnheader">
+                <button
+                  type="button"
+                  onClick={() => patchQuery({ sort: "updated-desc" })}
+                >
+                  Updated <ChevronDown />
+                </button>
+              </div>
             </div>
             <div
               className="table-body"
@@ -3128,67 +4540,145 @@ export default function App() {
                 const isChild = Boolean(item.parentId);
                 const expanded = expandedParents.has(item.id);
                 return (
-                  <div className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`} role="row" aria-selected={selectedRow} tabIndex={0} key={item.id} onClick={() => selectRow(item)} onKeyDown={(event) => {
-                    if (event.key === "Enter") selectRow(item);
-                  }}>
+                  <div
+                    className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`}
+                    role="row"
+                    aria-selected={selectedRow}
+                    tabIndex={0}
+                    data-actionable-id={item.id}
+                    key={item.id}
+                    onClick={() => selectRow(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") selectRow(item);
+                    }}
+                  >
                     <div className="finding-cell" role="cell">
                       {item.childIds && !discoveryActive ? (
-                        <button type="button" className="row-expander" aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${item.title}`} onClick={(event) => {
-                          event.stopPropagation();
-                          setExpandedParents((current) => {
-                            const next = new Set(current);
-                            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-                            return next;
-                          });
-                        }}>{expanded ? <ChevronDown /> : <ChevronRight />}</button>
-                      ) : isChild ? <span className="child-guide" /> : <span className="row-spacer" />}
-                      <span className="finding-title truncate-reveal" title={item.title}>{item.title}</span>
-                      {item.childCompletion && <span className="child-count">{item.childCompletion.terminal}/{item.childCompletion.total}</span>}
-                      {item.unresolvedDependencyCount > 0 && <span className="blocked-indicator" title={`Derived block: ${item.unresolvedDependencyCount} unresolved prerequisite${item.unresolvedDependencyCount === 1 ? "" : "s"}`}>Blocked by {item.unresolvedDependencyCount}</span>}
-                      {item.archiveState.isArchived && <span className="archived-indicator">Archived</span>}
+                        <button
+                          type="button"
+                          className="row-expander"
+                          aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${item.title}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setExpandedParents((current) => {
+                              const next = new Set(current);
+                              if (next.has(item.id)) next.delete(item.id);
+                              else next.add(item.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          {expanded ? <ChevronDown /> : <ChevronRight />}
+                        </button>
+                      ) : isChild ? (
+                        <span className="child-guide" />
+                      ) : (
+                        <span className="row-spacer" />
+                      )}
+                      <span
+                        className="finding-title truncate-reveal"
+                        title={item.title}
+                      >
+                        {item.title}
+                      </span>
+                      {item.childCompletion && (
+                        <span className="child-count">
+                          {item.childCompletion.terminal}/
+                          {item.childCompletion.total}
+                        </span>
+                      )}
+                      {item.unresolvedDependencyCount > 0 && (
+                        <span
+                          className="blocked-indicator"
+                          title={`Derived block: ${item.unresolvedDependencyCount} unresolved prerequisite${item.unresolvedDependencyCount === 1 ? "" : "s"}`}
+                        >
+                          Blocked by {item.unresolvedDependencyCount}
+                        </span>
+                      )}
+                      {item.archiveState.isArchived && (
+                        <span className="archived-indicator">Archived</span>
+                      )}
                     </div>
-                    <div role="cell"><Badge tone={item.priority}>{item.priority}</Badge></div>
-                    <div role="cell"><Badge tone={item.status} title={item.statusProvenance.note}>{item.status}</Badge></div>
-                    <div role="cell" className="mono worktree-cell">{item.worktree}</div>
-                    <div role="cell" className="effort-cell">{item.effort}</div>
-                    <div role="cell" className="updated-cell">{new Date(item.updatedAt).toLocaleDateString()}</div>
+                    <div role="cell">
+                      <Badge tone={item.priority}>{item.priority}</Badge>
+                    </div>
+                    <div role="cell">
+                      <Badge
+                        tone={item.status}
+                        title={item.statusProvenance.note}
+                      >
+                        {item.status}
+                      </Badge>
+                    </div>
+                    <div role="cell" className="mono worktree-cell">
+                      {item.worktree}
+                    </div>
+                    <div role="cell" className="effort-cell">
+                      {item.effort}
+                    </div>
+                    <div role="cell" className="updated-cell">
+                      {new Date(item.updatedAt).toLocaleDateString()}
+                    </div>
                   </div>
                 );
               })}
               {visibleRows.length === 0 && (
-                <div className="empty-state" role={listQuery.isError ? "alert" : "status"}>
-                  {listQuery.isPending ? <RefreshCw className="spin" /> : listQuery.isError ? <AlertTriangle /> : <Search />}
-                  <strong>
-                    {listQuery.isPending
-                      ? "Loading actionables"
-                      : listQuery.isError
-                        ? "Could not load actionables"
-                        : listQuery.data?.counts.total === 0
-                          ? "No actionables yet"
-                          : listQuery.data?.result.scopeTotal === 0
-                            ? "This scope is empty"
-                            : "No results match these filters"}
-                  </strong>
-                  <span>
-                    {listQuery.isError
-                      ? errorMessage(listQuery.error)
-                      : listQuery.data?.result.scopeTotal === 0
-                        ? "Choose another project, repository, or worktree."
-                        : "Clear one or all filters to broaden the result."}
-                  </span>
-                  {listQuery.isError && <button type="button" onClick={() => void listQuery.refetch()}>Retry</button>}
+                <div role="row">
+                  <div
+                    className="empty-state"
+                    role="cell"
+                    aria-live={listQuery.isError ? "assertive" : "polite"}
+                  >
+                    {listQuery.isPending ? (
+                      <RefreshCw className="spin" />
+                    ) : listQuery.isError ? (
+                      <AlertTriangle />
+                    ) : (
+                      <Search />
+                    )}
+                    <strong>
+                      {listQuery.isPending
+                        ? "Loading actionables"
+                        : listQuery.isError
+                          ? "Could not load actionables"
+                          : listQuery.data?.counts.total === 0
+                            ? "No actionables yet"
+                            : listQuery.data?.result.scopeTotal === 0
+                              ? "This scope is empty"
+                              : "No results match these filters"}
+                    </strong>
+                    <span>
+                      {listQuery.isError
+                        ? errorMessage(listQuery.error)
+                        : listQuery.data?.result.scopeTotal === 0
+                          ? "Choose another project, repository, or worktree."
+                          : "Clear one or all filters to broaden the result."}
+                    </span>
+                    {listQuery.isError && (
+                      <button
+                        type="button"
+                        onClick={() => void listQuery.refetch()}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </div>
           <footer className="table-footer">
-            <span>{visibleRows.length} visible rows · {listQuery.data?.result.topLevel ?? 0} top-level · {listQuery.data?.result.nested ?? 0} subtasks</span>
+            <span>
+              {visibleRows.length} visible rows ·{" "}
+              {listQuery.data?.result.topLevel ?? 0} top-level ·{" "}
+              {listQuery.data?.result.nested ?? 0} subtasks
+            </span>
             <span>{listQuery.data?.counts.total ?? 0} total actionables</span>
           </footer>
         </main>
       )}
 
-      {((view !== "dashboard" && view !== "data") || selectedId !== null) ? (
+      {(view !== "dashboard" && view !== "data") || selectedId !== null ? (
         <aside className="inspector" aria-label="Selected actionable">
           {selected ? (
             <Inspector
@@ -3201,23 +4691,39 @@ export default function App() {
                 replaceLocation("actionables", null, query);
               }}
               validationChecks={validationChecks}
-              toggleValidation={(key) => setValidationChecks((current) => {
-                const next = new Set(current);
-                if (next.has(key)) next.delete(key); else next.add(key);
-                return next;
-              })}
+              toggleValidation={(key) =>
+                setValidationChecks((current) => {
+                  const next = new Set(current);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                })
+              }
               onEdit={() => setFormMode("edit")}
               onMutated={handleMutated}
               onNavigate={(id) => {
-                const item = actionables.find((candidate) => candidate.id === id);
+                const item = actionables.find(
+                  (candidate) => candidate.id === id,
+                );
                 if (item) selectRow(item);
                 else replaceLocation("actionables", id, query);
               }}
               onNotice={setNotice}
-              onArchive={() => openArchive("actionable", selected.id, selected.title, selected.version, selected.archiveState.directlyArchived)}
+              onArchive={() =>
+                openArchive(
+                  "actionable",
+                  selected.id,
+                  selected.title,
+                  selected.version,
+                  selected.archiveState.directlyArchived,
+                )
+              }
             />
           ) : (
-            <div className="inspector-loading" role={detailQuery.isError ? "alert" : "status"}>
+            <div
+              className="inspector-loading"
+              role={detailQuery.isError ? "alert" : "status"}
+            >
               {selectedId === null ? (
                 <>
                   <strong>No actionable selected</strong>
@@ -3227,18 +4733,47 @@ export default function App() {
                 <>
                   <strong>Actionable unavailable</strong>
                   <span>{errorMessage(detailQuery.error)}</span>
-                  <button type="button" onClick={() => replaceLocation("actionables", null, query)}>Back to results</button>
+                  <button
+                    type="button"
+                    onClick={() => replaceLocation("actionables", null, query)}
+                  >
+                    Back to results
+                  </button>
                 </>
-              ) : "Loading actionable details…"}
+              ) : (
+                "Loading actionable details…"
+              )}
             </div>
           )}
         </aside>
       ) : null}
 
-      {sidebarCollapsed && <button type="button" className="collapsed-brand" onClick={() => setSidebarCollapsed(false)} aria-label="Open project navigation">A</button>}
-      <div className="sr-only" aria-live="polite">{notice}{listQuery.isFetching ? " Results updating." : ""}</div>
+      {sidebarCollapsed && (
+        <button
+          type="button"
+          className="collapsed-brand"
+          onClick={() => setSidebarCollapsed(false)}
+          aria-label="Open project navigation"
+        >
+          A
+        </button>
+      )}
+      <div className="sr-only" aria-live="polite">
+        {notice}
+        {listQuery.isFetching ? " Results updating." : ""}
+      </div>
       {formMode && scopesQuery.data && (formMode === "create" || selected) && (
-        <ActionableForm key={formMode === "edit" && selected ? `edit-${selected.id}-${selected.version}` : "create"} item={formMode === "edit" ? selected : undefined} scopes={scopesQuery.data} onClose={() => setFormMode(null)} onSaved={handleSaved} />
+        <ActionableForm
+          key={
+            formMode === "edit" && selected
+              ? `edit-${selected.id}-${selected.version}`
+              : "create"
+          }
+          item={formMode === "edit" ? selected : undefined}
+          scopes={scopesQuery.data}
+          onClose={() => setFormMode(null)}
+          onSaved={handleSaved}
+        />
       )}
       {archiveTarget && (
         <ArchiveDialog
@@ -3246,7 +4781,10 @@ export default function App() {
           impact={impactQuery.data}
           pending={impactQuery.isPending}
           saving={archiveSaving}
-          error={archiveError || (impactQuery.isError ? errorMessage(impactQuery.error) : "")}
+          error={
+            archiveError ||
+            (impactQuery.isError ? errorMessage(impactQuery.error) : "")
+          }
           onClose={closeArchive}
           onConfirm={() => void confirmArchive()}
         />

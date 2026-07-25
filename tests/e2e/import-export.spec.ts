@@ -14,8 +14,7 @@ test("previews, authorizes, and explicitly commits portable JSON before linking 
   expect(exportedResponse.ok()).toBe(true);
   const portable = await exportedResponse.json();
   portable.metadata.sourceName = "Playwright safe-update import";
-  portable.actionables[0].description =
-    `${portable.actionables[0].description}\n\nPlaywright verified portable reconciliation.`;
+  portable.actionables[0].description = `${portable.actionables[0].description}\n\nPlaywright verified portable reconciliation.`;
   const importPath = testInfo.outputPath("portable-import.json");
   await writeFile(importPath, `${JSON.stringify(portable, null, 2)}\n`, "utf8");
 
@@ -27,12 +26,18 @@ test("previews, authorizes, and explicitly commits portable JSON before linking 
   await expect(page).toHaveURL(/\?q=portable-context/);
   await page.getByRole("button", { name: "Data" }).click();
   await expect(page.getByRole("heading", { name: "Data" })).toBeVisible();
-  await expect(page.getByText(/Exports can contain technical paths/)).toBeVisible();
+  await expect(
+    page.getByText(/Exports can contain technical paths/),
+  ).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles(importPath);
   await expect(page.getByRole("heading", { name: "2. Preview" })).toBeVisible();
-  await expect(page.getByText("Schema version 1 is supported exactly.")).toBeVisible();
-  await expect(page.getByText("safe-update", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("Schema version 1 is supported exactly."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("safe-update", { exact: true }).first(),
+  ).toBeVisible();
 
   const beforeCommit = await request.get("/api/actionables/1");
   expect((await beforeCommit.json()).item.description).not.toContain(
@@ -44,7 +49,9 @@ test("previews, authorizes, and explicitly commits portable JSON before linking 
     await expect(suggestionChecks.first()).not.toBeChecked();
   }
   await page.getByRole("button", { name: "Review selections" }).click();
-  const commitButton = page.getByRole("button", { name: "Commit reviewed import" });
+  const commitButton = page.getByRole("button", {
+    name: "Commit reviewed import",
+  });
   await expect(commitButton).toBeEnabled();
   await commitButton.focus();
   await page.keyboard.press("Enter");

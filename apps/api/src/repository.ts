@@ -65,14 +65,18 @@ const actionableInclude = {
     where: { removedAt: null },
     orderBy: { createdAt: "asc" as const },
     include: {
-      prerequisite: { include: { project: true, repository: true, worktree: true } },
+      prerequisite: {
+        include: { project: true, repository: true, worktree: true },
+      },
     },
   },
   dependenciesAsPrerequisite: {
     where: { removedAt: null },
     orderBy: { createdAt: "asc" as const },
     include: {
-      dependent: { include: { project: true, repository: true, worktree: true } },
+      dependent: {
+        include: { project: true, repository: true, worktree: true },
+      },
     },
   },
 } satisfies Prisma.ActionableInclude;
@@ -125,7 +129,10 @@ function stringContext(value: Prisma.JsonValue): Record<string, string> {
 }
 
 function latestInProgressAt(row: ActionableRow) {
-  return row.statusHistory.find((entry) => entry.newStatus === "In progress")?.occurredAt ?? null;
+  return (
+    row.statusHistory.find((entry) => entry.newStatus === "In progress")
+      ?.occurredAt ?? null
+  );
 }
 
 function qualifyingValidationIds(row: ActionableRow) {
@@ -150,12 +157,19 @@ function qualifyingValidationIds(row: ActionableRow) {
 
 function latestQualifyingValidationId(row: ActionableRow) {
   const qualifying = qualifyingValidationIds(row);
-  return [...row.validationRecords]
-    .reverse()
-    .find((record) => qualifying.has(record.id))?.id ?? null;
+  return (
+    [...row.validationRecords]
+      .reverse()
+      .find((record) => qualifying.has(record.id))?.id ?? null
+  );
 }
 
-function archiveState(row: Pick<ActionableRow, "archivedAt" | "project" | "repository" | "worktree">) {
+function archiveState(
+  row: Pick<
+    ActionableRow,
+    "archivedAt" | "project" | "repository" | "worktree"
+  >,
+) {
   const inheritedFrom: Array<"project" | "repository" | "worktree"> = [];
   if (row.project.archivedAt) inheritedFrom.push("project");
   if (row.repository.archivedAt) inheritedFrom.push("repository");
@@ -200,7 +214,8 @@ function dependencyState(
   const prerequisite = relationship.prerequisite;
   if (relationship.waivedAt) return "waived" as const;
   if (prerequisite.status === "Done") return "satisfied" as const;
-  if (prerequisite.status === "Dismissed") return "dismissed-prerequisite" as const;
+  if (prerequisite.status === "Dismissed")
+    return "dismissed-prerequisite" as const;
   return "unresolved" as const;
 }
 
@@ -269,13 +284,15 @@ function toSummary(row: ActionableRow): ActionableSummary {
     tags: stringArray(row.tagsJson),
     manualBlocker: row.manualBlockerMd,
     isDependencyBlocked: unresolvedDependencies.length > 0,
-    isEffectivelyBlocked: status === "Blocked" || unresolvedDependencies.length > 0,
+    isEffectivelyBlocked:
+      status === "Blocked" || unresolvedDependencies.length > 0,
     unresolvedDependencyCount: unresolvedDependencies.length,
     dependencyCount: row.dependenciesAsDependent.length,
     blocksCount: row.dependenciesAsPrerequisite.length,
     hasQualifyingValidation: latestQualifyingValidationId(row) !== null,
     wasReopened: row.activityEvents.some(
-      (event) => event.type === "reopened" || event.type === "parent-auto-reopened",
+      (event) =>
+        event.type === "reopened" || event.type === "parent-auto-reopened",
     ),
     archiveState: archiveState(row),
     blockedBy:
@@ -345,7 +362,9 @@ function toDetail(row: ActionableRow): ActionableDetail {
       recordedAt: record.recordedAt.toISOString(),
       supersedesId: record.supersedesId,
       supersededById:
-        row.validationRecords.find((candidate) => candidate.supersedesId === record.id)?.id ?? null,
+        row.validationRecords.find(
+          (candidate) => candidate.supersedesId === record.id,
+        )?.id ?? null,
       qualifiesForCompletion: qualifying.has(record.id),
     })),
     activity: row.activityEvents.map((event) => ({
@@ -402,7 +421,10 @@ function toDetail(row: ActionableRow): ActionableDetail {
 
 async function validateScope(
   client: AppPrismaClient | TransactionClient,
-  input: Pick<CreateActionableRequest, "projectId" | "repositoryId" | "worktreeId">,
+  input: Pick<
+    CreateActionableRequest,
+    "projectId" | "repositoryId" | "worktreeId"
+  >,
 ) {
   const [project, repository, worktree] = await Promise.all([
     client.project.findUnique({ where: { id: input.projectId } }),
@@ -424,7 +446,11 @@ async function validateScope(
   }
 
   if (Object.keys(errors).length > 0) {
-    throw new DomainValidationError("INVALID_SCOPE", errors, "The selected scope is invalid.");
+    throw new DomainValidationError(
+      "INVALID_SCOPE",
+      errors,
+      "The selected scope is invalid.",
+    );
   }
 }
 
@@ -438,15 +464,16 @@ async function findActionableRow(
   });
 }
 
-export async function listActionables(prisma: AppPrismaClient): Promise<ActionablesListResponse> {
+export async function listActionables(
+  prisma: AppPrismaClient,
+): Promise<ActionablesListResponse> {
   return listActionablesWithQuery(prisma, actionableQuerySchema.parse({}));
 }
 
 const priorityRank = new Map(
-  ["Critical", "High", "Medium", "Low", "Backlog", "Unset"].map((value, index) => [
-    value,
-    index,
-  ]),
+  ["Critical", "High", "Medium", "Low", "Backlog", "Unset"].map(
+    (value, index) => [value, index],
+  ),
 );
 const effortRank = new Map(
   ["XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL", "Unknown"].map(
@@ -454,9 +481,15 @@ const effortRank = new Map(
   ),
 );
 const statusRank = new Map(
-  ["Inbox", "Researching", "Ready", "In progress", "Blocked", "Done", "Dismissed"].map(
-    (value, index) => [value, index],
-  ),
+  [
+    "Inbox",
+    "Researching",
+    "Ready",
+    "In progress",
+    "Blocked",
+    "Done",
+    "Dismissed",
+  ].map((value, index) => [value, index]),
 );
 
 function boolMatch(filter: "all" | "yes" | "no", value: boolean) {
@@ -480,7 +513,10 @@ function searchText(row: ActionableRow) {
       if (!file || typeof file !== "object" || Array.isArray(file)) return [];
       return Object.values(file).map((value) => String(value ?? ""));
     }),
-    ...row.userSources.flatMap((source) => [source.locator, source.label ?? ""]),
+    ...row.userSources.flatMap((source) => [
+      source.locator,
+      source.label ?? "",
+    ]),
   ]
     .join("\n")
     .toLocaleLowerCase();
@@ -493,24 +529,32 @@ function matchesQuery(row: ActionableRow, query: ActionableQuery) {
   if (query.repository && row.repository.id !== query.repository) return false;
   if (query.worktree && row.worktree.id !== query.worktree) return false;
   if (query.status && summary.status !== query.status) return false;
-  if (!boolMatch(query.manualBlocked, summary.status === "Blocked")) return false;
-  if (!boolMatch(query.dependencyBlocked, summary.isDependencyBlocked)) return false;
+  if (!boolMatch(query.manualBlocked, summary.status === "Blocked"))
+    return false;
+  if (!boolMatch(query.dependencyBlocked, summary.isDependencyBlocked))
+    return false;
   if (query.priority && summary.priority !== query.priority) return false;
   if (query.effort && summary.effort !== query.effort) return false;
   if (query.evidence && summary.evidenceState !== query.evidence) return false;
   if (
     query.tag &&
-    !summary.tags.some((tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase())
-  ) return false;
+    !summary.tags.some(
+      (tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase(),
+    )
+  )
+    return false;
   if (
     query.archived !== "all" &&
     (query.archived === "archived") !== summary.archiveState.isArchived
-  ) return false;
+  )
+    return false;
   if (query.parent === "top-level" && !isTopLevel) return false;
   if (query.parent === "subtasks" && isTopLevel) return false;
-  if (!boolMatch(query.validation, summary.hasQualifyingValidation)) return false;
+  if (!boolMatch(query.validation, summary.hasQualifyingValidation))
+    return false;
   if (!boolMatch(query.reopened, summary.wasReopened)) return false;
-  if (query.q && !searchText(row).includes(query.q.toLocaleLowerCase())) return false;
+  if (query.q && !searchText(row).includes(query.q.toLocaleLowerCase()))
+    return false;
   return true;
 }
 
@@ -519,7 +563,8 @@ function sortRows(rows: ActionableRow[], sort: ActionableQuery["sort"]) {
     let result = 0;
     if (sort === "priority") {
       result =
-        (priorityRank.get(left.priority) ?? 99) - (priorityRank.get(right.priority) ?? 99);
+        (priorityRank.get(left.priority) ?? 99) -
+        (priorityRank.get(right.priority) ?? 99);
     } else if (sort === "updated-desc") {
       result = right.updatedAt.getTime() - left.updatedAt.getTime();
     } else if (sort === "updated-asc") {
@@ -529,9 +574,13 @@ function sortRows(rows: ActionableRow[], sort: ActionableQuery["sort"]) {
     } else if (sort === "title") {
       result = left.title.localeCompare(right.title);
     } else if (sort === "status") {
-      result = (statusRank.get(left.status) ?? 99) - (statusRank.get(right.status) ?? 99);
+      result =
+        (statusRank.get(left.status) ?? 99) -
+        (statusRank.get(right.status) ?? 99);
     } else if (sort === "effort") {
-      result = (effortRank.get(left.effort) ?? 99) - (effortRank.get(right.effort) ?? 99);
+      result =
+        (effortRank.get(left.effort) ?? 99) -
+        (effortRank.get(right.effort) ?? 99);
     }
     return result || left.sourceOrdinal - right.sourceOrdinal;
   });
@@ -544,7 +593,8 @@ export function actionableQueryRecord(query: ActionableQuery) {
   if (query.worktree) values.worktree = query.worktree;
   if (query.status) values.status = query.status;
   if (query.manualBlocked !== "all") values.manualBlocked = query.manualBlocked;
-  if (query.dependencyBlocked !== "all") values.dependencyBlocked = query.dependencyBlocked;
+  if (query.dependencyBlocked !== "all")
+    values.dependencyBlocked = query.dependencyBlocked;
   if (query.priority) values.priority = query.priority;
   if (query.effort) values.effort = query.effort;
   if (query.evidence) values.evidence = query.evidence;
@@ -570,7 +620,10 @@ export async function listActionablesWithQuery(
   query: ActionableQuery,
 ): Promise<ActionablesListResponse> {
   const rows = await allActionableRows(prisma);
-  const matchedRows = sortRows(rows.filter((row) => matchesQuery(row, query)), query.sort);
+  const matchedRows = sortRows(
+    rows.filter((row) => matchesQuery(row, query)),
+    query.sort,
+  );
   const first = rows[0];
   if (!first) {
     return actionablesListResponseSchema.parse({
@@ -578,7 +631,13 @@ export async function listActionablesWithQuery(
       repository: { name: "Repository" },
       worktree: { name: "Worktree" },
       counts: { total: 0, topLevel: 0 },
-      result: { matched: 0, scopeTotal: 0, topLevel: 0, nested: 0, normalizedQuery: actionableQueryRecord(query) },
+      result: {
+        matched: 0,
+        scopeTotal: 0,
+        topLevel: 0,
+        nested: 0,
+        normalizedQuery: actionableQueryRecord(query),
+      },
       items: [],
     });
   }
@@ -654,7 +713,11 @@ export async function listScopeOptions(
           version: worktree.version,
           archivedAt: worktree.archivedAt?.toISOString() ?? null,
           archiveState: {
-            isArchived: Boolean(project.archivedAt || repository.archivedAt || worktree.archivedAt),
+            isArchived: Boolean(
+              project.archivedAt ||
+              repository.archivedAt ||
+              worktree.archivedAt,
+            ),
             directlyArchived: Boolean(worktree.archivedAt),
             archivedAt: worktree.archivedAt?.toISOString() ?? null,
             inheritedFrom: [
@@ -707,25 +770,105 @@ export async function getDashboard(
     label,
     description,
     count: matching.length,
-    query: { ...actionableQueryRecord(actionableQuerySchema.parse(scope)), ...query },
+    query: {
+      ...actionableQueryRecord(actionableQuerySchema.parse(scope)),
+      ...query,
+    },
     items: matching.slice(0, 6).map((row) => summaries.get(row.id)!),
   });
 
   const byOrdinal = (items: ActionableRow[]) =>
     [...items].sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
   const queues: DashboardResponse["queues"] = [
-    queue("inbox", "Inbox requiring triage", "Captured items that still need triage.", { status: "Inbox" }, byOrdinal(rows.filter((row) => row.status === "Inbox"))),
-    queue("researching", "Researching", "Items where evidence is still being developed.", { status: "Researching" }, byOrdinal(rows.filter((row) => row.status === "Researching"))),
-    queue("ready", "Ready to start", "Ready items without manual or dependency blockers.", { status: "Ready", dependencyBlocked: "no", manualBlocked: "no" }, byOrdinal(rows.filter((row) => row.status === "Ready" && !toSummary(row).isDependencyBlocked))),
-    queue("in-progress", "In progress", "Work currently being executed.", { status: "In progress" }, byOrdinal(rows.filter((row) => row.status === "In progress"))),
-    queue("manual-blocked", "Manually blocked", "Items explicitly blocked by the user.", { manualBlocked: "yes" }, byOrdinal(rows.filter((row) => row.status === "Blocked"))),
-    queue("dependency-blocked", "Dependency-blocked", "Items with at least one unresolved active prerequisite.", { dependencyBlocked: "yes" }, byOrdinal(rows.filter((row) => toSummary(row).isDependencyBlocked))),
-    queue("awaiting-validation", "Awaiting qualifying validation", "In-progress items without a current qualifying Passed validation.", { status: "In progress", validation: "no" }, byOrdinal(rows.filter((row) => row.status === "In progress" && !latestQualifyingValidationId(row)))),
-    queue("recently-updated", "Recently updated", "Most recently changed active items.", { sort: "updated-desc" }, recent(() => true)),
-    queue("recently-completed", "Recently completed", "Most recently changed Done items.", { status: "Done", sort: "updated-desc" }, recent((row) => row.status === "Done")),
-    queue("reopened", "Reopened", "Items reopened directly or because a subtask reopened.", { reopened: "yes", sort: "updated-desc" }, recent((row) => row.activityEvents.some((event) => event.type === "reopened" || event.type === "parent-auto-reopened"))),
+    queue(
+      "inbox",
+      "Inbox requiring triage",
+      "Captured items that still need triage.",
+      { status: "Inbox" },
+      byOrdinal(rows.filter((row) => row.status === "Inbox")),
+    ),
+    queue(
+      "researching",
+      "Researching",
+      "Items where evidence is still being developed.",
+      { status: "Researching" },
+      byOrdinal(rows.filter((row) => row.status === "Researching")),
+    ),
+    queue(
+      "ready",
+      "Ready to start",
+      "Ready items without manual or dependency blockers.",
+      { status: "Ready", dependencyBlocked: "no", manualBlocked: "no" },
+      byOrdinal(
+        rows.filter(
+          (row) =>
+            row.status === "Ready" && !toSummary(row).isDependencyBlocked,
+        ),
+      ),
+    ),
+    queue(
+      "in-progress",
+      "In progress",
+      "Work currently being executed.",
+      { status: "In progress" },
+      byOrdinal(rows.filter((row) => row.status === "In progress")),
+    ),
+    queue(
+      "manual-blocked",
+      "Manually blocked",
+      "Items explicitly blocked by the user.",
+      { manualBlocked: "yes" },
+      byOrdinal(rows.filter((row) => row.status === "Blocked")),
+    ),
+    queue(
+      "dependency-blocked",
+      "Dependency-blocked",
+      "Items with at least one unresolved active prerequisite.",
+      { dependencyBlocked: "yes" },
+      byOrdinal(rows.filter((row) => toSummary(row).isDependencyBlocked)),
+    ),
+    queue(
+      "awaiting-validation",
+      "Awaiting qualifying validation",
+      "In-progress items without a current qualifying Passed validation.",
+      { status: "In progress", validation: "no" },
+      byOrdinal(
+        rows.filter(
+          (row) =>
+            row.status === "In progress" && !latestQualifyingValidationId(row),
+        ),
+      ),
+    ),
+    queue(
+      "recently-updated",
+      "Recently updated",
+      "Most recently changed active items.",
+      { sort: "updated-desc" },
+      recent(() => true),
+    ),
+    queue(
+      "recently-completed",
+      "Recently completed",
+      "Most recently changed Done items.",
+      { status: "Done", sort: "updated-desc" },
+      recent((row) => row.status === "Done"),
+    ),
+    queue(
+      "reopened",
+      "Reopened",
+      "Items reopened directly or because a subtask reopened.",
+      { reopened: "yes", sort: "updated-desc" },
+      recent((row) =>
+        row.activityEvents.some(
+          (event) =>
+            event.type === "reopened" || event.type === "parent-auto-reopened",
+        ),
+      ),
+    ),
   ];
-  const topLevel = rows.filter((row) => row.hierarchyAsChild.length === 0).length;
+  const topLevel = rows.filter(
+    (row) => row.hierarchyAsChild.length === 0,
+  ).length;
   return dashboardResponseSchema.parse({
     counts: { total: rows.length, topLevel, nested: rows.length - topLevel },
     queues,
@@ -745,11 +888,15 @@ async function scopeTarget(
   id: string,
 ): Promise<ScopeArchiveRow | null> {
   if (kind === "project") return client.project.findUnique({ where: { id } });
-  if (kind === "repository") return client.repository.findUnique({ where: { id } });
+  if (kind === "repository")
+    return client.repository.findUnique({ where: { id } });
   return client.worktree.findUnique({ where: { id } });
 }
 
-function scopeWhere(kind: Exclude<ArchiveTargetKind, "actionable">, id: string) {
+function scopeWhere(
+  kind: Exclude<ArchiveTargetKind, "actionable">,
+  id: string,
+) {
   if (kind === "project") return { projectId: id };
   if (kind === "repository") return { repositoryId: id };
   return { worktreeId: id };
@@ -787,7 +934,8 @@ export async function archiveImpact(
     (total, row) =>
       total +
       row.hierarchyAsParent.filter(
-        (relationship) => !["Done", "Dismissed"].includes(relationship.child.status),
+        (relationship) =>
+          !["Done", "Dismissed"].includes(relationship.child.status),
       ).length,
     0,
   );
@@ -806,11 +954,26 @@ export async function archiveImpact(
   );
   const descendants = kind === "actionable" ? activeSubtasks : rows.length;
   const warnings: string[] = [];
-  if (activeSubtasks) warnings.push(`${activeSubtasks} active subtask${activeSubtasks === 1 ? "" : "s"} will be hidden.`);
-  if (kind === "actionable" && rows[0]!.hierarchyAsChild.length) warnings.push("This actionable is a subtask; its parent relationship will be preserved.");
-  if (blocks) warnings.push(`${blocks} dependent actionable${blocks === 1 ? "" : "s"} will keep this prerequisite relationship.`);
-  if (unresolvedPrerequisites) warnings.push(`${unresolvedPrerequisites} unresolved prerequisite${unresolvedPrerequisites === 1 ? "" : "s"} will continue to block.`);
-  if (kind !== "actionable" && descendants) warnings.push(`${descendants} actionable${descendants === 1 ? "" : "s"} will be effectively hidden without changing workflow status.`);
+  if (activeSubtasks)
+    warnings.push(
+      `${activeSubtasks} active subtask${activeSubtasks === 1 ? "" : "s"} will be hidden.`,
+    );
+  if (kind === "actionable" && rows[0]!.hierarchyAsChild.length)
+    warnings.push(
+      "This actionable is a subtask; its parent relationship will be preserved.",
+    );
+  if (blocks)
+    warnings.push(
+      `${blocks} dependent actionable${blocks === 1 ? "" : "s"} will keep this prerequisite relationship.`,
+    );
+  if (unresolvedPrerequisites)
+    warnings.push(
+      `${unresolvedPrerequisites} unresolved prerequisite${unresolvedPrerequisites === 1 ? "" : "s"} will continue to block.`,
+    );
+  if (kind !== "actionable" && descendants)
+    warnings.push(
+      `${descendants} actionable${descendants === 1 ? "" : "s"} will be effectively hidden without changing workflow status.`,
+    );
   return archiveImpactResponseSchema.parse({
     target: {
       kind,
@@ -833,11 +996,16 @@ export async function setActionableArchived(
   return prisma.$transaction(async (transaction) => {
     const current = await findActionableRow(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== version) throw new VersionConflictError(toDetail(current));
+    if (current.version !== version)
+      throw new VersionConflictError(toDetail(current));
     if (!archived && archiveState(current).inheritedFrom.length) {
       throw new DomainValidationError(
         "ARCHIVED_ANCESTOR",
-        { archive: [`Restore the archived ${archiveState(current).inheritedFrom[0]} first.`] },
+        {
+          archive: [
+            `Restore the archived ${archiveState(current).inheritedFrom[0]} first.`,
+          ],
+        },
         "This actionable remains hidden by an archived scope.",
       );
     }
@@ -855,7 +1023,10 @@ export async function setActionableArchived(
         actionableId: current.id,
         type: archived ? "archived" : "restored",
         summary: archived ? "Archived actionable" : "Restored actionable",
-        metadataJson: inputJson({ origin: "user", workflowStatus: current.status }),
+        metadataJson: inputJson({
+          origin: "user",
+          workflowStatus: current.status,
+        }),
       },
     });
     const saved = await findActionableRow(transaction, sourceOrdinal);
@@ -873,7 +1044,8 @@ export async function setScopeArchived(
   return prisma.$transaction(async (transaction) => {
     const current = await scopeTarget(transaction, kind, id);
     if (!current) return null;
-    if (current.version !== version) throw new ArchiveVersionConflictError(current.version);
+    if (current.version !== version)
+      throw new ArchiveVersionConflictError(current.version);
     if (!archived) {
       if (kind === "repository") {
         const repository = await transaction.repository.findUnique({
@@ -881,7 +1053,11 @@ export async function setScopeArchived(
           include: { project: true },
         });
         if (repository?.project.archivedAt) {
-          throw new DomainValidationError("ARCHIVED_ANCESTOR", { archive: ["Restore the project first."] }, "This repository remains hidden by an archived project.");
+          throw new DomainValidationError(
+            "ARCHIVED_ANCESTOR",
+            { archive: ["Restore the project first."] },
+            "This repository remains hidden by an archived project.",
+          );
         }
       }
       if (kind === "worktree") {
@@ -890,18 +1066,32 @@ export async function setScopeArchived(
           include: { project: true, repository: true },
         });
         if (worktree?.project.archivedAt || worktree?.repository.archivedAt) {
-          throw new DomainValidationError("ARCHIVED_ANCESTOR", { archive: ["Restore the archived project or repository first."] }, "This worktree remains hidden by an archived ancestor.");
+          throw new DomainValidationError(
+            "ARCHIVED_ANCESTOR",
+            { archive: ["Restore the archived project or repository first."] },
+            "This worktree remains hidden by an archived ancestor.",
+          );
         }
       }
     }
-    const data = { archivedAt: archived ? new Date() : null, version: { increment: 1 } };
+    const data = {
+      archivedAt: archived ? new Date() : null,
+      version: { increment: 1 },
+    };
     const result =
       kind === "project"
         ? await transaction.project.updateMany({ where: { id, version }, data })
         : kind === "repository"
-          ? await transaction.repository.updateMany({ where: { id, version }, data })
-          : await transaction.worktree.updateMany({ where: { id, version }, data });
-    if (result.count !== 1) throw new ArchiveVersionConflictError(current.version);
+          ? await transaction.repository.updateMany({
+              where: { id, version },
+              data,
+            })
+          : await transaction.worktree.updateMany({
+              where: { id, version },
+              data,
+            });
+    if (result.count !== 1)
+      throw new ArchiveVersionConflictError(current.version);
     const affected = await transaction.actionable.findMany({
       where: scopeWhere(kind, id),
       select: { id: true, status: true },
@@ -914,7 +1104,11 @@ export async function setScopeArchived(
           summary: archived
             ? `Hidden by archived ${kind}: ${current.name}`
             : `Visible after ${kind} restore: ${current.name}`,
-          metadataJson: inputJson({ scopeKind: kind, scopeId: id, workflowStatus: item.status }),
+          metadataJson: inputJson({
+            scopeKind: kind,
+            scopeId: id,
+            workflowStatus: item.status,
+          }),
         })),
       });
     }
@@ -923,7 +1117,11 @@ export async function setScopeArchived(
 }
 
 function sourceSignature(source: UserSourceReferenceInput) {
-  return JSON.stringify([source.type, source.locator.trim(), source.label?.trim() ?? ""]);
+  return JSON.stringify([
+    source.type,
+    source.locator.trim(),
+    source.label?.trim() ?? "",
+  ]);
 }
 
 async function syncUserSources(
@@ -937,7 +1135,8 @@ async function syncUserSources(
   for (const source of requested) {
     const match = remaining.findIndex(
       (candidate) =>
-        sourceSignature(candidate as UserSourceReferenceInput) === sourceSignature(source),
+        sourceSignature(candidate as UserSourceReferenceInput) ===
+        sourceSignature(source),
     );
     if (match >= 0) remaining.splice(match, 1);
     else added.push(source);
@@ -991,7 +1190,9 @@ export async function createActionable(
 ): Promise<ActionableDetail> {
   return prisma.$transaction(async (transaction) => {
     await validateScope(transaction, input);
-    const highest = await transaction.actionable.aggregate({ _max: { sourceOrdinal: true } });
+    const highest = await transaction.actionable.aggregate({
+      _max: { sourceOrdinal: true },
+    });
     const sourceOrdinal = (highest._max.sourceOrdinal ?? 0) + 1;
     const created = await transaction.actionable.create({
       data: {
@@ -1024,13 +1225,21 @@ export async function createActionable(
         repositoryId: input.repositoryId,
         worktreeId: input.worktreeId,
         statusHistory: {
-          create: { previousStatus: null, newStatus: "Inbox", origin: "manual-create" },
+          create: {
+            previousStatus: null,
+            newStatus: "Inbox",
+            origin: "manual-create",
+          },
         },
         activityEvents: {
           create: {
             type: "status-transition",
             summary: "Created as Inbox",
-            metadataJson: inputJson({ previousStatus: "", newStatus: "Inbox", origin: "manual-create" }),
+            metadataJson: inputJson({
+              previousStatus: "",
+              newStatus: "Inbox",
+              origin: "manual-create",
+            }),
           },
         },
         userSources: {
@@ -1114,16 +1323,24 @@ function validateTransition(
   ) {
     const errors: Record<string, string[]> = {};
     if (!readiness.finding.trim()) {
-      errors.finding = ["Add the finding before moving this actionable to Ready."];
+      errors.finding = [
+        "Add the finding before moving this actionable to Ready.",
+      ];
     }
     if (!readiness.description.trim()) {
-      errors.description = ["Add the intended result before moving this actionable to Ready."];
+      errors.description = [
+        "Add the intended result before moving this actionable to Ready.",
+      ];
     }
     if (readiness.validation.length === 0) {
-      errors.validation = ["Add at least one validation step before moving to Ready."];
+      errors.validation = [
+        "Add at least one validation step before moving to Ready.",
+      ];
     }
     if (Object.keys(errors).length > 0) {
-      errors.status = ["Ready requires a finding, description, and validation plan."];
+      errors.status = [
+        "Ready requires a finding, description, and validation plan.",
+      ];
       throw new DomainValidationError(
         "READY_REQUIREMENTS_NOT_MET",
         errors,
@@ -1195,7 +1412,9 @@ function validateTransition(
     throw new DomainValidationError(
       "VALIDATION_REQUIRED",
       {
-        status: ["Done requires a current Passed validation or a completion override."],
+        status: [
+          "Done requires a current Passed validation or a completion override.",
+        ],
         completionOverrideReason: [
           "Record a Passed validation or provide a nonempty override reason.",
         ],
@@ -1285,7 +1504,8 @@ export async function updateActionable(
   return prisma.$transaction(async (transaction) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
+    if (current.version !== input.version)
+      throw new VersionConflictError(toDetail(current));
 
     await validateScope(transaction, input);
     const previousStatus = parsePersistedStatus(current.status);
@@ -1336,7 +1556,13 @@ export async function updateActionable(
 
     await syncUserSources(transaction, current, input.userSources);
     if (decision) {
-      await writeTransitionHistory(transaction, current, input.status, "user-edit", decision);
+      await writeTransitionHistory(
+        transaction,
+        current,
+        input.status,
+        "user-edit",
+        decision,
+      );
     }
 
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
@@ -1352,7 +1578,8 @@ export async function transitionActionable(
   return prisma.$transaction(async (transaction) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
+    if (current.version !== input.version)
+      throw new VersionConflictError(toDetail(current));
 
     const previousStatus = parsePersistedStatus(current.status);
     const parentRelationship =
@@ -1383,7 +1610,9 @@ export async function transitionActionable(
               ? null
               : current.manualBlockerMd,
         dismissalReasonMd:
-          input.status === "Dismissed" ? decision.reason : current.dismissalReasonMd,
+          input.status === "Dismissed"
+            ? decision.reason
+            : current.dismissalReasonMd,
         completionOverrideMd:
           input.status === "Done"
             ? decision.completionMode === "override"
@@ -1473,7 +1702,8 @@ export async function recordValidation(
   return prisma.$transaction(async (transaction) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
+    if (current.version !== input.version)
+      throw new VersionConflictError(toDetail(current));
     if (!input.notes.trim() && !input.evidence.trim()) {
       throw new DomainValidationError(
         "VALIDATION_EVIDENCE_REQUIRED",
@@ -1493,7 +1723,9 @@ export async function recordValidation(
       if (!superseded) {
         throw new DomainValidationError(
           "INVALID_SUPERSESSION",
-          { supersedesId: ["Choose a validation record from this actionable."] },
+          {
+            supersedesId: ["Choose a validation record from this actionable."],
+          },
           "The validation correction target is invalid.",
         );
       }
@@ -1504,7 +1736,11 @@ export async function recordValidation(
       ) {
         throw new DomainValidationError(
           "ALREADY_SUPERSEDED",
-          { supersedesId: ["Correct the latest record in the supersession chain."] },
+          {
+            supersedesId: [
+              "Correct the latest record in the supersession chain.",
+            ],
+          },
           "That validation record has already been superseded.",
         );
       }

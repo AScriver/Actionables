@@ -6,12 +6,12 @@ A local, single-user web application can be implemented without redesigning the 
 
 ## Execution
 
-- Mode: Supervised
+- Mode: Continuous
 - Task execution: Inline
 
 ## Global constraints
 
-- The completed checkpoint authorizes only T-006. Implement the final functional import/export MVP slice and stop before T-007; do not add release-hardening work or mutate the representative `WWW` repository.
+- T-007 is approved by the 2026-07-25 release-verification brief. Complete release hardening, documentation, and proof; fix verification defects but add no product features and do not mutate the representative `WWW` repository.
 - Initial use is local and single-user. Do not add authentication, accounts, permissions, collaboration, notifications, cloud infrastructure, or synchronization.
 - Optimize for long, technical, Markdown-heavy findings and a dense desktop workflow; mobile is a usable companion, not the primary authoring surface.
 - Preserve hierarchy and dependency as separate relationships with separate rules and UI.
@@ -77,6 +77,7 @@ A local, single-user web application can be implemented without redesigning the 
 - Resolved 2026-07-24: the user approved T-004 and authorized T-003 hierarchy/dependency implementation, a focused T-003 commit, and a stop before T-005.
 - Resolved 2026-07-25: the user approved T-005 daily-use shell implementation, a focused T-005 commit, a clean worktree, and a stop before the next plan task.
 - Resolved 2026-07-25: the user approved T-006 as the final functional MVP slice, required one shared versioned preview/commit pipeline for the reviewed seed and uploaded JSON, authorized a focused T-006 commit, and required a stop before T-007.
+- Resolved 2026-07-25: the user approved T-007 through `C:\Users\AustinScriver\.codex\attachments\f984aa9a-3424-4e2f-9b14-ebe4a40aecf6\pasted-text.txt`, required continuous release verification from clean Windows checkouts under Node 24 and, if reasonably available, Node 22.19.0, authorized release-blocking fixes and one focused commit, and prohibited new MVP features, tags, releases, installers, hosted deployment, and distribution artifacts.
 
 ## 1. Product definition
 
@@ -1290,7 +1291,11 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 | T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-004 | Complete |
 | T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Complete |
 | T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Complete |
-| T-007 | None | Responsive, accessible MVP is verified for local Windows use | T-005, T-006 | Pending |
+| T-007 | None | Responsive, accessible MVP is verified for local Windows use | T-005, T-006 | Complete |
+| T-007A | T-007 | A reproducible release harness and draft Windows operating documentation cover every required release surface | T-005, T-006 | Complete |
+| T-007B | T-007 | Automated and manual accessibility, keyboard, responsive, and state verification pass without unresolved violations | T-007A | Complete |
+| T-007C | T-007 | Clean Windows checkouts, supported browsers, production runtime, and portable backup restoration are proven | T-007B | Complete |
+| T-007D | T-007 | Final release artifacts, scope audit, complete gate, focused commit, and clean worktree establish the MVP release decision | T-007C | Complete |
 
 ## Task details
 
@@ -1349,10 +1354,45 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 
 ### T-007 — Verify the MVP release
 
-- Authority: mobile, accessibility, state, local development, and MVP acceptance requirements.
-- Done when: desktop/mobile and keyboard workflows pass, serious accessibility findings are resolved, and fresh Windows setup/backup documentation is proven.
-- Touches: responsive styles, accessibility corrections, Playwright suite, documentation.
-- Verify: automated and manual accessibility checks; representative mobile/desktop E2E; clean Windows setup; scope audit against MVP/non-goals.
+- Authority: mobile, accessibility, state, local development, and MVP acceptance requirements plus the approved 2026-07-25 T-007 release-verification brief.
+- Done when: every T-007 child is Complete and the final report truthfully defines supported runtimes/browsers, records clean Windows setup and restart proof, resolves all automated accessibility violations, retains a structured manual WCAG 2.2 AA audit, proves responsive/keyboard/state behavior and portable backup restoration, passes the complete release gate, confirms the MVP/non-goal boundary, and leaves one focused commit on a clean worktree.
+- Touches: child tasks only; this parent is non-executable.
+- Verify: reconcile child evidence and the exact MVP completion definition.
+
+### T-007A — Establish the release harness and operating contract
+
+- Authority: T-007 release runtime/package management, clean-install commands, documentation/artifacts, and single release-verification command requirements.
+- Done when: the repository pins the verified pnpm version; supplies non-conflicting Node-version guidance pending dual-runtime proof; has formatting, migration, living-plan, production-start, and ordered release-verification commands; and has concise draft README/setup/backup/support/troubleshooting/scope documentation sufficient to execute the clean proof without hidden local knowledge.
+- Touches: root manifest and lockfile, Node version file if justified, release/format/migration validation scripts, production server wiring or scripts, README and operational documentation, and living plan.
+- Verify: lockfile-frozen install compatibility in a disposable copy; each new command is executable in PowerShell; production build/start health smoke; living-plan validator; review that docs are copy/paste-ready and make no unsupported claims.
+- Boundaries: do not declare the final Node support range until T-007C evidence exists; do not add product features, installers, deployment, distribution, or automation beyond local verification.
+- Commit: include in the single focused T-007 release-hardening commit after T-007D.
+
+### T-007B — Resolve accessibility, keyboard, responsive, and state defects
+
+- Authority: T-007 automated accessibility, manual WCAG 2.2 AA, responsive/state, keyboard-only workflow, and shortcut acceptance requirements.
+- Done when: maintained Playwright-compatible axe checks cover representative product states at desktop/mobile; no reported impact-level violations remain; `/`, `j/k`, Enter, `e`, and `c` are discoverable, suppressed in editing/modal/content-editable contexts, and retain ordinary alternatives; representative manual audit criteria, viewports, 200% reflow, focus/dialog behavior, touch targets, state contracts, console, and keyboard flows pass or have individually evidenced limitations.
+- Touches: minimal accessible semantics/styles/interaction fixes, Playwright configuration/helpers/specs, axe dependency, accessibility audit record, responsive/state evidence, and living plan.
+- Verify: full Chromium E2E plus focused axe suite; installed Edge or Chrome representative workflow where available; desktop 1586×990, laptop 1280×800, mobile 390×844, intermediate pane-collapse width, and 200% reflow; keyboard-only primary flows; browser-console review; no horizontal overflow or lost focus.
+- Boundaries: passing axe is not WCAG certification; do not globally disable useful axe rules or add unrelated UI behavior.
+- Commit: include in the single focused T-007 release-hardening commit after T-007D.
+
+### T-007C — Prove clean Windows operation and portable recovery
+
+- Authority: T-007 release runtime support, clean Windows installation proof, browser policy, backup/restore proof, and regression requirements.
+- Done when: fresh temporary Windows checkouts in representative paths with spaces complete the applicable gate under Node 24 and reasonably available Node 22.19.0; native `better-sqlite3` loads; empty-database migrations, reviewed seed/no-op import, development and production start/health/browser access, full tests, shutdown/restart, and exact tool versions are recorded; Edge and Chrome representative workflows are evidenced; and a user-workflow export restores into a separate fresh database with semantic re-export equivalence.
+- Touches: verification artifacts/logs outside product code where practical, release report evidence, support policy/runtime declarations determined by results, and living plan.
+- Verify: frozen-lockfile install; Prisma generate/status; explicit native-module load; full release gate per runtime; browser-channel runs; timestamped export, explicit preview/commit into fresh database, domain inventory checks, canonical semantic equivalence, clean shutdown and repeatable restart.
+- Boundaries: declare only the runtime/browser support proven; Firefox, Safari, and non-Windows remain explicitly unverified; automatic backup and raw SQLite copying remain unsupported MVP workflows.
+- Commit: include in the single focused T-007 release-hardening commit after T-007D.
+
+### T-007D — Reconcile and commit the MVP release
+
+- Authority: T-007 documentation/release artifacts, full regression/scope audit, defect policy, completion report, and focused-commit requirements.
+- Done when: README links all final operational artifacts; the release report records exact environments, results, defects/remediation, limitations, scope audit, and completion definition; the complete release command/gate passes after all fixes; T-007 and its children are Complete; the completed plan is renamed per workflow; a focused conventional commit exists; and the worktree is clean.
+- Touches: final documentation, living plan/final reconciliation, focused T-007 diff and commit.
+- Verify: complete release gate, artifact-link/content audit, MVP/non-goal searches and manual review, `git diff --check`, focused staged diff review, commit, and clean `git status`.
+- Boundaries: do not create a tag, release, zip, installer, updater, binary, hosted deployment, or unrelated cleanup.
 
 ## Deferred discoveries
 
@@ -1389,6 +1429,7 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - 2026-07-25: Deliberate visual differences — the dashboard uses compact two-column queue panels at desktop/laptop and one column on mobile; totals remain a thin inline strip rather than oversized cards, the existing Actionables table and inspector remain the daily detail surface, and no charts were added.
 - 2026-07-25: T-006 complete — added schema-version-1 portable backup/restore, one shared non-mutating preview and atomic commit service for seed and uploaded JSON, field-baseline conflict safety, explicit suggestion confirmation, stale/content/selection/replay protection, deterministic export, and restrained Data UI without beginning T-007.
 - 2026-07-25: Deliberate visual differences — Data remains a compact form-like management surface inside the approved shell; preview totals use a thin six-cell strip, record differences use native disclosure rows, and no wizard chrome, oversized cards, charts, or new visual system was introduced.
+- 2026-07-25: Decomposition — expanded the approved T-007 release outcome into T-007A release harness/docs, T-007B accessibility/keyboard/responsive/state hardening, T-007C clean-runtime/browser/backup proof, and T-007D final reconciliation/commit. Authority is the detailed T-007 release-verification brief; no new product outcome was added.
 
 ## Validation log
 
@@ -1437,11 +1478,27 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - T-006: the full Playwright suite reported 14 passing Chromium tests, and the final focused Data suite reported two passing tests covering keyboard navigation, context preservation, file preview, no mutation before commit, selection authorization, explicit commit, affected-actionable links, timestamped download, mobile overflow, and clean console behavior.
 - T-006: final desktop and mobile screenshots at 1586×990 and 390×844 were captured under `output/playwright/t006-data-*.png` and visually inspected; the Data surface remains restrained, keyboard-native, readable, and free of observed clipping or horizontal page overflow.
 - T-006: production output measured 390.12 kB / 112.03 kB gzip for the main JavaScript chunk, 154.00 kB / 45.88 kB gzip for the lazy Markdown renderer, and 46.50 kB / 9.80 kB gzip for CSS; Vite emitted no chunk-size advisory.
+- T-007A: added pnpm 11.9.0 package-manager pinning, Node 24.18.0 version-manager guidance, Prettier 3.9.6 formatting, production orchestration, empty-database migration/seed/native-driver and living-plan validators, and concise README/Windows/backup/support/release/audit artifacts; package scripts and PowerShell commands are path-space-safe.
+- T-007A: `pnpm run format:check`, `pnpm run typecheck`, `pnpm test`, `pnpm run build`, `pnpm run verify:migrations`, and `pnpm run verify:living-plan` passed; Vitest reported 38 passing tests, seven migrations applied to an empty temporary database, the second reviewed seed import reported 32 unchanged, and a direct `better-sqlite3` query returned `1`.
+- T-007A: production mode served the built UI through Vite preview, proxied API health returned HTTP 200 with a matching correlation ID, and both child processes terminated without being orphaned. The outer `pnpm.cmd` Windows prompt is avoided by the documented direct Node orchestrator when a noninteractive shutdown proof is required.
+- T-007A: verification discovered that `better-sqlite3` was only transitive and could not be loaded from the API package; declaring the already-locked 12.11.1 driver directly fixed the clean native-load boundary without changing product behavior.
+- T-007B: `pnpm run test:a11y` passed two maintained axe 4.12.1 tests covering dashboard, actionable list/inspector, create/edit, lifecycle, validation, relationships, filters, archive confirmation, Data initial/preview/success, no-results, API error/retry, mobile list/detail, and reflow with zero violations at every reported impact and no disabled rules.
+- T-007B: `pnpm run test:e2e` passed 16 Chromium tests after a deterministic E2E database reset, including keyboard-only capture/triage, stale conflict recovery, lifecycle/validation, relationships, search/filter/sort, archive/restore, import/commit/export, responsive/state behavior, and the discoverable `/`, `j/k`, Enter, `e`, and `c` shortcuts with editing/dialog/content-editable suppression.
+- T-007B: representative release-critical import/export and keyboard workflows each passed against installed Edge 150.0.4078.83 and Chrome 150.0.7871.182 in addition to Playwright Chromium 149.0.7827.55.
+- T-007B: 1586×990 desktop, 1280×800 laptop, 900×800 pane-collapse, 390×844 mobile, and 640×480 200%-equivalent reflow screenshots were inspected; no page-level horizontal overflow, obscured primary control, inaccessible content, or lost focus was observed. The structured WCAG 2.2 AA record in `docs/accessibility-audit.md` passes the audited surfaces and records no separate screen-reader session as a limitation rather than certification.
+- T-007B: remediated missing document metadata, serious contrast failures, invalid header/tab/table semantics, duplicate dialog banner, missing skip navigation/shortcut discovery, archive-dialog focus containment/isolation, minimum target sizing, and the scope-loading race on New actionable; focused and full retests passed.
+- T-007C: disposable worktrees at `Actionables T007 clean proof\Node 24 checkout` and `Node 22 checkout`, each using a new isolated pnpm store and a path containing spaces, completed frozen-lockfile installs of 394 packages. Node 24.18.0 and Node 22.19.0 each loaded `better-sqlite3` 12.11.1 and passed one uninterrupted final `pnpm run verify:release`: formatting, types, 39 Vitest tests, 16 Chromium E2E tests, three zero-violation axe suites, build, seven fresh migrations, 32-create/32-unchanged seed proof, native query, and plan validation.
+- T-007C: installed Edge 150.0.4078.83 and Chrome 150.0.7871.182 passed representative import/export and shortcut workflows; production health returned HTTP 200 with database status and a correlation ID, Ctrl+C closed ports 4173/4174, and restart returned health 200 again. A first request against an intentionally unmigrated default database produced the expected Prisma P2021 and passed after following the documented migration prerequisite.
+- T-007C: the browser Data workflow proved timestamped download, non-mutating preview, review authorization, explicit keyboard commit, affected-record links, and re-export. A public-API continuity test used two separately migrated fresh databases and proved timestamped export, preview/selections/commit, full collection inventory, and canonical semantic re-export equality.
+- T-007C: the dual-runtime result established and enforced Node `>=22.19.0 <25`, pnpm `11.9.0`, with Node 24.18.0 as the intended release runtime. The shared-store native ABI hazard found during the initial Node 24 attempt is documented with an isolated-store remediation.
+- T-007D: finalized README, Windows setup/troubleshooting, backup/restore, runtime/browser support, accessibility audit, and release-verification artifacts; the report records exact versions, clean paths/commands/results, defects, honest accessibility limits, state evidence, recovery equivalence, completion definition, and the explicit no-tag/no-release boundary.
+- T-007D: repository/UI/manifest/dependency review found no authentication/accounts, collaboration/assignment, notifications, cloud sync, hosted deployment, live Codex integration, Git mutation, AI-generated priority/dependencies, generic project-management expansion, installer, updater, or distribution artifact. Repository/worktree and Codex fields remain inert local evidence metadata.
+- T-007D: after all code, test, documentation, support-policy, and engine changes, isolated Node 24.18.0 and Node 22.19.0 checkouts each passed the complete ordered gate with 39 Vitest tests, 16 Chromium E2E tests, three axe suites, build, migration/seed/native-load proof, and plan validation. `git diff --check` passed; the focused staged-diff, commit, and clean-worktree checks are the final handoff operations.
 
 ## Final reconciliation
 
 - Product direction: **Actionables** as the dense primary interface, with a local dependency view from Workbench and per-actionable activity/source history from Signal.
 - Technology stack: **Node.js 24 LTS, TypeScript, pnpm, React + Vite, React Router Declarative mode, TanStack Query, Fastify, Zod, Prisma + SQLite + `better-sqlite3`, React Hook Form, safe GFM Markdown, Tailwind CSS, Vitest/Testing Library, and Playwright**.
 - Exact MVP: the features listed in “MVP boundaries”; all listed non-goals remain excluded.
-- Current milestone: T-006 is complete as the final functional MVP slice; versioned portable import/export, seed reconciliation, conflict safety, atomic commit, and full-state restoration are implemented and verified.
-- Stop boundary: T-007 remains Pending and has not been activated or implemented.
+- Current milestone: T-007 and every child are complete; the MVP release-verification decision is pass within the documented support boundary.
+- Stop boundary: complete T-007 through one focused release-hardening commit, confirm a clean worktree, and stop without creating a tag or release.

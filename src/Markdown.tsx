@@ -31,7 +31,11 @@ export function Markdown({
   if (!children.trim()) return null;
   return (
     <div className={`markdown ${inline ? "markdown-inline" : ""}`}>
-      <Suspense fallback={<span className="markdown-loading">Loading formatted text…</span>}>
+      <Suspense
+        fallback={
+          <span className="markdown-loading">Loading formatted text…</span>
+        }
+      >
         <MarkdownRenderer value={children} transformUrl={safeMarkdownUrl} />
       </Suspense>
     </div>

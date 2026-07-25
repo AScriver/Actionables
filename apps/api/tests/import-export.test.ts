@@ -5,14 +5,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import {
-  DataImportService,
-  PortableImportError,
-} from "../src/data-import.js";
-import {
-  createPrismaClient,
-  type AppPrismaClient,
-} from "../src/database.js";
+import { DataImportService, PortableImportError } from "../src/data-import.js";
+import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { readReviewedSeed } from "../src/import-seed.js";
 import {
   exportPortableDocument,
@@ -45,14 +39,16 @@ async function freshDatabase() {
 }
 
 afterEach(async () => {
-  await Promise.all(databases.splice(0).map(async ({ path, prisma }) => {
-    await prisma.$disconnect();
-    await Promise.all(
-      ["", "-journal", "-shm", "-wal"].map((suffix) =>
-        rm(`${path}${suffix}`, { force: true }),
-      ),
-    );
-  }));
+  await Promise.all(
+    databases.splice(0).map(async ({ path, prisma }) => {
+      await prisma.$disconnect();
+      await Promise.all(
+        ["", "-journal", "-shm", "-wal"].map((suffix) =>
+          rm(`${path}${suffix}`, { force: true }),
+        ),
+      );
+    }),
+  );
 });
 
 function conflictSelections(preview: ImportPreviewResponse) {
@@ -94,6 +90,22 @@ function actionableClassification(
   );
 }
 
+function portableInventory(document: PortableDocument) {
+  return {
+    projects: document.projects.length,
+    repositories: document.repositories.length,
+    worktrees: document.worktrees.length,
+    actionables: document.actionables.length,
+    statusHistory: document.statusHistory.length,
+    validationRecords: document.validationRecords.length,
+    userSources: document.userSources.length,
+    activities: document.activities.length,
+    hierarchy: document.hierarchy.length,
+    dependencies: document.dependencies.length,
+    relationshipSuggestions: document.relationshipSuggestions.length,
+  };
+}
+
 describe("portable import and export", () => {
   it("routes the reviewed 32-item seed through one idempotent order-independent preview and commit pipeline", async () => {
     const prisma = await freshDatabase();
@@ -112,13 +124,17 @@ describe("portable import and export", () => {
     await commitPreview(service, first);
 
     expect(await prisma.actionable.count()).toBe(32);
-    expect(await prisma.hierarchyRelationship.count({
-      where: { detachedAt: null },
-    })).toBe(4);
+    expect(
+      await prisma.hierarchyRelationship.count({
+        where: { detachedAt: null },
+      }),
+    ).toBe(4);
     expect(await prisma.dependencyRelationship.count()).toBe(0);
-    expect(await prisma.actionable.count({
-      where: { hierarchyAsChild: { none: { detachedAt: null } } },
-    })).toBe(28);
+    expect(
+      await prisma.actionable.count({
+        where: { hierarchyAsChild: { none: { detachedAt: null } } },
+      }),
+    ).toBe(28);
 
     const second = await service.preview(document);
     expect(second.totalsByRecordType.actionable).toMatchObject({
@@ -156,15 +172,19 @@ describe("portable import and export", () => {
       (item) => item.classification === "suggestion",
     )!;
     await commitPreview(service, confirmable, [suggestion.portableId]);
-    expect(await prisma.dependencyRelationship.findUniqueOrThrow({
-      where: { id: suggestion.portableId },
-    })).toMatchObject({
+    expect(
+      await prisma.dependencyRelationship.findUniqueOrThrow({
+        where: { id: suggestion.portableId },
+      }),
+    ).toMatchObject({
       provenance: expect.stringContaining("confirmed suggestion"),
     });
     const afterConfirmation = await service.preview(document);
-    expect(afterConfirmation.items.find(
-      (item) => item.portableId === suggestion.portableId,
-    )).toMatchObject({ classification: "no-op" });
+    expect(
+      afterConfirmation.items.find(
+        (item) => item.portableId === suggestion.portableId,
+      ),
+    ).toMatchObject({ classification: "no-op" });
   }, 30_000);
 
   it("applies safe source changes but preserves local edits with field-level conflicts", async () => {
@@ -182,9 +202,13 @@ describe("portable import and export", () => {
       changes: [expect.objectContaining({ field: "title" })],
     });
     await commitPreview(service, safe);
-    expect((await prisma.actionable.findUniqueOrThrow({
-      where: { externalKey: portableId },
-    })).title).toBe("Source revision one");
+    expect(
+      (
+        await prisma.actionable.findUniqueOrThrow({
+          where: { externalKey: portableId },
+        })
+      ).title,
+    ).toBe("Source revision one");
 
     await prisma.actionable.update({
       where: { externalKey: portableId },
@@ -195,31 +219,45 @@ describe("portable import and export", () => {
     const conflict = await service.preview(divergedSource);
     expect(actionableClassification(conflict, portableId)).toMatchObject({
       classification: "conflict",
-      changes: [expect.objectContaining({
-        field: "title",
-        reason: expect.stringContaining("both the source and local"),
-      })],
+      changes: [
+        expect.objectContaining({
+          field: "title",
+          reason: expect.stringContaining("both the source and local"),
+        }),
+      ],
     });
-    expect(() => service.prepare(conflict.previewToken, {
-      contentDigest: conflict.contentDigest,
-      conflictResolutions: {},
-      acceptedSuggestionIds: [],
-    })).toThrowError(expect.objectContaining({
-      code: "CONFLICT_SELECTION_MISMATCH",
-    }));
+    expect(() =>
+      service.prepare(conflict.previewToken, {
+        contentDigest: conflict.contentDigest,
+        conflictResolutions: {},
+        acceptedSuggestionIds: [],
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "CONFLICT_SELECTION_MISMATCH",
+      }),
+    );
     await commitPreview(service, conflict);
-    expect((await prisma.actionable.findUniqueOrThrow({
-      where: { externalKey: portableId },
-    })).title).toBe("Local user wording");
+    expect(
+      (
+        await prisma.actionable.findUniqueOrThrow({
+          where: { externalKey: portableId },
+        })
+      ).title,
+    ).toBe("Local user wording");
 
     const sourceUnchanged = await service.preview(changedSource);
-    expect(actionableClassification(sourceUnchanged, portableId)).toMatchObject({
-      classification: "no-op",
-      changes: [expect.objectContaining({
-        field: "title",
-        reason: expect.stringContaining("local user edit is preserved"),
-      })],
-    });
+    expect(actionableClassification(sourceUnchanged, portableId)).toMatchObject(
+      {
+        classification: "no-op",
+        changes: [
+          expect.objectContaining({
+            field: "title",
+            reason: expect.stringContaining("local user edit is preserved"),
+          }),
+        ],
+      },
+    );
   }, 30_000);
 
   it("binds content and selections, rejects stale state, expiry, and replay", async () => {
@@ -228,16 +266,22 @@ describe("portable import and export", () => {
     const document = await seedDocument();
     const preview = await service.preview(document);
 
-    expect(() => service.prepare(preview.previewToken, {
-      contentDigest: "0".repeat(64),
-      conflictResolutions: {},
-      acceptedSuggestionIds: [],
-    })).toThrowError(expect.objectContaining({ code: "DOCUMENT_CHANGED" }));
-    expect(() => service.prepare(preview.previewToken, {
-      contentDigest: preview.contentDigest,
-      conflictResolutions: {},
-      acceptedSuggestionIds: ["not-a-previewed-suggestion"],
-    })).toThrowError(expect.objectContaining({ code: "INVALID_SUGGESTION_SELECTION" }));
+    expect(() =>
+      service.prepare(preview.previewToken, {
+        contentDigest: "0".repeat(64),
+        conflictResolutions: {},
+        acceptedSuggestionIds: [],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "DOCUMENT_CHANGED" }));
+    expect(() =>
+      service.prepare(preview.previewToken, {
+        contentDigest: preview.contentDigest,
+        conflictResolutions: {},
+        acceptedSuggestionIds: ["not-a-previewed-suggestion"],
+      }),
+    ).toThrowError(
+      expect.objectContaining({ code: "INVALID_SUGGESTION_SELECTION" }),
+    );
 
     const prepared = service.prepare(preview.previewToken, {
       contentDigest: preview.contentDigest,
@@ -247,11 +291,13 @@ describe("portable import and export", () => {
     await prisma.project.create({
       data: { externalKey: "concurrent-project", name: "Concurrent edit" },
     });
-    await expect(service.commit(preview.previewToken, {
-      contentDigest: preview.contentDigest,
-      commitToken: prepared.commitToken,
-      selectionsDigest: prepared.selectionsDigest,
-    })).rejects.toMatchObject({ code: "STALE_PREVIEW" });
+    await expect(
+      service.commit(preview.previewToken, {
+        contentDigest: preview.contentDigest,
+        commitToken: prepared.commitToken,
+        selectionsDigest: prepared.selectionsDigest,
+      }),
+    ).rejects.toMatchObject({ code: "STALE_PREVIEW" });
     expect(await prisma.actionable.count()).toBe(0);
 
     const current = await service.preview(document);
@@ -259,28 +305,35 @@ describe("portable import and export", () => {
     expect(committed.summary.creates).toBeGreaterThan(0);
 
     const successfulPreview = await service.preview(document);
-    const successfulAuthorization = service.prepare(successfulPreview.previewToken, {
-      contentDigest: successfulPreview.contentDigest,
-      conflictResolutions: {},
-      acceptedSuggestionIds: [],
-    });
+    const successfulAuthorization = service.prepare(
+      successfulPreview.previewToken,
+      {
+        contentDigest: successfulPreview.contentDigest,
+        conflictResolutions: {},
+        acceptedSuggestionIds: [],
+      },
+    );
     const request = {
       contentDigest: successfulPreview.contentDigest,
       commitToken: successfulAuthorization.commitToken,
       selectionsDigest: successfulAuthorization.selectionsDigest,
     };
     await service.commit(successfulPreview.previewToken, request);
-    await expect(service.commit(successfulPreview.previewToken, request)).rejects.toMatchObject({
+    await expect(
+      service.commit(successfulPreview.previewToken, request),
+    ).rejects.toMatchObject({
       code: "COMMIT_REPLAYED",
     });
 
     const expiring = new DataImportService(prisma, 0);
     const expired = await expiring.preview(document);
-    expect(() => expiring.prepare(expired.previewToken, {
-      contentDigest: expired.contentDigest,
-      conflictResolutions: {},
-      acceptedSuggestionIds: [],
-    })).toThrowError(expect.objectContaining({ code: "PREVIEW_EXPIRED" }));
+    expect(() =>
+      expiring.prepare(expired.previewToken, {
+        contentDigest: expired.contentDigest,
+        conflictResolutions: {},
+        acceptedSuggestionIds: [],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "PREVIEW_EXPIRED" }));
   }, 30_000);
 
   it("reports unsupported, duplicate, missing, unsafe, nested, and graph-invalid input without mutation", async () => {
@@ -288,28 +341,40 @@ describe("portable import and export", () => {
     const service = new DataImportService(prisma);
     const document = await seedDocument();
 
-    await expect(service.preview({ ...document, schemaVersion: 2 })).rejects.toMatchObject({
+    await expect(
+      service.preview({ ...document, schemaVersion: 2 }),
+    ).rejects.toMatchObject({
       code: "UNSUPPORTED_SCHEMA_VERSION",
     });
-    await expect(service.preview({ ...document, format: "unknown" })).rejects.toMatchObject({
+    await expect(
+      service.preview({ ...document, format: "unknown" }),
+    ).rejects.toMatchObject({
       code: "UNSUPPORTED_FORMAT",
     });
 
     const duplicate = structuredClone(document);
     duplicate.actionables.push(structuredClone(duplicate.actionables[0]!));
-    expect((await service.preview(duplicate)).totals.invalid).toBeGreaterThan(0);
+    expect((await service.preview(duplicate)).totals.invalid).toBeGreaterThan(
+      0,
+    );
 
     const invalidEnum = structuredClone(document) as PortableDocument;
     (invalidEnum.actionables[0] as { status: string }).status = "Future";
-    expect((await service.preview(invalidEnum)).totals.invalid).toBeGreaterThan(0);
+    expect((await service.preview(invalidEnum)).totals.invalid).toBeGreaterThan(
+      0,
+    );
 
     const invalidTimestamp = structuredClone(document);
     invalidTimestamp.exportedAt = "not-a-timestamp";
-    expect((await service.preview(invalidTimestamp)).totals.invalid).toBeGreaterThan(0);
+    expect(
+      (await service.preview(invalidTimestamp)).totals.invalid,
+    ).toBeGreaterThan(0);
 
     const missing = structuredClone(document);
     missing.actionables[0]!.projectId = "missing-project";
-    expect((await service.preview(missing)).totals.missingReferences).toBeGreaterThan(0);
+    expect(
+      (await service.preview(missing)).totals.missingReferences,
+    ).toBeGreaterThan(0);
 
     const unsafe = structuredClone(document);
     unsafe.userSources.push({
@@ -362,7 +427,9 @@ describe("portable import and export", () => {
       removedAt: null,
       provenance: "test",
     });
-    expect((await service.preview(selfDependency)).totals.integrityFailures).toBeGreaterThan(0);
+    expect(
+      (await service.preview(selfDependency)).totals.integrityFailures,
+    ).toBeGreaterThan(0);
 
     const cycle = structuredClone(document);
     cycle.dependencies.push(
@@ -387,7 +454,9 @@ describe("portable import and export", () => {
         provenance: "test",
       },
     );
-    expect((await service.preview(cycle)).totals.integrityFailures).toBeGreaterThan(0);
+    expect(
+      (await service.preview(cycle)).totals.integrityFailures,
+    ).toBeGreaterThan(0);
 
     const duplicateRelationship = structuredClone(document);
     duplicateRelationship.dependencies.push(
@@ -412,7 +481,9 @@ describe("portable import and export", () => {
         provenance: "test",
       },
     );
-    expect((await service.preview(duplicateRelationship)).totals.integrityFailures).toBeGreaterThan(0);
+    expect(
+      (await service.preview(duplicateRelationship)).totals.integrityFailures,
+    ).toBeGreaterThan(0);
 
     const excessiveDepth = structuredClone(document);
     excessiveDepth.hierarchy.push({
@@ -425,7 +496,9 @@ describe("portable import and export", () => {
       detachedAt: null,
       provenance: "test",
     });
-    expect((await service.preview(excessiveDepth)).totals.integrityFailures).toBeGreaterThan(0);
+    expect(
+      (await service.preview(excessiveDepth)).totals.integrityFailures,
+    ).toBeGreaterThan(0);
     expect(await prisma.project.count()).toBe(0);
     expect(await prisma.importRun.count()).toBe(0);
   }, 30_000);
@@ -451,13 +524,17 @@ describe("portable import and export", () => {
       commitToken: prepared.commitToken,
       selectionsDigest: prepared.selectionsDigest,
     };
-    await expect(service.commit(preview.previewToken, request)).rejects.toThrow();
+    await expect(
+      service.commit(preview.previewToken, request),
+    ).rejects.toThrow();
     expect(await prisma.project.count()).toBe(0);
     expect(await prisma.repository.count()).toBe(0);
     expect(await prisma.worktree.count()).toBe(0);
     expect(await prisma.actionable.count()).toBe(0);
     expect(await prisma.importRun.count()).toBe(0);
-    await expect(service.commit(preview.previewToken, request)).rejects.toMatchObject({
+    await expect(
+      service.commit(preview.previewToken, request),
+    ).rejects.toMatchObject({
       code: "COMMIT_REPLAYED",
     });
   }, 30_000);
@@ -465,7 +542,10 @@ describe("portable import and export", () => {
   it("restores a full representative database to a canonical semantic equivalent", async () => {
     const source = await freshDatabase();
     const seedService = new DataImportService(source);
-    await commitPreview(seedService, await seedService.preview(await seedDocument()));
+    await commitPreview(
+      seedService,
+      await seedService.preview(await seedDocument()),
+    );
     const seedAction = await source.actionable.findFirstOrThrow({
       orderBy: { sourceOrdinal: "asc" },
     });
@@ -637,12 +717,125 @@ describe("portable import and export", () => {
     expect(await restored.validationRecord.count()).toBe(
       exported.validationRecords.length,
     );
-    expect(await restored.dependencyRelationship.findUniqueOrThrow({
-      where: { id: "dependency-cross-scope" },
-    })).toMatchObject({
+    expect(
+      await restored.dependencyRelationship.findUniqueOrThrow({
+        where: { id: "dependency-cross-scope" },
+      }),
+    ).toMatchObject({
       waiverReason: "Reviewed and accepted.",
       provenance: "user",
     });
+  }, 30_000);
+
+  it("restores a timestamped public API backup into a fresh database with semantic continuity", async () => {
+    const source = await freshDatabase();
+    const sourceApp = buildApp({ prisma: source });
+    const target = await freshDatabase();
+    const targetApp = buildApp({ prisma: target });
+
+    try {
+      const seedPreviewResponse = await sourceApp.inject({
+        method: "POST",
+        url: "/api/data/import-previews",
+        payload: await seedDocument(),
+      });
+      expect(seedPreviewResponse.statusCode).toBe(200);
+      const seedPreview = seedPreviewResponse.json<ImportPreviewResponse>();
+      const seedAuthorizationResponse = await sourceApp.inject({
+        method: "POST",
+        url: `/api/data/import-previews/${seedPreview.previewToken}/selections`,
+        payload: {
+          contentDigest: seedPreview.contentDigest,
+          conflictResolutions: conflictSelections(seedPreview),
+          acceptedSuggestionIds: [],
+        },
+      });
+      expect(seedAuthorizationResponse.statusCode).toBe(200);
+      const seedAuthorization = seedAuthorizationResponse.json<{
+        commitToken: string;
+        selectionsDigest: string;
+      }>();
+      const seedCommitResponse = await sourceApp.inject({
+        method: "POST",
+        url: `/api/data/import-previews/${seedPreview.previewToken}/commit`,
+        payload: {
+          contentDigest: seedPreview.contentDigest,
+          commitToken: seedAuthorization.commitToken,
+          selectionsDigest: seedAuthorization.selectionsDigest,
+        },
+      });
+      expect(seedCommitResponse.statusCode).toBe(200);
+
+      const backupResponse = await sourceApp.inject({
+        method: "GET",
+        url: "/api/data/export",
+      });
+      expect(backupResponse.statusCode).toBe(200);
+      expect(backupResponse.headers["content-disposition"]).toMatch(
+        /^attachment; filename="actionables-backup-\d{8}-\d{6}Z\.json"$/,
+      );
+      const backup = backupResponse.json<PortableDocument>();
+      expect(Number.isNaN(Date.parse(backup.exportedAt))).toBe(false);
+      expect(portableInventory(backup).actionables).toBe(32);
+
+      const previewResponse = await targetApp.inject({
+        method: "POST",
+        url: "/api/data/import-previews",
+        payload: backup,
+      });
+      expect(previewResponse.statusCode).toBe(200);
+      const preview = previewResponse.json<ImportPreviewResponse>();
+      expect(preview.canCommit).toBe(true);
+      expect(preview.totalsByRecordType.actionable).toMatchObject({
+        creates: 32,
+        conflicts: 0,
+        invalid: 0,
+      });
+
+      const authorizationResponse = await targetApp.inject({
+        method: "POST",
+        url: `/api/data/import-previews/${preview.previewToken}/selections`,
+        payload: {
+          contentDigest: preview.contentDigest,
+          conflictResolutions: conflictSelections(preview),
+          acceptedSuggestionIds: [],
+        },
+      });
+      expect(authorizationResponse.statusCode).toBe(200);
+      const authorization = authorizationResponse.json<{
+        commitToken: string;
+        selectionsDigest: string;
+      }>();
+      expect(authorization.commitToken).toBeTruthy();
+      expect(authorization.selectionsDigest).toHaveLength(64);
+
+      const commitResponse = await targetApp.inject({
+        method: "POST",
+        url: `/api/data/import-previews/${preview.previewToken}/commit`,
+        payload: {
+          contentDigest: preview.contentDigest,
+          commitToken: authorization.commitToken,
+          selectionsDigest: authorization.selectionsDigest,
+        },
+      });
+      expect(commitResponse.statusCode).toBe(200);
+      expect(commitResponse.json()).toMatchObject({
+        summary: { creates: expect.any(Number) },
+      });
+
+      const reexportResponse = await targetApp.inject({
+        method: "GET",
+        url: "/api/data/export",
+      });
+      expect(reexportResponse.statusCode).toBe(200);
+      const reexported = reexportResponse.json<PortableDocument>();
+      expect(portableInventory(reexported)).toEqual(portableInventory(backup));
+      expect(semanticPortableSnapshot(reexported)).toBe(
+        semanticPortableSnapshot(backup),
+      );
+    } finally {
+      await Promise.all([sourceApp.close(), targetApp.close()]);
+    }
   }, 30_000);
 
   it("returns structured API errors for malformed and oversized JSON and a timestamped export", async () => {
@@ -666,12 +859,17 @@ describe("portable import and export", () => {
     expect(oversized.statusCode).toBe(413);
     expect(oversized.json()).toMatchObject({ code: "IMPORT_TOO_LARGE" });
 
-    const exported = await app.inject({ method: "GET", url: "/api/data/export" });
+    const exported = await app.inject({
+      method: "GET",
+      url: "/api/data/export",
+    });
     expect(exported.statusCode).toBe(200);
     expect(exported.headers["content-disposition"]).toMatch(
       /^attachment; filename="actionables-backup-\d{8}-\d{6}Z\.json"$/,
     );
-    expect(exported.headers["x-actionables-sensitive-data"]).toContain("technical paths");
+    expect(exported.headers["x-actionables-sensitive-data"]).toContain(
+      "technical paths",
+    );
     await app.close();
   }, 30_000);
 });

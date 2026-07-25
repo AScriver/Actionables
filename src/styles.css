@@ -48,6 +48,28 @@
   box-sizing: border-box;
 }
 
+button {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 8px;
+  padding: 8px 12px;
+  transform: translateY(-150%);
+  border: 2px solid var(--accent-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-strong);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 html,
 body,
 #root {
@@ -413,6 +435,7 @@ button {
 
 .global-search .shortcut {
   margin-right: 7px;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -434,6 +457,41 @@ button {
 .topbar-actions {
   justify-content: flex-end;
   gap: 9px;
+}
+
+.shortcut-help-wrap {
+  position: relative;
+}
+
+.shortcut-help {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 7px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 7px 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: 0 8px 26px rgb(0 0 0 / 32%);
+  font-size: 11px;
+}
+
+.shortcut-help span {
+  white-space: nowrap;
+}
+
+.shortcut-help kbd,
+.global-search kbd {
+  font: inherit;
+}
+
+.shortcut-help kbd {
+  color: var(--text-strong);
+  font-weight: 700;
 }
 
 .primary-action,
@@ -462,15 +520,15 @@ button {
   gap: 7px;
   height: 34px;
   padding: 0 13px;
-  background: #087e9f;
-  border-color: #0b91b5;
+  background: #067593;
+  border-color: #0986a7;
   color: #f3fbfd;
   font-size: 12px;
   font-weight: 600;
 }
 
 .primary-action:hover {
-  background: #0991b5;
+  background: #077f9f;
   border-color: var(--accent-strong);
 }
 
@@ -670,11 +728,26 @@ button {
   white-space: nowrap;
 }
 
-.table-header > button {
+.table-header > div > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.table-header > button,
+.table-header > div > button {
   cursor: pointer;
 }
 
-.table-header > button:hover {
+.table-header > button:hover,
+.table-header > div > button:hover {
   color: var(--text-strong);
 }
 
@@ -3058,7 +3131,7 @@ button {
 .queue-empty {
   display: block;
   padding: 11px 10px;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 
 .dashboard-state {
@@ -3226,7 +3299,7 @@ button {
   box-shadow: 0 20px 70px rgba(0, 0, 0, .48);
 }
 
-.archive-dialog > header {
+.archive-dialog-header {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 10px;
@@ -3337,6 +3410,19 @@ button {
     width: 37px;
     padding: 0;
     font-size: 0;
+  }
+
+  .shortcut-help-button {
+    width: 37px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .shortcut-help {
+    position: fixed;
+    top: 52px;
+    right: 8px;
+    grid-template-columns: max-content;
   }
 
   .topbar-actions .filter-wrap .filter-count {

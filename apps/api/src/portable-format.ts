@@ -55,7 +55,9 @@ function byPortableId<T extends { portableId: string }>(left: T, right: T) {
   return left.portableId.localeCompare(right.portableId);
 }
 
-export function normalizePortableDocument(document: PortableDocument): PortableDocument {
+export function normalizePortableDocument(
+  document: PortableDocument,
+): PortableDocument {
   const normalized = {
     ...document,
     projects: [...document.projects].sort(byPortableId),
@@ -76,7 +78,9 @@ export function normalizePortableDocument(document: PortableDocument): PortableD
     activities: [...document.activities].sort(byPortableId),
     hierarchy: [...document.hierarchy].sort(byPortableId),
     dependencies: [...document.dependencies].sort(byPortableId),
-    relationshipSuggestions: [...document.relationshipSuggestions].sort(byPortableId),
+    relationshipSuggestions: [...document.relationshipSuggestions].sort(
+      byPortableId,
+    ),
   };
   return portableDocumentSchema.parse(normalized);
 }
@@ -108,11 +112,13 @@ function sourceFiles(value: Prisma.JsonValue) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const row = item as Record<string, unknown>;
     if (typeof row.path !== "string" || !row.path) return [];
-    return [{
-      path: row.path,
-      ...(typeof row.lines === "string" ? { lines: row.lines } : {}),
-      ...(typeof row.symbol === "string" ? { symbol: row.symbol } : {}),
-    }];
+    return [
+      {
+        path: row.path,
+        ...(typeof row.lines === "string" ? { lines: row.lines } : {}),
+        ...(typeof row.symbol === "string" ? { symbol: row.symbol } : {}),
+      },
+    ];
   });
 }
 
@@ -134,7 +140,8 @@ function statusProvenance(row: {
     : undefined;
   return {
     kind: "neutral-import" as const,
-    note: row.statusProvenance || "Imported without changing workflow ownership.",
+    note:
+      row.statusProvenance || "Imported without changing workflow ownership.",
     ...(suggested ? { suggestedStatus: suggested } : {}),
   };
 }
@@ -147,27 +154,39 @@ export async function exportPortableDocument(
   prisma: AppPrismaClient,
   options: { exportedAt?: Date; sourceName?: string | null } = {},
 ): Promise<PortableDocument> {
-  const [projects, repositories, worktrees, actionables, statusHistory, validations, sources, activities, hierarchy, dependencies] =
-    await Promise.all([
-      prisma.project.findMany(),
-      prisma.repository.findMany({ include: { project: true } }),
-      prisma.worktree.findMany({ include: { project: true, repository: true } }),
-      prisma.actionable.findMany({
-        include: { project: true, repository: true, worktree: true },
-      }),
-      prisma.actionableStatusHistory.findMany({ include: { actionable: true } }),
-      prisma.validationRecord.findMany({ include: { actionable: true } }),
-      prisma.userSourceReference.findMany({ include: { actionable: true } }),
-      prisma.activityEvent.findMany({ include: { actionable: true } }),
-      prisma.hierarchyRelationship.findMany({
-        include: { parent: true, child: true },
-      }),
-      prisma.dependencyRelationship.findMany({
-        include: { dependent: true, prerequisite: true },
-      }),
-    ]);
+  const [
+    projects,
+    repositories,
+    worktrees,
+    actionables,
+    statusHistory,
+    validations,
+    sources,
+    activities,
+    hierarchy,
+    dependencies,
+  ] = await Promise.all([
+    prisma.project.findMany(),
+    prisma.repository.findMany({ include: { project: true } }),
+    prisma.worktree.findMany({ include: { project: true, repository: true } }),
+    prisma.actionable.findMany({
+      include: { project: true, repository: true, worktree: true },
+    }),
+    prisma.actionableStatusHistory.findMany({ include: { actionable: true } }),
+    prisma.validationRecord.findMany({ include: { actionable: true } }),
+    prisma.userSourceReference.findMany({ include: { actionable: true } }),
+    prisma.activityEvent.findMany({ include: { actionable: true } }),
+    prisma.hierarchyRelationship.findMany({
+      include: { parent: true, child: true },
+    }),
+    prisma.dependencyRelationship.findMany({
+      include: { dependent: true, prerequisite: true },
+    }),
+  ]);
 
-  const actionableId = new Map(actionables.map((item) => [item.id, item.externalKey]));
+  const actionableId = new Map(
+    actionables.map((item) => [item.id, item.externalKey]),
+  );
   const relationshipId = new Map([
     ...hierarchy.map((item) => [item.id, item.id] as const),
     ...dependencies.map((item) => [item.id, item.id] as const),
@@ -235,7 +254,8 @@ export async function exportPortableDocument(
       updatedAt: worktree.updatedAt.toISOString(),
     })),
     actionables: actionables.map((item) => {
-      const origin = item.importProvider === "MANUAL" ? "user-authored" : "imported";
+      const origin =
+        item.importProvider === "MANUAL" ? "user-authored" : "imported";
       const ownership = jsonObject(item.fieldOwnershipJson);
       return {
         portableId: item.externalKey,
@@ -247,7 +267,8 @@ export async function exportPortableDocument(
         status: item.status as PortableActionable["status"],
         statusProvenance: statusProvenance(item),
         effort: item.effort as PortableActionable["effort"],
-        evidenceState: item.evidenceState as PortableActionable["evidenceState"],
+        evidenceState:
+          item.evidenceState as PortableActionable["evidenceState"],
         finding: item.finding,
         description: item.description,
         research: stringArray(item.researchJson),
@@ -270,7 +291,9 @@ export async function exportPortableDocument(
           containerId: item.sourceContainerId,
           threadUrl: item.sourceThread,
           contentHash: item.contentHash,
-          rawFragment: JSON.parse(JSON.stringify(item.rawFragmentJson)) as PortableActionable["importedEvidence"]["rawFragment"],
+          rawFragment: JSON.parse(
+            JSON.stringify(item.rawFragmentJson),
+          ) as PortableActionable["importedEvidence"]["rawFragment"],
         },
         provenance: {
           origin,
@@ -285,8 +308,10 @@ export async function exportPortableDocument(
     statusHistory: statusHistory.map((entry) => ({
       portableId: entry.id,
       actionableId: entry.actionable.externalKey,
-      previousStatus: entry.previousStatus as PortableDocument["statusHistory"][number]["previousStatus"],
-      newStatus: entry.newStatus as PortableDocument["statusHistory"][number]["newStatus"],
+      previousStatus:
+        entry.previousStatus as PortableDocument["statusHistory"][number]["previousStatus"],
+      newStatus:
+        entry.newStatus as PortableDocument["statusHistory"][number]["newStatus"],
       origin: entry.origin,
       occurredAt: entry.occurredAt.toISOString(),
     })),
@@ -294,7 +319,8 @@ export async function exportPortableDocument(
       portableId: record.id,
       actionableId: record.actionable.externalKey,
       type: record.type as PortableDocument["validationRecords"][number]["type"],
-      outcome: record.outcome as PortableDocument["validationRecords"][number]["outcome"],
+      outcome:
+        record.outcome as PortableDocument["validationRecords"][number]["outcome"],
       notes: record.notesMd,
       evidence: record.evidenceMd,
       origin: record.origin,
@@ -341,10 +367,17 @@ export async function exportPortableDocument(
   });
 }
 
-export function reviewedSeedToPortable(document: SeedDocument): PortableDocument {
+export function reviewedSeedToPortable(
+  document: SeedDocument,
+): PortableDocument {
   const exportedAt = "2026-07-24T00:00:00.000Z";
-  const byOrdinal = new Map(document.items.map((item) => [item.ordinal, item.externalKey]));
-  const suggestions = new Map<string, PortableDocument["relationshipSuggestions"][number]>();
+  const byOrdinal = new Map(
+    document.items.map((item) => [item.ordinal, item.externalKey]),
+  );
+  const suggestions = new Map<
+    string,
+    PortableDocument["relationshipSuggestions"][number]
+  >();
   for (const item of document.items) {
     for (const prerequisite of item.blockedBy ?? []) {
       const prerequisiteId = byOrdinal.get(prerequisite);
@@ -355,7 +388,8 @@ export function reviewedSeedToPortable(document: SeedDocument): PortableDocument
         kind: "dependency",
         fromId: item.externalKey,
         toId: prerequisiteId,
-        reason: "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
+        reason:
+          "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
         provenance: document.source.threadUrl,
       });
     }
@@ -368,7 +402,8 @@ export function reviewedSeedToPortable(document: SeedDocument): PortableDocument
         kind: "dependency",
         fromId: dependentId,
         toId: item.externalKey,
-        reason: "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
+        reason:
+          "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
         provenance: document.source.threadUrl,
       });
     }
@@ -386,26 +421,32 @@ export function reviewedSeedToPortable(document: SeedDocument): PortableDocument
       sourceName: "Reviewed WWW architecture findings (32 items)",
       sourceKind: "reviewed-seed",
     },
-    projects: [{
-      portableId: document.project.externalKey,
-      name: document.project.name,
-      archive: { directArchivedAt: null, inheritedFrom: [] },
-    }],
-    repositories: [{
-      portableId: document.repository.externalKey,
-      projectId: document.project.externalKey,
-      name: document.repository.name,
-      localPath: document.repository.localPath ?? null,
-      archive: { directArchivedAt: null, inheritedFrom: [] },
-    }],
-    worktrees: [{
-      portableId: document.worktree.externalKey,
-      projectId: document.project.externalKey,
-      repositoryId: document.repository.externalKey,
-      name: document.worktree.name,
-      localPath: document.worktree.localPath ?? null,
-      archive: { directArchivedAt: null, inheritedFrom: [] },
-    }],
+    projects: [
+      {
+        portableId: document.project.externalKey,
+        name: document.project.name,
+        archive: { directArchivedAt: null, inheritedFrom: [] },
+      },
+    ],
+    repositories: [
+      {
+        portableId: document.repository.externalKey,
+        projectId: document.project.externalKey,
+        name: document.repository.name,
+        localPath: document.repository.localPath ?? null,
+        archive: { directArchivedAt: null, inheritedFrom: [] },
+      },
+    ],
+    worktrees: [
+      {
+        portableId: document.worktree.externalKey,
+        projectId: document.project.externalKey,
+        repositoryId: document.repository.externalKey,
+        name: document.worktree.name,
+        localPath: document.worktree.localPath ?? null,
+        archive: { directArchivedAt: null, inheritedFrom: [] },
+      },
+    ],
     actionables: document.items.map((item) => ({
       portableId: item.externalKey,
       projectId: document.project.externalKey,
@@ -446,14 +487,16 @@ export function reviewedSeedToPortable(document: SeedDocument): PortableDocument
     hierarchy: document.items.flatMap((item) => {
       const parentId = item.parentId ? byOrdinal.get(item.parentId) : undefined;
       return parentId
-        ? [{
-            portableId: `seed-hierarchy-${item.parentId}-${item.ordinal}`,
-            parentId,
-            childId: item.externalKey,
-            createdAt: exportedAt,
-            detachedAt: null,
-            provenance: "reviewed-seed",
-          }]
+        ? [
+            {
+              portableId: `seed-hierarchy-${item.parentId}-${item.ordinal}`,
+              parentId,
+              childId: item.externalKey,
+              createdAt: exportedAt,
+              detachedAt: null,
+              provenance: "reviewed-seed",
+            },
+          ]
         : [];
     }),
     dependencies: [],

@@ -25,7 +25,11 @@ class StaleRelationshipError extends Error {
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
-async function requireActionable(tx: Transaction, ordinal: number, field: string) {
+async function requireActionable(
+  tx: Transaction,
+  ordinal: number,
+  field: string,
+) {
   const actionable = await tx.actionable.findUnique({
     where: { sourceOrdinal: ordinal },
     include: {
@@ -52,7 +56,12 @@ function requireVersion(
   }
 }
 
-async function bump(tx: Transaction, id: string, ordinal: number, version: number) {
+async function bump(
+  tx: Transaction,
+  id: string,
+  ordinal: number,
+  version: number,
+) {
   const updated = await tx.actionable.updateMany({
     where: { id, version },
     data: { version: { increment: 1 }, updatedLabel: "just now" },
@@ -93,7 +102,9 @@ async function runMutation(
     await prisma.$transaction(operation);
   } catch (error) {
     if (error instanceof StaleRelationshipError) {
-      throw new VersionConflictError(await currentDetail(prisma, error.ordinal));
+      throw new VersionConflictError(
+        await currentDetail(prisma, error.ordinal),
+      );
     }
     const message = error instanceof Error ? error.message : "";
     if (message.includes("DEPENDENCY_CYCLE")) {
@@ -142,7 +153,11 @@ async function assertNoDependencyCycle(
   if (edges.length > 10_000) {
     throw new DomainValidationError(
       "DEPENDENCY_GRAPH_LIMIT",
-      { prerequisiteId: ["The dependency graph is too large to validate safely."] },
+      {
+        prerequisiteId: [
+          "The dependency graph is too large to validate safely.",
+        ],
+      },
       "The dependency graph validation limit was reached.",
     );
   }
@@ -159,7 +174,11 @@ async function assertNoDependencyCycle(
     if (current === prerequisiteId) {
       throw new DomainValidationError(
         "DEPENDENCY_CYCLE",
-        { prerequisiteId: ["This edge would create a direct or transitive cycle."] },
+        {
+          prerequisiteId: [
+            "This edge would create a direct or transitive cycle.",
+          ],
+        },
         "A dependency cycle is not allowed.",
       );
     }
@@ -184,7 +203,9 @@ export async function createSubtask(
         "Only one hierarchy level is supported.",
       );
     }
-    const highest = await tx.actionable.aggregate({ _max: { sourceOrdinal: true } });
+    const highest = await tx.actionable.aggregate({
+      _max: { sourceOrdinal: true },
+    });
     const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
     const child = await tx.actionable.create({
       data: {
@@ -193,7 +214,8 @@ export async function createSubtask(
         title: input.title,
         priority: "Unset",
         status: "Inbox",
-        statusProvenance: "Created manually as a subtask with neutral Inbox status.",
+        statusProvenance:
+          "Created manually as a subtask with neutral Inbox status.",
         effort: "Unknown",
         evidenceState: "Unclassified",
         updatedLabel: "just now",
@@ -216,13 +238,21 @@ export async function createSubtask(
         repositoryId: parent.repositoryId,
         worktreeId: parent.worktreeId,
         statusHistory: {
-          create: { previousStatus: null, newStatus: "Inbox", origin: "subtask-create" },
+          create: {
+            previousStatus: null,
+            newStatus: "Inbox",
+            origin: "subtask-create",
+          },
         },
         activityEvents: {
           create: {
             type: "status-transition",
             summary: "Created as Inbox subtask",
-            metadataJson: json({ previousStatus: "", newStatus: "Inbox", origin: "subtask-create" }),
+            metadataJson: json({
+              previousStatus: "",
+              newStatus: "Inbox",
+              origin: "subtask-create",
+            }),
           },
         },
       },
@@ -236,8 +266,20 @@ export async function createSubtask(
       parentOrdinal: String(parent.sourceOrdinal),
       childOrdinal: String(child.sourceOrdinal),
     };
-    await activity(tx, parent.id, "hierarchy-attached", `Created subtask ${child.sourceOrdinal}`, context);
-    await activity(tx, child.id, "hierarchy-attached", `Attached to parent ${parent.sourceOrdinal}`, context);
+    await activity(
+      tx,
+      parent.id,
+      "hierarchy-attached",
+      `Created subtask ${child.sourceOrdinal}`,
+      context,
+    );
+    await activity(
+      tx,
+      child.id,
+      "hierarchy-attached",
+      `Attached to parent ${parent.sourceOrdinal}`,
+      context,
+    );
   });
 }
 
@@ -261,14 +303,20 @@ export async function setParent(
     if (!sameHierarchyScope(child, parent)) {
       throw new DomainValidationError(
         "HIERARCHY_SCOPE_MISMATCH",
-        { parentId: ["Parent and child must share project, repository, and worktree."] },
+        {
+          parentId: [
+            "Parent and child must share project, repository, and worktree.",
+          ],
+        },
         "Hierarchy cannot cross scopes.",
       );
     }
     if (child.hierarchyAsParent.length || parent.hierarchyAsChild.length) {
       throw new DomainValidationError(
         "HIERARCHY_DEPTH_EXCEEDED",
-        { parentId: ["This relationship would exceed the one-level hierarchy."] },
+        {
+          parentId: ["This relationship would exceed the one-level hierarchy."],
+        },
         "Only one hierarchy level is supported.",
       );
     }
@@ -287,7 +335,11 @@ export async function setParent(
       if (!input.currentParentVersion) {
         throw new DomainValidationError(
           "CURRENT_PARENT_VERSION_REQUIRED",
-          { currentParentVersion: ["Provide the current parent version to reassign this child."] },
+          {
+            currentParentVersion: [
+              "Provide the current parent version to reassign this child.",
+            ],
+          },
           "Reassignment requires all affected versions.",
         );
       }
@@ -296,12 +348,23 @@ export async function setParent(
         where: { id: existing.id },
         data: { detachedAt: new Date() },
       });
-      await bump(tx, existing.parent.id, existing.parent.sourceOrdinal, existing.parent.version);
-      await activity(tx, existing.parent.id, "hierarchy-detached", `Detached subtask ${child.sourceOrdinal}`, {
-        hierarchyRelationshipId: existing.id,
-        childOrdinal: String(child.sourceOrdinal),
-        reason: "reassigned",
-      });
+      await bump(
+        tx,
+        existing.parent.id,
+        existing.parent.sourceOrdinal,
+        existing.parent.version,
+      );
+      await activity(
+        tx,
+        existing.parent.id,
+        "hierarchy-detached",
+        `Detached subtask ${child.sourceOrdinal}`,
+        {
+          hierarchyRelationshipId: existing.id,
+          childOrdinal: String(child.sourceOrdinal),
+          reason: "reassigned",
+        },
+      );
     }
     const relationship = await tx.hierarchyRelationship.create({
       data: { parentId: parent.id, childId: child.id },
@@ -312,10 +375,26 @@ export async function setParent(
       hierarchyRelationshipId: relationship.id,
       parentOrdinal: String(parent.sourceOrdinal),
       childOrdinal: String(child.sourceOrdinal),
-      previousParentOrdinal: existing ? String(existing.parent.sourceOrdinal) : "",
+      previousParentOrdinal: existing
+        ? String(existing.parent.sourceOrdinal)
+        : "",
     };
-    await activity(tx, child.id, existing ? "hierarchy-reassigned" : "hierarchy-attached", existing ? `Reassigned to parent ${parent.sourceOrdinal}` : `Attached to parent ${parent.sourceOrdinal}`, context);
-    await activity(tx, parent.id, "hierarchy-attached", `Attached subtask ${child.sourceOrdinal}`, context);
+    await activity(
+      tx,
+      child.id,
+      existing ? "hierarchy-reassigned" : "hierarchy-attached",
+      existing
+        ? `Reassigned to parent ${parent.sourceOrdinal}`
+        : `Attached to parent ${parent.sourceOrdinal}`,
+      context,
+    );
+    await activity(
+      tx,
+      parent.id,
+      "hierarchy-attached",
+      `Attached subtask ${child.sourceOrdinal}`,
+      context,
+    );
   });
 }
 
@@ -344,14 +423,31 @@ export async function detachParent(
       data: { detachedAt: new Date() },
     });
     await bump(tx, child.id, child.sourceOrdinal, child.version);
-    await bump(tx, relationship.parent.id, relationship.parent.sourceOrdinal, relationship.parent.version);
+    await bump(
+      tx,
+      relationship.parent.id,
+      relationship.parent.sourceOrdinal,
+      relationship.parent.version,
+    );
     const context = {
       hierarchyRelationshipId: relationship.id,
       parentOrdinal: String(relationship.parent.sourceOrdinal),
       childOrdinal: String(child.sourceOrdinal),
     };
-    await activity(tx, child.id, "hierarchy-detached", `Detached from parent ${relationship.parent.sourceOrdinal}`, context);
-    await activity(tx, relationship.parent.id, "hierarchy-detached", `Detached subtask ${child.sourceOrdinal}`, context);
+    await activity(
+      tx,
+      child.id,
+      "hierarchy-detached",
+      `Detached from parent ${relationship.parent.sourceOrdinal}`,
+      context,
+    );
+    await activity(
+      tx,
+      relationship.parent.id,
+      "hierarchy-detached",
+      `Detached subtask ${child.sourceOrdinal}`,
+      context,
+    );
   });
 }
 
@@ -368,12 +464,24 @@ export async function createDependency(
         "Self-dependencies are not allowed.",
       );
     }
-    const dependent = await requireActionable(tx, dependentOrdinal, "dependent");
-    const prerequisite = await requireActionable(tx, input.prerequisiteId, "prerequisiteId");
+    const dependent = await requireActionable(
+      tx,
+      dependentOrdinal,
+      "dependent",
+    );
+    const prerequisite = await requireActionable(
+      tx,
+      input.prerequisiteId,
+      "prerequisiteId",
+    );
     requireVersion(dependent, input.version);
     requireVersion(prerequisite, input.prerequisiteVersion);
     const duplicate = await tx.dependencyRelationship.findFirst({
-      where: { dependentId: dependent.id, prerequisiteId: prerequisite.id, removedAt: null },
+      where: {
+        dependentId: dependent.id,
+        prerequisiteId: prerequisite.id,
+        removedAt: null,
+      },
     });
     if (duplicate) {
       throw new DomainValidationError(
@@ -387,14 +495,31 @@ export async function createDependency(
       data: { dependentId: dependent.id, prerequisiteId: prerequisite.id },
     });
     await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
-    await bump(tx, prerequisite.id, prerequisite.sourceOrdinal, prerequisite.version);
+    await bump(
+      tx,
+      prerequisite.id,
+      prerequisite.sourceOrdinal,
+      prerequisite.version,
+    );
     const context = {
       dependencyRelationshipId: relationship.id,
       dependentOrdinal: String(dependent.sourceOrdinal),
       prerequisiteOrdinal: String(prerequisite.sourceOrdinal),
     };
-    await activity(tx, dependent.id, "dependency-added", `Blocked by ${prerequisite.sourceOrdinal}`, context);
-    await activity(tx, prerequisite.id, "dependency-added", `Now blocks ${dependent.sourceOrdinal}`, context);
+    await activity(
+      tx,
+      dependent.id,
+      "dependency-added",
+      `Blocked by ${prerequisite.sourceOrdinal}`,
+      context,
+    );
+    await activity(
+      tx,
+      prerequisite.id,
+      "dependency-added",
+      `Now blocks ${dependent.sourceOrdinal}`,
+      context,
+    );
   });
 }
 
@@ -406,7 +531,11 @@ async function mutateDependency(
   action: "remove" | "waive" | "restore",
 ) {
   return runMutation(prisma, dependentOrdinal, async (tx) => {
-    const dependent = await requireActionable(tx, dependentOrdinal, "dependent");
+    const dependent = await requireActionable(
+      tx,
+      dependentOrdinal,
+      "dependent",
+    );
     requireVersion(dependent, input.version);
     const relationship = await tx.dependencyRelationship.findUnique({
       where: { id: relationshipId },
@@ -429,13 +558,30 @@ async function mutateDependency(
       );
     }
     if (action === "remove" && relationship.removedAt) {
-      throw new DomainValidationError("DEPENDENCY_REMOVED", { relationship: ["This dependency is already removed."] }, "The dependency is already removed.");
+      throw new DomainValidationError(
+        "DEPENDENCY_REMOVED",
+        { relationship: ["This dependency is already removed."] },
+        "The dependency is already removed.",
+      );
     }
-    if (action === "waive" && (relationship.removedAt || relationship.waivedAt)) {
-      throw new DomainValidationError("DEPENDENCY_NOT_ACTIVE", { relationship: ["Only an unresolved active dependency can be waived."] }, "The dependency cannot be waived.");
+    if (
+      action === "waive" &&
+      (relationship.removedAt || relationship.waivedAt)
+    ) {
+      throw new DomainValidationError(
+        "DEPENDENCY_NOT_ACTIVE",
+        {
+          relationship: ["Only an unresolved active dependency can be waived."],
+        },
+        "The dependency cannot be waived.",
+      );
     }
     if (action === "restore") {
-      await assertNoDependencyCycle(tx, dependent.id, relationship.prerequisiteId);
+      await assertNoDependencyCycle(
+        tx,
+        dependent.id,
+        relationship.prerequisiteId,
+      );
     }
     await tx.dependencyRelationship.update({
       where: { id: relationship.id },
@@ -447,16 +593,38 @@ async function mutateDependency(
             : { removedAt: null, waivedAt: null, waiverReason: null },
     });
     await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
-    await bump(tx, relationship.prerequisite.id, relationship.prerequisite.sourceOrdinal, relationship.prerequisite.version);
+    await bump(
+      tx,
+      relationship.prerequisite.id,
+      relationship.prerequisite.sourceOrdinal,
+      relationship.prerequisite.version,
+    );
     const context = {
       dependencyRelationshipId: relationship.id,
       dependentOrdinal: String(dependent.sourceOrdinal),
       prerequisiteOrdinal: String(relationship.prerequisite.sourceOrdinal),
       reason,
     };
-    const type = action === "remove" ? "dependency-removed" : action === "waive" ? "dependency-waived" : "dependency-restored";
-    await activity(tx, dependent.id, type, `${action === "remove" ? "Removed" : action === "waive" ? "Waived" : "Restored"} dependency on ${relationship.prerequisite.sourceOrdinal}`, context);
-    await activity(tx, relationship.prerequisite.id, type, `Dependency from ${dependent.sourceOrdinal} was ${action === "restore" ? "restored" : `${action}d`}`, context);
+    const type =
+      action === "remove"
+        ? "dependency-removed"
+        : action === "waive"
+          ? "dependency-waived"
+          : "dependency-restored";
+    await activity(
+      tx,
+      dependent.id,
+      type,
+      `${action === "remove" ? "Removed" : action === "waive" ? "Waived" : "Restored"} dependency on ${relationship.prerequisite.sourceOrdinal}`,
+      context,
+    );
+    await activity(
+      tx,
+      relationship.prerequisite.id,
+      type,
+      `Dependency from ${dependent.sourceOrdinal} was ${action === "restore" ? "restored" : `${action}d`}`,
+      context,
+    );
   });
 }
 

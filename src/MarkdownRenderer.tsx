@@ -20,7 +20,9 @@ export default function MarkdownRenderer({
           return (
             <a
               href={href}
-              {...(external ? { target: "_blank", rel: "noreferrer noopener" } : {})}
+              {...(external
+                ? { target: "_blank", rel: "noreferrer noopener" }
+                : {})}
             >
               {children}
             </a>

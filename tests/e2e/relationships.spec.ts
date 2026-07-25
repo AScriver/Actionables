@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("relationships remain compact, navigable, responsive, and derived-blocking is explicit", async ({ page }, testInfo) => {
+test("relationships remain compact, navigable, responsive, and derived-blocking is explicit", async ({
+  page,
+}, testInfo) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -34,16 +36,32 @@ test("relationships remain compact, navigable, responsive, and derived-blocking 
   const prerequisite = await create("T-003 browser prerequisite");
 
   await page.goto(`/actionables/${dependent.id}`);
-  await page.getByLabel("Prerequisite actionable").selectOption(String(prerequisite.id));
-  await page.getByLabel("Prerequisite actionable").locator("..").getByRole("button", { name: "Add" }).click();
-  await expect(page.getByRole("heading", { name: /Blocked by 1/ })).toBeVisible();
+  await page
+    .getByLabel("Prerequisite actionable")
+    .selectOption(String(prerequisite.id));
+  await page
+    .getByLabel("Prerequisite actionable")
+    .locator("..")
+    .getByRole("button", { name: "Add" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: /Blocked by 1/ }),
+  ).toBeVisible();
   await expect(page.getByText("unresolved", { exact: true })).toBeVisible();
-  await expect(page.getByTitle("Derived block: 1 unresolved prerequisite").first()).toBeVisible();
+  await expect(
+    page.getByTitle("Derived block: 1 unresolved prerequisite").first(),
+  ).toBeVisible();
 
   await page.getByLabel("New subtask name").fill("T-003 browser subtask");
-  await page.getByLabel("New subtask name").locator("..").getByRole("button", { name: "Create" }).click();
+  await page
+    .getByLabel("New subtask name")
+    .locator("..")
+    .getByRole("button", { name: "Create" })
+    .click();
   await expect(page.getByRole("heading", { name: /Subtasks 1/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /T-003 browser subtask/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /T-003 browser subtask/ }),
+  ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("T003-relationships-desktop.png"),
     fullPage: true,
@@ -51,8 +69,12 @@ test("relationships remain compact, navigable, responsive, and derived-blocking 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await expect(page.getByRole("heading", { name: /Blocked by 1/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /T-003 browser prerequisite/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Blocked by 1/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /T-003 browser prerequisite/ }),
+  ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("T003-relationships-mobile.png"),
     fullPage: true,
