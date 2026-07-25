@@ -5,11 +5,16 @@ import {
   scopeOptionsResponseSchema,
   type ActionableDetail,
   type ActionablesListResponse,
+  type CreateDependencyRequest,
+  type CreateSubtaskRequest,
   type CreateValidationRecordRequest,
   type CreateActionableRequest,
   type ProblemDetails,
+  type DependencyActionRequest,
+  type DetachParentRequest,
   type ScopeOptionsResponse,
   type StatusTransitionRequest,
+  type SetParentRequest,
   type UpdateActionableRequest,
 } from "@actionables/contracts";
 
@@ -104,3 +109,40 @@ export async function recordValidation(
   );
   return response.item;
 }
+
+async function relationshipRequest(path: string, method: string, input: unknown) {
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(path, { method, body: JSON.stringify(input) }),
+  );
+  return response.item;
+}
+
+export const createSubtask = (id: number, input: CreateSubtaskRequest) =>
+  relationshipRequest(`/api/actionables/${id}/subtasks`, "POST", input);
+
+export const setParent = (id: number, input: SetParentRequest) =>
+  relationshipRequest(`/api/actionables/${id}/parent`, "PUT", input);
+
+export const detachParent = (id: number, input: DetachParentRequest) =>
+  relationshipRequest(`/api/actionables/${id}/parent`, "DELETE", input);
+
+export const createDependency = (id: number, input: CreateDependencyRequest) =>
+  relationshipRequest(`/api/actionables/${id}/dependencies`, "POST", input);
+
+export const removeDependency = (
+  id: number,
+  relationshipId: string,
+  input: DependencyActionRequest,
+) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}`, "DELETE", input);
+
+export const waiveDependency = (
+  id: number,
+  relationshipId: string,
+  input: DependencyActionRequest,
+) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}/waive`, "POST", input);
+
+export const restoreDependency = (
+  id: number,
+  relationshipId: string,
+  input: DependencyActionRequest,
+) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}/restore`, "POST", input);

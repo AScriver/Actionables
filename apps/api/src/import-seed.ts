@@ -151,6 +151,56 @@ export async function importReviewedSeed(
       }
     }
 
+    // New databases run migrations before seed rows exist, so establish the
+    // reviewed one-level hierarchy after import. Any prior relationship
+    // (including a detached one) is left alone so re-import never undoes a
+    // user detach or reassignment.
+    for (const item of document.items.filter((candidate) => candidate.parentId)) {
+      const [child, parent] = await Promise.all([
+        transaction.actionable.findUnique({
+          where: { externalKey: item.externalKey },
+          include: { hierarchyAsChild: { where: { detachedAt: null } } },
+        }),
+        transaction.actionable.findFirst({
+          where: {
+            sourceOrdinal: item.parentId!,
+            projectId: project.id,
+            worktreeId: worktree.id,
+          },
+        }),
+      ]);
+      if (!child || !parent || child.hierarchyAsChild.length > 0) continue;
+      const prior = await transaction.hierarchyRelationship.findFirst({
+        where: { parentId: parent.id, childId: child.id },
+      });
+      if (prior) continue;
+      const relationship = await transaction.hierarchyRelationship.create({
+        data: { parentId: parent.id, childId: child.id },
+      });
+      const context = asJson({
+        hierarchyRelationshipId: relationship.id,
+        parentActionableId: parent.id,
+        childActionableId: child.id,
+        origin: "reviewed-seed-import",
+      });
+      await transaction.activityEvent.createMany({
+        data: [
+          {
+            actionableId: child.id,
+            type: "hierarchy-attached",
+            summary: "Imported as a subtask",
+            metadataJson: context,
+          },
+          {
+            actionableId: parent.id,
+            type: "hierarchy-attached",
+            summary: "Imported subtask relationship",
+            metadataJson: context,
+          },
+        ],
+      });
+    }
+
     return { created, updated, unchanged, total: document.items.length };
   });
 }

@@ -2,10 +2,15 @@ import { randomUUID } from "node:crypto";
 import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  createDependencyRequestSchema,
+  createSubtaskRequestSchema,
   createValidationRecordRequestSchema,
   createActionableRequestSchema,
+  dependencyActionRequestSchema,
+  detachParentRequestSchema,
   healthResponseSchema,
   scopeOptionsResponseSchema,
+  setParentRequestSchema,
   statusTransitionRequestSchema,
   updateActionableRequestSchema,
 } from "@actionables/contracts";
@@ -26,6 +31,15 @@ import {
   updateActionable,
   VersionConflictError,
 } from "./repository.js";
+import {
+  createDependency,
+  createSubtask,
+  detachParent,
+  removeDependency,
+  restoreDependency,
+  setParent,
+  waiveDependency,
+} from "./relationships.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
@@ -223,6 +237,87 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
       }
       return actionableDetailResponseSchema.parse({ item });
     },
+  );
+
+  app.post<{ Params: { id: string } }>("/api/actionables/:id/subtasks", async (request, reply) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = createSubtaskRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the subtask fields.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    return actionableDetailResponseSchema.parse({ item: await createSubtask(prisma, id, parsed.data) });
+  });
+
+  app.put<{ Params: { id: string } }>("/api/actionables/:id/parent", async (request, reply) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = setParentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the hierarchy fields.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    return actionableDetailResponseSchema.parse({ item: await setParent(prisma, id, parsed.data) });
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/actionables/:id/parent", async (request, reply) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = detachParentRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the hierarchy fields.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    return actionableDetailResponseSchema.parse({ item: await detachParent(prisma, id, parsed.data) });
+  });
+
+  app.post<{ Params: { id: string } }>("/api/actionables/:id/dependencies", async (request, reply) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = createDependencyRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the dependency fields.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    return actionableDetailResponseSchema.parse({ item: await createDependency(prisma, id, parsed.data) });
+  });
+
+  const dependencyMutation = (
+    action: typeof removeDependency,
+    title: string,
+  ) => async (
+    request: FastifyRequest<{ Params: { id: string; relationshipId: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = dependencyActionRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", title, {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    return actionableDetailResponseSchema.parse({
+      item: await action(prisma, id, request.params.relationshipId, parsed.data),
+    });
+  };
+
+  app.delete<{ Params: { id: string; relationshipId: string } }>(
+    "/api/actionables/:id/dependencies/:relationshipId",
+    dependencyMutation(removeDependency, "Check the dependency removal."),
+  );
+  app.post<{ Params: { id: string; relationshipId: string } }>(
+    "/api/actionables/:id/dependencies/:relationshipId/waive",
+    dependencyMutation(waiveDependency, "Check the dependency waiver."),
+  );
+  app.post<{ Params: { id: string; relationshipId: string } }>(
+    "/api/actionables/:id/dependencies/:relationshipId/restore",
+    dependencyMutation(restoreDependency, "Check the dependency restoration."),
   );
 
   return app;

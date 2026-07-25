@@ -88,6 +88,14 @@ export const activityTypeSchema = z.enum([
   "reopened",
   "source-added",
   "source-removed",
+  "hierarchy-attached",
+  "hierarchy-detached",
+  "hierarchy-reassigned",
+  "dependency-added",
+  "dependency-removed",
+  "dependency-waived",
+  "dependency-restored",
+  "parent-auto-reopened",
 ]);
 
 export const activityEventSchema = z.object({
@@ -135,6 +143,39 @@ export const immutableSourceEvidenceSchema = z.object({
   note: z.string().min(1),
 });
 
+export const relatedActionableSchema = z.object({
+  id: z.number().int().positive(),
+  recordId: z.string().min(1),
+  title: z.string().min(1),
+  status: statusSchema,
+  version: z.number().int().positive(),
+  scope: scopeSchema,
+});
+
+export const hierarchyRelationshipSchema = z.object({
+  id: z.string().min(1),
+  parent: relatedActionableSchema,
+  child: relatedActionableSchema,
+  createdAt: z.string().datetime(),
+});
+
+export const dependencyStateSchema = z.enum([
+  "satisfied",
+  "unresolved",
+  "waived",
+  "dismissed-prerequisite",
+]);
+
+export const dependencyRelationshipSchema = z.object({
+  id: z.string().min(1),
+  dependent: relatedActionableSchema,
+  prerequisite: relatedActionableSchema,
+  state: dependencyStateSchema,
+  isSatisfied: z.boolean(),
+  waiverReason: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+
 export const actionableSummarySchema = z.object({
   id: z.number().int().positive(),
   recordId: z.string().min(1),
@@ -154,10 +195,19 @@ export const actionableSummarySchema = z.object({
   manualBlocker: z.string().nullable(),
   isDependencyBlocked: z.boolean(),
   isEffectivelyBlocked: z.boolean(),
+  unresolvedDependencyCount: z.number().int().nonnegative(),
+  dependencyCount: z.number().int().nonnegative(),
+  blocksCount: z.number().int().nonnegative(),
   blockedBy: z.array(z.number().int().positive()).optional(),
   blocks: z.array(z.number().int().positive()).optional(),
   parentId: z.number().int().positive().optional(),
   childIds: z.array(z.number().int().positive()).optional(),
+  childCompletion: z
+    .object({
+      terminal: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 export const actionableDetailSchema = actionableSummarySchema.extend({
@@ -175,6 +225,12 @@ export const actionableDetailSchema = actionableSummarySchema.extend({
   completionEligibility: z.object({
     qualifyingValidationRecordId: z.string().min(1).nullable(),
     policy: z.string().min(1),
+  }),
+  relationships: z.object({
+    parent: hierarchyRelationshipSchema.nullable(),
+    subtasks: z.array(hierarchyRelationshipSchema),
+    blockedBy: z.array(dependencyRelationshipSchema),
+    blocks: z.array(dependencyRelationshipSchema),
   }),
 });
 
@@ -272,6 +328,45 @@ export const createValidationRecordRequestSchema = z
   })
   .strict();
 
+export const createSubtaskRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    title: titleField,
+  })
+  .strict();
+
+export const setParentRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    parentId: z.number().int().positive(),
+    parentVersion: z.number().int().positive(),
+    currentParentVersion: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export const detachParentRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    parentVersion: z.number().int().positive(),
+  })
+  .strict();
+
+export const createDependencyRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    prerequisiteId: z.number().int().positive(),
+    prerequisiteVersion: z.number().int().positive(),
+  })
+  .strict();
+
+export const dependencyActionRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    prerequisiteVersion: z.number().int().positive(),
+    reason: z.string().trim().max(10_000).optional(),
+  })
+  .strict();
+
 export const fieldErrorsSchema = z.record(z.string(), z.array(z.string()));
 export const problemDetailsSchema = z.object({
   type: z.string().min(1),
@@ -352,6 +447,10 @@ export type ValidationType = z.infer<typeof validationTypeSchema>;
 export type ValidationOutcome = z.infer<typeof validationOutcomeSchema>;
 export type ValidationRecord = z.infer<typeof validationRecordSchema>;
 export type ActivityEvent = z.infer<typeof activityEventSchema>;
+export type RelatedActionable = z.infer<typeof relatedActionableSchema>;
+export type HierarchyRelationship = z.infer<typeof hierarchyRelationshipSchema>;
+export type DependencyState = z.infer<typeof dependencyStateSchema>;
+export type DependencyRelationship = z.infer<typeof dependencyRelationshipSchema>;
 export type StatusProvenance = z.infer<typeof statusProvenanceSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type ActionableSummary = z.infer<typeof actionableSummarySchema>;
@@ -364,6 +463,11 @@ export type StatusTransitionRequest = z.infer<typeof statusTransitionRequestSche
 export type CreateValidationRecordRequest = z.infer<
   typeof createValidationRecordRequestSchema
 >;
+export type CreateSubtaskRequest = z.infer<typeof createSubtaskRequestSchema>;
+export type SetParentRequest = z.infer<typeof setParentRequestSchema>;
+export type DetachParentRequest = z.infer<typeof detachParentRequestSchema>;
+export type CreateDependencyRequest = z.infer<typeof createDependencyRequestSchema>;
+export type DependencyActionRequest = z.infer<typeof dependencyActionRequestSchema>;
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>;
 export type ActionableDetailResponse = z.infer<typeof actionableDetailResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;

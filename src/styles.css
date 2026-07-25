@@ -1203,14 +1203,98 @@ button {
 
 .relationships {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
-.relationship-group p {
-  padding: 5px 0 5px 12px;
-  border-left: 1px solid #34414a;
-  color: #9fabb1;
+.relationship-group {
+  display: grid;
+  gap: 5px;
+}
+
+.relationship-group h3 {
+  display: flex;
+  justify-content: space-between;
+}
+
+.relationship-row,
+.relationship-parent,
+.relationship-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.relationship-row > button:first-child,
+.relationship-parent > button:first-of-type {
+  overflow: hidden;
+  color: #b8c3c9;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relationship-row button,
+.relationship-parent button,
+.relationship-add button {
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid #34414a;
+  border-radius: 3px;
+  color: #aebac0;
+  background: #182128;
+  font-size: 10px;
+}
+
+.relationship-add {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.relationship-add input,
+.relationship-add select {
+  min-width: 0;
+  height: 28px;
+  padding: 3px 6px;
+  border: 1px solid #34414a;
+  border-radius: 3px;
+  color: #c5cdd1;
+  background: #11181d;
   font-size: 11px;
+}
+
+.dependency-state {
+  color: #9fabb1;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.dependency-state.is-unresolved,
+.dependency-state.is-dismissed-prerequisite,
+.relationship-error {
+  color: #efa8a8;
+}
+
+.dependency-state.is-satisfied,
+.dependency-state.is-waived {
+  color: #91c8ad;
+}
+
+.relationship-error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.blocks-indicator {
+  color: #7f929d;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .relationship-row,
+  .relationship-parent {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 }
 
 .source-history {

@@ -42,13 +42,20 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiProblem,
+  createDependency,
   createActionable,
+  createSubtask,
+  detachParent,
   fetchActionable,
   fetchActionables,
   fetchScopeOptions,
   recordValidation,
+  removeDependency,
+  restoreDependency,
+  setParent,
   transitionActionable,
   updateActionable,
+  waiveDependency,
 } from "./api";
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
@@ -276,42 +283,274 @@ function SourceHistory({
 function RelationshipSection({
   selected,
   actionables,
+  onNavigate,
+  onMutated,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
+  onNavigate: (id: number) => void;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
 }) {
-  const blockedBy = (selected.blockedBy ?? [])
-    .map((id) => actionables.find((item) => item.id === id))
-    .filter(Boolean) as ActionableSummary[];
-  const blocks = (selected.blocks ?? [])
-    .map((id) => actionables.find((item) => item.id === id))
-    .filter(Boolean) as ActionableSummary[];
-
-  if (blockedBy.length === 0 && blocks.length === 0 && !selected.childIds?.length) return null;
+  const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [childId, setChildId] = useState("");
+  const [prerequisiteId, setPrerequisiteId] = useState("");
+  const [dependentId, setDependentId] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const hierarchyCandidates = actionables.filter(
+    (item) =>
+      item.id !== selected.id &&
+      item.scope.projectId === selected.scope.projectId &&
+      item.scope.repositoryId === selected.scope.repositoryId &&
+      item.scope.worktreeId === selected.scope.worktreeId,
+  );
+  const options = (items: ActionableSummary[]) =>
+    items.map((item) => (
+      <option key={item.id} value={item.id}>
+        {item.id} · {item.title} — {item.scope.projectName}/{item.scope.worktreeName}
+      </option>
+    ));
+  const run = async (work: () => Promise<ActionableDetail>, notice: string) => {
+    setSaving(true);
+    setError("");
+    try {
+      onMutated(await work(), notice);
+    } catch (caught) {
+      if (caught instanceof ApiProblem) {
+        setError(Object.values(caught.problem.errors ?? {}).flat().join(" ") || caught.problem.title);
+        if (caught.problem.current) onMutated(caught.problem.current, "The saved version changed; relationship action was not applied.");
+      } else setError("The relationship change could not be completed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const selectedParent = selected.relationships.parent?.parent;
 
   return (
-    <section className="inspector-section relationships">
-      {selected.childIds && (
-        <div className="relationship-group">
-          <h3>Subtasks <span>{selected.childIds.length}</span></h3>
-          {selected.childIds.map((id) => {
-            const child = actionables.find((item) => item.id === id);
-            return child ? <p key={id}>{child.title}</p> : null;
-          })}
+    <section className="inspector-section relationships" aria-label="Relationships">
+      {selectedParent && (
+        <div className="relationship-parent">
+          <span>Parent</span>
+          <button type="button" onClick={() => onNavigate(selectedParent.id)}>
+            {selectedParent.id} · {selectedParent.title}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void run(
+              () => detachParent(selected.id, {
+                version: selected.version,
+                parentVersion: selectedParent.version,
+              }),
+              "Subtask detached; the relationship remains in activity history.",
+            )}
+          >
+            Detach
+          </button>
         </div>
       )}
-      {blockedBy.length > 0 && (
-        <div className="relationship-group">
-          <h3>Blocked by <span>{blockedBy.length}</span></h3>
-          {blockedBy.map((item) => <p key={item.id}>{item.title}</p>)}
+      <div className="relationship-group">
+        <h3>Subtasks <span>{selected.relationships.subtasks.length}</span></h3>
+        {selected.relationships.subtasks.map((relationship) => (
+          <div className="relationship-row" key={relationship.id}>
+            <button type="button" onClick={() => onNavigate(relationship.child.id)}>
+              {relationship.child.id} · {relationship.child.title}
+            </button>
+            <span>{relationship.child.status}</span>
+          </div>
+        ))}
+        <form
+          className="relationship-add"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!subtaskTitle.trim()) return;
+            void run(
+              () => createSubtask(selected.id, { version: selected.version, title: subtaskTitle }),
+              "Subtask created and attached.",
+            ).then(() => setSubtaskTitle(""));
+          }}
+        >
+          <input value={subtaskTitle} onChange={(event) => setSubtaskTitle(event.target.value)} placeholder="New subtask name" aria-label="New subtask name" />
+          <button disabled={saving || !subtaskTitle.trim()} type="submit">Create</button>
+        </form>
+        {!selected.parentId && (
+          <div className="relationship-add">
+            <select value={childId} onChange={(event) => setChildId(event.target.value)} aria-label="Existing subtask">
+              <option value="">Link existing subtask…</option>
+              {options(hierarchyCandidates.filter((item) => !item.childIds?.length && item.id !== selected.id))}
+            </select>
+            <button
+              type="button"
+              disabled={saving || !childId}
+              onClick={() => {
+                const child = actionables.find((item) => item.id === Number(childId));
+                const oldParent = child?.parentId ? actionables.find((item) => item.id === child.parentId) : undefined;
+                if (!child) return;
+                void run(
+                  () => setParent(child.id, {
+                    version: child.version,
+                    parentId: selected.id,
+                    parentVersion: selected.version,
+                    currentParentVersion: oldParent?.version,
+                  }),
+                  oldParent ? "Subtask reassigned with both relationship changes recorded." : "Existing actionable attached as a subtask.",
+                ).then(() => setChildId(""));
+              }}
+            >
+              Link
+            </button>
+          </div>
+        )}
+        {selectedParent && (
+          <div className="relationship-add">
+            <select value={parentId} onChange={(event) => setParentId(event.target.value)} aria-label="Replacement parent">
+              <option value="">Change parent…</option>
+              {options(hierarchyCandidates.filter((item) => !item.parentId && !item.childIds?.length))}
+            </select>
+            <button
+              type="button"
+              disabled={saving || !parentId}
+              onClick={() => {
+                const parent = actionables.find((item) => item.id === Number(parentId));
+                if (!parent) return;
+                void run(
+                  () => setParent(selected.id, {
+                    version: selected.version,
+                    parentId: parent.id,
+                    parentVersion: parent.version,
+                    currentParentVersion: selectedParent.version,
+                  }),
+                  "Subtask reassigned and detach/attach history recorded.",
+                ).then(() => setParentId(""));
+              }}
+            >
+              Move
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="relationship-group">
+        <h3>Blocked by <span>{selected.relationships.blockedBy.length}</span></h3>
+        {selected.relationships.blockedBy.map((relationship) => (
+          <div className="relationship-row dependency-row" key={relationship.id}>
+            <button type="button" onClick={() => onNavigate(relationship.prerequisite.id)}>
+              {relationship.prerequisite.id} · {relationship.prerequisite.title}
+            </button>
+            <span className={`dependency-state is-${relationship.state}`}>{relationship.state}</span>
+            {relationship.state === "waived" ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void run(
+                  () => restoreDependency(selected.id, relationship.id, {
+                    version: selected.version,
+                    prerequisiteVersion: relationship.prerequisite.version,
+                  }),
+                  "Dependency restored; derived blocking recalculated.",
+                )}
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  const reason = window.prompt("Why is this dependency being waived?");
+                  if (reason?.trim()) void run(
+                    () => waiveDependency(selected.id, relationship.id, {
+                      version: selected.version,
+                      prerequisiteVersion: relationship.prerequisite.version,
+                      reason,
+                    }),
+                    "Dependency waived with its reason recorded.",
+                  );
+                }}
+              >
+                Waive
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                const reason = window.prompt("Why is this dependency being removed?");
+                if (reason?.trim()) void run(
+                  () => removeDependency(selected.id, relationship.id, {
+                    version: selected.version,
+                    prerequisiteVersion: relationship.prerequisite.version,
+                    reason,
+                  }),
+                  "Dependency removed; the relationship remains auditable.",
+                );
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        <div className="relationship-add">
+          <select value={prerequisiteId} onChange={(event) => setPrerequisiteId(event.target.value)} aria-label="Prerequisite actionable">
+            <option value="">Add prerequisite…</option>
+            {options(actionables.filter((item) => item.id !== selected.id))}
+          </select>
+          <button
+            type="button"
+            disabled={saving || !prerequisiteId}
+            onClick={() => {
+              const prerequisite = actionables.find((item) => item.id === Number(prerequisiteId));
+              if (!prerequisite) return;
+              void run(
+                () => createDependency(selected.id, {
+                  version: selected.version,
+                  prerequisiteId: prerequisite.id,
+                  prerequisiteVersion: prerequisite.version,
+                }),
+                "Dependency added; derived blocking recalculated.",
+              ).then(() => setPrerequisiteId(""));
+            }}
+          >
+            Add
+          </button>
         </div>
-      )}
-      {blocks.length > 0 && (
-        <div className="relationship-group">
-          <h3>Blocks <span>{blocks.length}</span></h3>
-          {blocks.map((item) => <p key={item.id}>{item.title}</p>)}
+      </div>
+      <div className="relationship-group">
+        <h3>Blocks <span>{selected.relationships.blocks.length}</span></h3>
+        {selected.relationships.blocks.map((relationship) => (
+          <div className="relationship-row" key={relationship.id}>
+            <button type="button" onClick={() => onNavigate(relationship.dependent.id)}>
+              {relationship.dependent.id} · {relationship.dependent.title}
+            </button>
+            <span className={`dependency-state is-${relationship.state}`}>{relationship.state}</span>
+          </div>
+        ))}
+        <div className="relationship-add">
+          <select value={dependentId} onChange={(event) => setDependentId(event.target.value)} aria-label="Dependent actionable">
+            <option value="">Link dependent…</option>
+            {options(actionables.filter((item) => item.id !== selected.id))}
+          </select>
+          <button
+            type="button"
+            disabled={saving || !dependentId}
+            onClick={() => {
+              const dependent = actionables.find((item) => item.id === Number(dependentId));
+              if (!dependent) return;
+              void run(
+                () => createDependency(dependent.id, {
+                  version: dependent.version,
+                  prerequisiteId: selected.id,
+                  prerequisiteVersion: selected.version,
+                }),
+                "Dependent linked; derived blocking recalculated.",
+              ).then(() => setDependentId(""));
+            }}
+          >
+            Link
+          </button>
         </div>
-      )}
+      </div>
+      {error && <p className="relationship-error" role="alert">{error}</p>}
     </section>
   );
 }
@@ -418,6 +657,13 @@ function LifecycleControls({
             {target === "Dismissed" && (
               <p>Dismissal means no longer intended; it is not completion.</p>
             )}
+            {target === "Ready" &&
+              (selected.status === "Done" || selected.status === "Dismissed") &&
+              selected.relationships.parent?.parent.status === "Done" && (
+                <p>
+                  Reopening this subtask will also reopen its Done parent to Ready in the same transaction.
+                </p>
+              )}
           </div>
           {needsReason && (
             <label>
@@ -676,6 +922,7 @@ function Inspector({
   toggleValidation,
   onEdit,
   onMutated,
+  onNavigate,
   onNotice,
 }: {
   selected: ActionableDetail;
@@ -687,6 +934,7 @@ function Inspector({
   toggleValidation: (key: string) => void;
   onEdit: () => void;
   onMutated: (saved: ActionableDetail, notice: string) => void;
+  onNavigate: (id: number) => void;
   onNotice: (notice: string) => void;
 }) {
   return (
@@ -791,7 +1039,7 @@ function Inspector({
                 })}
               </div> : <p>No validation plan yet.</p>}
             </section>
-            <RelationshipSection selected={selected} actionables={actionables} />
+            <RelationshipSection selected={selected} actionables={actionables} onNavigate={onNavigate} onMutated={onMutated} />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -805,7 +1053,7 @@ function Inspector({
                 {selected.research.map((note) => <Markdown key={note}>{note}</Markdown>)}
               </div>
             </section>
-            <RelationshipSection selected={selected} actionables={actionables} />
+            <RelationshipSection selected={selected} actionables={actionables} onNavigate={onNavigate} onMutated={onMutated} />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -1397,7 +1645,13 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorHidden, setInspectorHidden] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [expandedParents, setExpandedParents] = useState<Set<number>>(new Set());
+  const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
+    try {
+      return new Set<number>(JSON.parse(sessionStorage.getItem("expanded-actionable-parents") ?? "[]"));
+    } catch {
+      return new Set<number>();
+    }
+  });
   const [mobileDetailOpen, setMobileDetailOpen] = useState(
     () =>
       /^\/actionables\/\d+\/?$/.test(window.location.pathname) &&
@@ -1418,6 +1672,9 @@ export default function App() {
 
     return () => mobileViewport.removeEventListener("change", collapseSidebar);
   }, []);
+  useEffect(() => {
+    sessionStorage.setItem("expanded-actionable-parents", JSON.stringify([...expandedParents]));
+  }, [expandedParents]);
   useEffect(() => {
     const syncSelectionFromUrl = () => {
       const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);
@@ -1492,6 +1749,7 @@ export default function App() {
   const handleMutated = (saved: ActionableDetail, mutationNotice: string) => {
     queryClient.setQueryData(["actionable", saved.id], saved);
     void queryClient.invalidateQueries({ queryKey: ["actionables"] });
+    void queryClient.invalidateQueries({ queryKey: ["actionable"] });
     setNotice(mutationNotice);
   };
 
@@ -1680,7 +1938,7 @@ export default function App() {
               const selectedRow = item.id === selectedId;
               const isChild = Boolean(item.parentId);
               const expanded = expandedParents.has(item.id);
-              const dependencyCount = item.blockedBy?.length ?? 0;
+              const dependencyCount = item.unresolvedDependencyCount;
 
               return (
                 <div
@@ -1716,8 +1974,9 @@ export default function App() {
                     >
                       {item.title}
                     </span>
-                    {item.childIds && <span className="child-count">0/{item.childIds.length}</span>}
-                    {dependencyCount > 0 && <span className="blocked-indicator" title={`Blocked by ${dependencyCount} actionable${dependencyCount > 1 ? "s" : ""}`}>⊘ {dependencyCount}</span>}
+                    {item.childCompletion && <span className="child-count">{item.childCompletion.terminal}/{item.childCompletion.total}</span>}
+                    {dependencyCount > 0 && <span className="blocked-indicator" title={`Derived block: ${dependencyCount} unresolved prerequisite${dependencyCount > 1 ? "s" : ""}`}>Blocked by {dependencyCount}</span>}
+                    {item.blocksCount > 0 && <span className="blocks-indicator">Blocks {item.blocksCount}</span>}
                   </div>
                   <div role="cell"><Badge tone={item.priority}>{item.priority}</Badge></div>
                   <div role="cell">
@@ -1789,6 +2048,10 @@ export default function App() {
             toggleValidation={toggleValidation}
             onEdit={() => setFormMode("edit")}
             onMutated={handleMutated}
+            onNavigate={(id) => {
+              const item = actionables.find((candidate) => candidate.id === id);
+              if (item) selectRow(item);
+            }}
             onNotice={setNotice}
           />
         ) : (

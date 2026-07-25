@@ -87,6 +87,10 @@ model Actionable {
   validationRecords      ValidationRecord[]
   activityEvents         ActivityEvent[]
   userSources            UserSourceReference[]
+  hierarchyAsParent      HierarchyRelationship[]  @relation("HierarchyParent")
+  hierarchyAsChild       HierarchyRelationship[]  @relation("HierarchyChild")
+  dependenciesAsDependent    DependencyRelationship[] @relation("DependencyDependent")
+  dependenciesAsPrerequisite DependencyRelationship[] @relation("DependencyPrerequisite")
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
 
@@ -147,4 +151,32 @@ model UserSourceReference {
   actionable   Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
 
   @@index([actionableId, createdAt])
+}
+
+model HierarchyRelationship {
+  id         String     @id @default(cuid())
+  parentId   String
+  childId    String
+  createdAt  DateTime   @default(now())
+  detachedAt DateTime?
+  parent     Actionable @relation("HierarchyParent", fields: [parentId], references: [id], onDelete: Restrict)
+  child      Actionable @relation("HierarchyChild", fields: [childId], references: [id], onDelete: Restrict)
+
+  @@index([parentId, detachedAt])
+  @@index([childId, detachedAt])
+}
+
+model DependencyRelationship {
+  id             String     @id @default(cuid())
+  dependentId    String
+  prerequisiteId String
+  waivedAt       DateTime?
+  waiverReason   String?
+  removedAt      DateTime?
+  createdAt      DateTime   @default(now())
+  dependent      Actionable @relation("DependencyDependent", fields: [dependentId], references: [id], onDelete: Restrict)
+  prerequisite   Actionable @relation("DependencyPrerequisite", fields: [prerequisiteId], references: [id], onDelete: Restrict)
+
+  @@index([dependentId, removedAt])
+  @@index([prerequisiteId, removedAt])
 }

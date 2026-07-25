@@ -41,6 +41,33 @@ const actionableInclude = {
     where: { removedAt: null },
     orderBy: { createdAt: "asc" as const },
   },
+  hierarchyAsParent: {
+    where: { detachedAt: null },
+    orderBy: { createdAt: "asc" as const },
+    include: {
+      child: { include: { project: true, repository: true, worktree: true } },
+    },
+  },
+  hierarchyAsChild: {
+    where: { detachedAt: null },
+    include: {
+      parent: { include: { project: true, repository: true, worktree: true } },
+    },
+  },
+  dependenciesAsDependent: {
+    where: { removedAt: null },
+    orderBy: { createdAt: "asc" as const },
+    include: {
+      prerequisite: { include: { project: true, repository: true, worktree: true } },
+    },
+  },
+  dependenciesAsPrerequisite: {
+    where: { removedAt: null },
+    orderBy: { createdAt: "asc" as const },
+    include: {
+      dependent: { include: { project: true, repository: true, worktree: true } },
+    },
+  },
 } satisfies Prisma.ActionableInclude;
 
 type ActionableRow = Prisma.ActionableGetPayload<{
@@ -62,11 +89,6 @@ export class VersionConflictError extends Error {
   constructor(public readonly current: ActionableDetail) {
     super("This actionable changed after editing began.");
   }
-}
-
-function numberArray(value: Prisma.JsonValue): number[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  return value.map((item) => Number(item));
 }
 
 function stringArray(value: Prisma.JsonValue): string[] {
@@ -120,9 +142,70 @@ function latestQualifyingValidationId(row: ActionableRow) {
     .find((record) => qualifying.has(record.id))?.id ?? null;
 }
 
+type RelatedRow =
+  | ActionableRow
+  | ActionableRow["hierarchyAsParent"][number]["child"]
+  | ActionableRow["hierarchyAsChild"][number]["parent"]
+  | ActionableRow["dependenciesAsDependent"][number]["prerequisite"]
+  | ActionableRow["dependenciesAsPrerequisite"][number]["dependent"];
+
+function relatedActionable(row: RelatedRow) {
+  return {
+    id: row.sourceOrdinal,
+    recordId: row.id,
+    title: row.title,
+    status: parsePersistedStatus(row.status),
+    version: row.version,
+    scope: {
+      projectId: row.project.id,
+      projectName: row.project.name,
+      repositoryId: row.repository.id,
+      repositoryName: row.repository.name,
+      worktreeId: row.worktree.id,
+      worktreeName: row.worktree.name,
+    },
+  };
+}
+
+function dependencyState(
+  relationship: ActionableRow["dependenciesAsDependent"][number],
+) {
+  const prerequisite = relationship.prerequisite;
+  if (relationship.waivedAt) return "waived" as const;
+  if (prerequisite.status === "Done") return "satisfied" as const;
+  if (prerequisite.status === "Dismissed") return "dismissed-prerequisite" as const;
+  return "unresolved" as const;
+}
+
+function dependencyDetail(
+  relationship: ActionableRow["dependenciesAsDependent"][number],
+  dependent: RelatedRow,
+) {
+  const state = dependencyState(relationship);
+  return {
+    id: relationship.id,
+    dependent: relatedActionable(dependent),
+    prerequisite: relatedActionable(relationship.prerequisite),
+    state,
+    isSatisfied: state === "satisfied" || state === "waived",
+    waiverReason: relationship.waiverReason,
+    createdAt: relationship.createdAt.toISOString(),
+  };
+}
+
 function toSummary(row: ActionableRow): ActionableSummary {
   const imported = row.importProvider !== "MANUAL";
   const status = parsePersistedStatus(row.status);
+  const unresolvedDependencies = row.dependenciesAsDependent.filter(
+    (relationship) =>
+      !relationship.waivedAt && relationship.prerequisite.status !== "Done",
+  );
+  const childIds = row.hierarchyAsParent.map(
+    (relationship) => relationship.child.sourceOrdinal,
+  );
+  const terminalChildren = row.hierarchyAsParent.filter((relationship) =>
+    ["Done", "Dismissed"].includes(relationship.child.status),
+  ).length;
   return actionableSummarySchema.parse({
     id: row.sourceOrdinal,
     recordId: row.id,
@@ -156,12 +239,29 @@ function toSummary(row: ActionableRow): ActionableSummary {
     finding: row.finding,
     tags: stringArray(row.tagsJson),
     manualBlocker: row.manualBlockerMd,
-    isDependencyBlocked: false,
-    isEffectivelyBlocked: status === "Blocked",
-    blockedBy: numberArray(row.blockedByOrdinalsJson),
-    blocks: numberArray(row.blocksOrdinalsJson),
-    parentId: row.parentOrdinal ?? undefined,
-    childIds: numberArray(row.childOrdinalsJson),
+    isDependencyBlocked: unresolvedDependencies.length > 0,
+    isEffectivelyBlocked: status === "Blocked" || unresolvedDependencies.length > 0,
+    unresolvedDependencyCount: unresolvedDependencies.length,
+    dependencyCount: row.dependenciesAsDependent.length,
+    blocksCount: row.dependenciesAsPrerequisite.length,
+    blockedBy:
+      row.dependenciesAsDependent.length > 0
+        ? row.dependenciesAsDependent.map(
+            (relationship) => relationship.prerequisite.sourceOrdinal,
+          )
+        : undefined,
+    blocks:
+      row.dependenciesAsPrerequisite.length > 0
+        ? row.dependenciesAsPrerequisite.map(
+            (relationship) => relationship.dependent.sourceOrdinal,
+          )
+        : undefined,
+    parentId: row.hierarchyAsChild[0]?.parent.sourceOrdinal,
+    childIds: childIds.length > 0 ? childIds : undefined,
+    childCompletion:
+      childIds.length > 0
+        ? { terminal: terminalChildren, total: childIds.length }
+        : undefined,
   });
 }
 
@@ -226,6 +326,43 @@ function toDetail(row: ActionableRow): ActionableDetail {
       policy:
         "A current Passed validation recorded after the latest move into In progress qualifies. Failed, Partial, and superseded records do not.",
     },
+    relationships: {
+      parent: row.hierarchyAsChild[0]
+        ? {
+            id: row.hierarchyAsChild[0].id,
+            parent: relatedActionable(row.hierarchyAsChild[0].parent),
+            child: relatedActionable(row),
+            createdAt: row.hierarchyAsChild[0].createdAt.toISOString(),
+          }
+        : null,
+      subtasks: row.hierarchyAsParent.map((relationship) => ({
+        id: relationship.id,
+        parent: relatedActionable(row),
+        child: relatedActionable(relationship.child),
+        createdAt: relationship.createdAt.toISOString(),
+      })),
+      blockedBy: row.dependenciesAsDependent.map((relationship) =>
+        dependencyDetail(relationship, row),
+      ),
+      blocks: row.dependenciesAsPrerequisite.map((relationship) => {
+        const state = relationship.waivedAt
+          ? "waived"
+          : row.status === "Done"
+            ? "satisfied"
+            : row.status === "Dismissed"
+              ? "dismissed-prerequisite"
+              : "unresolved";
+        return {
+          id: relationship.id,
+          dependent: relatedActionable(relationship.dependent),
+          prerequisite: relatedActionable(row),
+          state,
+          isSatisfied: state === "satisfied" || state === "waived",
+          waiverReason: relationship.waiverReason,
+          createdAt: relationship.createdAt.toISOString(),
+        };
+      }),
+    },
   });
 }
 
@@ -289,7 +426,7 @@ export async function listActionables(prisma: AppPrismaClient): Promise<Actionab
     worktree: { name: first.worktree.name },
     counts: {
       total: rows.length,
-      topLevel: rows.filter((row) => row.parentOrdinal === null).length,
+      topLevel: rows.filter((row) => row.hierarchyAsChild.length === 0).length,
     },
     items: rows.map(toSummary),
   });
@@ -571,6 +708,22 @@ function validateTransition(
     return { reason, completionMode: "none", validationRecordId: null };
   }
 
+  const incompleteChildren = current.hierarchyAsParent
+    .map((relationship) => relationship.child)
+    .filter((child) => child.status !== "Done" && child.status !== "Dismissed");
+  if (incompleteChildren.length > 0) {
+    throw new DomainValidationError(
+      "INCOMPLETE_SUBTASKS",
+      {
+        status: ["A parent cannot be Done while it has nonterminal subtasks."],
+        children: incompleteChildren.map(
+          (child) => `${child.sourceOrdinal}: ${child.title} (${child.status})`,
+        ),
+      },
+      "Complete or dismiss every direct subtask before completing this parent.",
+    );
+  }
+
   const override = request.completionOverrideReason?.trim() ?? "";
   if (override) {
     return {
@@ -606,6 +759,7 @@ async function writeTransitionHistory(
   nextStatus: Status,
   origin: string,
   decision: TransitionDecision,
+  extraContext: Record<string, string> = {},
 ) {
   const previousStatus = parsePersistedStatus(current.status);
   await transaction.actionableStatusHistory.create({
@@ -623,6 +777,7 @@ async function writeTransitionHistory(
     previousStatus,
     newStatus: nextStatus,
     origin,
+    ...extraContext,
   };
 
   if (nextStatus === "Blocked") {
@@ -747,6 +902,12 @@ export async function transitionActionable(
     if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
 
     const previousStatus = parsePersistedStatus(current.status);
+    const parentRelationship =
+      input.status === "Ready" &&
+      (previousStatus === "Done" || previousStatus === "Dismissed") &&
+      current.hierarchyAsChild[0]?.parent.status === "Done"
+        ? current.hierarchyAsChild[0]
+        : null;
     const decision = validateTransition(
       current,
       input.status,
@@ -785,7 +946,67 @@ export async function transitionActionable(
       throw new VersionConflictError(toDetail(latest));
     }
 
-    await writeTransitionHistory(transaction, current, input.status, input.origin, decision);
+    await writeTransitionHistory(
+      transaction,
+      current,
+      input.status,
+      input.origin,
+      decision,
+      parentRelationship
+        ? {
+            hierarchyRelationshipId: parentRelationship.id,
+            autoReopenedParentId: parentRelationship.parent.id,
+          }
+        : {},
+    );
+
+    if (parentRelationship) {
+      const parent = parentRelationship.parent;
+      const parentUpdated = await transaction.actionable.updateMany({
+        where: { id: parent.id, version: parent.version, status: "Done" },
+        data: {
+          status: "Ready",
+          updatedLabel: "just now",
+          version: { increment: 1 },
+        },
+      });
+      if (parentUpdated.count !== 1) {
+        const latestParent = await currentOrNotFound(
+          transaction,
+          parent.sourceOrdinal,
+        );
+        if (!latestParent) {
+          throw new DomainValidationError(
+            "PARENT_NOT_FOUND",
+            { parent: ["The parent actionable no longer exists."] },
+            "The parent actionable could not be reopened.",
+          );
+        }
+        throw new VersionConflictError(toDetail(latestParent));
+      }
+      await transaction.actionableStatusHistory.create({
+        data: {
+          actionableId: parent.id,
+          previousStatus: "Done",
+          newStatus: "Ready",
+          origin: "child-reopen",
+        },
+      });
+      await transaction.activityEvent.create({
+        data: {
+          actionableId: parent.id,
+          type: "parent-auto-reopened",
+          summary: "Automatically reopened because a subtask reopened",
+          metadataJson: inputJson({
+            hierarchyRelationshipId: parentRelationship.id,
+            childActionableId: current.id,
+            childOrdinal: String(current.sourceOrdinal),
+            reason: decision.reason,
+            origin: "child-reopen",
+          }),
+        },
+      });
+    }
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
     return saved ? toDetail(saved) : null;
   });
