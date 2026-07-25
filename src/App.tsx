@@ -10,6 +10,8 @@ import {
   CircleDot,
   Clock3,
   Copy,
+  Database,
+  Download,
   ExternalLink,
   FileCode2,
   GitBranch,
@@ -27,6 +29,7 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  Upload,
   X,
 } from "lucide-react";
 import {
@@ -39,6 +42,8 @@ import {
   type Effort,
   type EvidenceState,
   type Priority,
+  type ImportCommitResponse,
+  type ImportPreviewResponse,
   type ScopeOptionsResponse,
   type Status,
   type UserSourceReferenceInput,
@@ -52,12 +57,16 @@ import {
   createDependency,
   createActionable,
   createSubtask,
+  commitPortableImport,
   detachParent,
   fetchActionable,
   fetchActionables,
   fetchArchiveImpact,
   fetchDashboard,
   fetchScopeOptions,
+  downloadPortableExport,
+  preparePortableImport,
+  previewPortableImport,
   recordValidation,
   removeDependency,
   restoreDependency,
@@ -2119,7 +2128,7 @@ function LegacyApp() {
   );
 }
 
-type ViewMode = "dashboard" | "actionables" | "archive";
+type ViewMode = "dashboard" | "actionables" | "archive" | "data";
 type QueryState = Partial<Record<keyof ActionableQuery, string>>;
 type ArchiveDialogTarget = {
   kind: ArchiveTargetKind;
@@ -2153,6 +2162,7 @@ function viewFromLocation(): ViewMode {
     return "dashboard";
   }
   if (window.location.pathname === "/archive") return "archive";
+  if (window.location.pathname === "/data") return "data";
   return "actionables";
 }
 
@@ -2189,6 +2199,8 @@ function routeFor(view: ViewMode, selectedId: number | null, query: QueryState) 
         ? "/dashboard"
         : view === "archive"
           ? "/archive"
+          : view === "data"
+            ? "/data"
           : "/";
   return `${path}${searchFor(query)}`;
 }
@@ -2277,6 +2289,273 @@ function DashboardPanel({
           </section>
         ))}
       </div>
+    </section>
+  );
+}
+
+function DataPanel({
+  onCommitted,
+  onOpenActionable,
+}: {
+  onCommitted: () => Promise<void>;
+  onOpenActionable: (id: number) => void;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [preview, setPreview] = useState<ImportPreviewResponse | null>(null);
+  const [prepared, setPrepared] = useState<Awaited<ReturnType<typeof preparePortableImport>> | null>(null);
+  const [committed, setCommitted] = useState<ImportCommitResponse | null>(null);
+  const [acceptedSuggestions, setAcceptedSuggestions] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<"preview" | "prepare" | "commit" | "export" | null>(null);
+  const [error, setError] = useState("");
+
+  const resetAfterSelection = () => {
+    setPrepared(null);
+    setCommitted(null);
+  };
+
+  const selectFile = async (file: File | undefined) => {
+    setError("");
+    setPreview(null);
+    setPrepared(null);
+    setCommitted(null);
+    setAcceptedSuggestions(new Set());
+    if (!file) {
+      setFileName("");
+      return;
+    }
+    setFileName(file.name);
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Choose a JSON file no larger than 5 MB.");
+      return;
+    }
+    setBusy("preview");
+    try {
+      const text = await file.text();
+      let document: unknown;
+      try {
+        document = JSON.parse(text);
+      } catch {
+        throw new Error("The selected file is not valid JSON.");
+      }
+      setPreview(await previewPortableImport(document));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const prepare = async () => {
+    if (!preview) return;
+    setBusy("prepare");
+    setError("");
+    try {
+      const conflictResolutions = Object.fromEntries(
+        preview.items
+          .filter((item) => item.classification === "conflict")
+          .map((item) => [item.id, "skip" as const]),
+      );
+      setPrepared(
+        await preparePortableImport(preview.previewToken, {
+          contentDigest: preview.contentDigest,
+          conflictResolutions,
+          acceptedSuggestionIds: [...acceptedSuggestions],
+        }),
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const commit = async () => {
+    if (!preview || !prepared) return;
+    setBusy("commit");
+    setError("");
+    try {
+      const result = await commitPortableImport(preview.previewToken, {
+        contentDigest: preview.contentDigest,
+        commitToken: prepared.commitToken,
+        selectionsDigest: prepared.selectionsDigest,
+      });
+      setCommitted(result);
+      await onCommitted();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setPrepared(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const download = async () => {
+    setBusy("export");
+    setError("");
+    try {
+      const exported = await downloadPortableExport();
+      const blob = new Blob([`${JSON.stringify(exported.document, null, 2)}\n`], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = exported.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const conflicts = preview?.items.filter((item) => item.classification === "conflict") ?? [];
+  const invalid = preview?.items.filter((item) =>
+    ["invalid", "missing-reference", "integrity-failure"].includes(item.classification),
+  ) ?? [];
+  const suggestions = preview?.items.filter((item) => item.classification === "suggestion") ?? [];
+  const changed = preview?.items.filter((item) =>
+    ["create", "safe-update", "conflict"].includes(item.classification),
+  ) ?? [];
+
+  return (
+    <section className="data-panel" aria-labelledby="data-title">
+      <header className="data-heading">
+        <div>
+          <h1 id="data-title">Data</h1>
+          <p>Preview and reconcile a versioned portable backup, or export the complete local domain state.</p>
+        </div>
+        <button type="button" className="toolbar-button" onClick={() => void download()} disabled={busy !== null}>
+          <Download aria-hidden="true" />{busy === "export" ? "Preparing…" : "Export backup"}
+        </button>
+      </header>
+      <div className="sensitive-warning" role="note">
+        <AlertTriangle aria-hidden="true" />
+        Exports can contain technical paths, research notes, source wording, and other sensitive project information.
+      </div>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <section className="data-section" aria-labelledby="import-file-title">
+        <div>
+          <h2 id="import-file-title">1. Select JSON file</h2>
+          <p>Files are treated as untrusted data. The app never reads paths contained in JSON.</p>
+        </div>
+        <label className="file-picker">
+          <Upload aria-hidden="true" />
+          <span>{fileName || "Choose portable JSON"}</span>
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(event) => void selectFile(event.target.files?.[0])}
+            disabled={busy !== null}
+          />
+        </label>
+        {busy === "preview" && <span role="status">Parsing and building a non-mutating preview…</span>}
+      </section>
+      {preview && (
+        <>
+          <section className="data-section" aria-labelledby="preview-title">
+            <div>
+              <h2 id="preview-title">2. Preview</h2>
+              <p>{preview.compatibility}</p>
+            </div>
+            <dl className="preview-totals">
+              <div><dt>Creates</dt><dd>{preview.totals.creates}</dd></div>
+              <div><dt>Safe updates</dt><dd>{preview.totals.safeUpdates}</dd></div>
+              <div><dt>No-ops</dt><dd>{preview.totals.noOps}</dd></div>
+              <div><dt>Conflicts</dt><dd>{preview.totals.conflicts}</dd></div>
+              <div><dt>Invalid</dt><dd>{preview.totals.invalid + preview.totals.missingReferences + preview.totals.integrityFailures}</dd></div>
+              <div><dt>Suggestions</dt><dd>{preview.totals.suggestions}</dd></div>
+            </dl>
+            {(changed.length > 0 || invalid.length > 0) && (
+              <div className="preview-details">
+                {[...invalid, ...changed].map((item) => (
+                  <details key={item.id} open={item.classification === "conflict" || invalid.includes(item)}>
+                    <summary>
+                      <Badge tone={item.classification}>{item.classification}</Badge>
+                      <span>{item.display}</span>
+                      <small>{item.recordType}</small>
+                    </summary>
+                    {item.errors.length > 0 && <ul>{item.errors.map((message) => <li key={message}>{message}</li>)}</ul>}
+                    {item.changes.length > 0 && (
+                      <ul>{item.changes.map((change) => <li key={`${item.id}-${change.field}`}><strong>{change.field}</strong>: {change.reason}</li>)}</ul>
+                    )}
+                    {item.classification === "conflict" && <p>Resolution: skip conflicting fields and preserve local values.</p>}
+                  </details>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="data-section" aria-labelledby="suggestions-title">
+            <div>
+              <h2 id="suggestions-title">3. Confirm relationship suggestions</h2>
+              <p>Unconfirmed suggestions do not create hierarchy or dependency facts.</p>
+            </div>
+            {suggestions.length ? (
+              <ul className="suggestion-list">
+                {suggestions.map((item) => (
+                  <li key={item.id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={acceptedSuggestions.has(item.portableId)}
+                        onChange={(event) => {
+                          setAcceptedSuggestions((current) => {
+                            const next = new Set(current);
+                            if (event.target.checked) next.add(item.portableId);
+                            else next.delete(item.portableId);
+                            return next;
+                          });
+                          resetAfterSelection();
+                        }}
+                      />
+                      <span>{item.display}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            ) : <p>No inferred relationships require confirmation.</p>}
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={() => void prepare()}
+              disabled={!preview.canCommit || busy !== null}
+            >
+              {busy === "prepare" ? "Authorizing…" : "Review selections"}
+            </button>
+          </section>
+          <section className="data-section" aria-labelledby="commit-title">
+            <div>
+              <h2 id="commit-title">4. Commit explicitly</h2>
+              <p>The commit is atomic and rejects stale data, changed selections, changed content, and replay.</p>
+            </div>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => void commit()}
+              disabled={!prepared || busy !== null || committed !== null}
+            >
+              {busy === "commit" ? "Committing…" : "Commit reviewed import"}
+            </button>
+            {committed && (
+              <div className="committed-summary" role="status">
+                <CheckCircle2 aria-hidden="true" />
+                <div>
+                  <strong>Import committed</strong>
+                  <p>{committed.summary.creates} creates, {committed.summary.safeUpdates} safe updates, {committed.summary.noOps} no-ops, {committed.summary.conflicts} skipped conflicts.</p>
+                  {committed.affectedActionables.length > 0 && (
+                    <ul>{committed.affectedActionables.map((item) => (
+                      <li key={item.portableId}>
+                        <button type="button" onClick={() => onOpenActionable(item.id)}>{item.title}</button>
+                      </li>
+                    ))}</ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </section>
   );
 }
@@ -2639,6 +2918,7 @@ export default function App() {
     inspectorHidden ? "inspector-hidden" : "",
     mobileDetailOpen ? "mobile-detail-open" : "",
     view === "dashboard" && selectedId === null ? "dashboard-mode" : "",
+    view === "data" && selectedId === null ? "data-mode" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -2658,15 +2938,14 @@ export default function App() {
           })}>
             <LayoutDashboard /> Dashboard
           </button>
-          <button type="button" className={view === "actionables" ? "is-selected" : ""} onClick={() => replaceLocation("actionables", null, {
-            ...(query.project ? { project: query.project } : {}),
-            ...(query.repository ? { repository: query.repository } : {}),
-            ...(query.worktree ? { worktree: query.worktree } : {}),
-          })}>
+          <button type="button" className={view === "actionables" ? "is-selected" : ""} onClick={() => replaceLocation("actionables", null, query)}>
             <List /> Actionables
           </button>
           <button type="button" className={view === "archive" ? "is-selected" : ""} onClick={() => replaceLocation("archive", null, { archived: "archived" })}>
             <Archive /> Archive
+          </button>
+          <button type="button" className={view === "data" ? "is-selected" : ""} onClick={() => replaceLocation("data", null, query)}>
+            <Database /> Data
           </button>
         </nav>
         <div className="project-tree">
@@ -2747,17 +3026,17 @@ export default function App() {
             <GitBranch aria-hidden="true" />{worktreeName} <ChevronDown aria-hidden="true" />
           </button>
         </div>
-        <label className="global-search">
+        {view !== "data" ? <label className="global-search">
           <Search aria-hidden="true" />
           <span className="shortcut">⌘K</span>
           <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search titles, findings, notes, tags, paths, symbols…" aria-label="Search actionables" />
           {searchInput && <button type="button" aria-label="Clear search" onClick={() => setSearchInput("")}><X /></button>}
-        </label>
+        </label> : <div className="data-context"><Database aria-hidden="true" /> Import / Export</div>}
         <div className="topbar-actions">
-          <button type="button" className="primary-action" onClick={() => scopesQuery.data ? setFormMode("create") : setNotice("Scope options are still loading.")}>
+          {view !== "data" && <button type="button" className="primary-action" onClick={() => scopesQuery.data ? setFormMode("create") : setNotice("Scope options are still loading.")}>
             <Plus /> New actionable
-          </button>
-          {view !== "dashboard" && (
+          </button>}
+          {(view === "actionables" || view === "archive") && (
             <div className="filter-wrap">
               <button type="button" className={`toolbar-button ${filterOpen ? "is-active" : ""}`} onClick={() => setFilterOpen((value) => !value)} aria-expanded={filterOpen}>
                 <SlidersHorizontal /> Filters {activeFilters.length > 0 && <span className="filter-count">{activeFilters.length}</span>}
@@ -2778,11 +3057,21 @@ export default function App() {
               )}
             </div>
           )}
-          {view !== "dashboard" && <IconButton label={inspectorHidden ? "Show inspector" : "Hide inspector"} onClick={() => setInspectorHidden((value) => !value)} pressed={!inspectorHidden}>{inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}</IconButton>}
+          {(view === "actionables" || view === "archive") && <IconButton label={inspectorHidden ? "Show inspector" : "Hide inspector"} onClick={() => setInspectorHidden((value) => !value)} pressed={!inspectorHidden}>{inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}</IconButton>}
         </div>
       </header>
 
-      {view === "dashboard" && selectedId === null ? (
+      {view === "data" && selectedId === null ? (
+        <main className="findings-panel">
+          <DataPanel
+            onCommitted={invalidateDailyUse}
+            onOpenActionable={(id) => {
+              replaceLocation("actionables", id, query);
+              setInspectorHidden(false);
+            }}
+          />
+        </main>
+      ) : view === "dashboard" && selectedId === null ? (
         <main className="findings-panel">
           <DashboardPanel
             data={dashboardQuery.data}
@@ -2899,7 +3188,7 @@ export default function App() {
         </main>
       )}
 
-      {view !== "dashboard" || selectedId !== null ? (
+      {((view !== "dashboard" && view !== "data") || selectedId !== null) ? (
         <aside className="inspector" aria-label="Selected actionable">
           {selected ? (
             <Inspector

@@ -11,6 +11,7 @@ model Project {
   id           String       @id @default(cuid())
   externalKey  String       @unique
   name         String
+  importBaselineJson Json?
   version      Int          @default(1)
   archivedAt   DateTime?
   repositories Repository[]
@@ -24,6 +25,7 @@ model Repository {
   id          String       @id @default(cuid())
   externalKey String       @unique
   name        String
+  importBaselineJson Json?
   version     Int          @default(1)
   archivedAt  DateTime?
   localPath   String?
@@ -39,6 +41,7 @@ model Worktree {
   id           String       @id @default(cuid())
   externalKey  String       @unique
   name         String
+  importBaselineJson Json?
   version      Int          @default(1)
   archivedAt   DateTime?
   localPath    String?
@@ -84,6 +87,8 @@ model Actionable {
   sourceThread           String
   contentHash            String
   rawFragmentJson        Json
+  importBaselineJson     Json?
+  fieldOwnershipJson     Json?
   projectId              String
   repositoryId           String
   worktreeId             String
@@ -105,6 +110,18 @@ model Actionable {
   @@index([priority, status])
   @@index([archivedAt, status, updatedAt])
   @@index([projectId, repositoryId, worktreeId, archivedAt])
+}
+
+model ImportRun {
+  id             String   @id @default(cuid())
+  documentDigest String
+  format         String
+  schemaVersion  Int
+  sourceName     String?
+  summaryJson    Json
+  committedAt    DateTime @default(now())
+
+  @@index([committedAt])
 }
 
 model ActionableStatusHistory {
@@ -168,6 +185,7 @@ model HierarchyRelationship {
   childId    String
   createdAt  DateTime   @default(now())
   detachedAt DateTime?
+  provenance String     @default("user")
   parent     Actionable @relation("HierarchyParent", fields: [parentId], references: [id], onDelete: Restrict)
   child      Actionable @relation("HierarchyChild", fields: [childId], references: [id], onDelete: Restrict)
 
@@ -183,6 +201,7 @@ model DependencyRelationship {
   waiverReason   String?
   removedAt      DateTime?
   createdAt      DateTime   @default(now())
+  provenance     String     @default("user")
   dependent      Actionable @relation("DependencyDependent", fields: [dependentId], references: [id], onDelete: Restrict)
   prerequisite   Actionable @relation("DependencyPrerequisite", fields: [prerequisiteId], references: [id], onDelete: Restrict)
 

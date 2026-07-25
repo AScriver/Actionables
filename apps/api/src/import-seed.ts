@@ -1,24 +1,16 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   seedDocumentSchema,
   type SeedDocument,
 } from "@actionables/contracts";
-import type { Prisma } from "./generated/prisma/client.js";
 import type { AppPrismaClient } from "./database.js";
+import { DataImportService } from "./data-import.js";
+import { reviewedSeedToPortable } from "./portable-format.js";
 
 export const reviewedSeedUrl = new URL(
   "../../../seed/codex-www-architecture-review.v1.json",
   import.meta.url,
 );
-
-function contentHash(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
-function asJson(value: unknown): Prisma.InputJsonValue {
-  return value as Prisma.InputJsonValue;
-}
 
 export async function readReviewedSeed(url = reviewedSeedUrl): Promise<SeedDocument> {
   const contents = await readFile(url, "utf8");
@@ -29,178 +21,30 @@ export async function importReviewedSeed(
   prisma: AppPrismaClient,
   document: SeedDocument,
 ) {
-  return prisma.$transaction(async (transaction) => {
-    const project = await transaction.project.upsert({
-      where: { externalKey: document.project.externalKey },
-      update: { name: document.project.name },
-      create: {
-        externalKey: document.project.externalKey,
-        name: document.project.name,
-      },
-    });
-
-    const repository = await transaction.repository.upsert({
-      where: { externalKey: document.repository.externalKey },
-      update: {
-        name: document.repository.name,
-        localPath: document.repository.localPath,
-        projectId: project.id,
-      },
-      create: {
-        externalKey: document.repository.externalKey,
-        name: document.repository.name,
-        localPath: document.repository.localPath,
-        projectId: project.id,
-      },
-    });
-
-    const worktree = await transaction.worktree.upsert({
-      where: { externalKey: document.worktree.externalKey },
-      update: {
-        name: document.worktree.name,
-        localPath: document.worktree.localPath,
-        projectId: project.id,
-        repositoryId: repository.id,
-      },
-      create: {
-        externalKey: document.worktree.externalKey,
-        name: document.worktree.name,
-        localPath: document.worktree.localPath,
-        projectId: project.id,
-        repositoryId: repository.id,
-      },
-    });
-
-    let created = 0;
-    let updated = 0;
-    let unchanged = 0;
-
-    for (const item of document.items) {
-      const hash = contentHash(item);
-      const existing = await transaction.actionable.findUnique({
-        where: { externalKey: item.externalKey },
-        select: { contentHash: true },
-      });
-
-      if (existing?.contentHash === hash) {
-        unchanged += 1;
-        continue;
-      }
-
-      const data = {
-        sourceOrdinal: item.ordinal,
-        title: item.title,
-        priority: item.priority,
-        status: item.status,
-        statusProvenance: item.statusProvenance.note,
-        sourceStatusSuggestion: item.statusProvenance.suggestedStatus,
-        effort: item.effort,
-        updatedLabel: item.updated,
-        finding: item.finding,
-        description: item.description,
-        researchJson: asJson(item.research),
-        validationJson: asJson(item.validation),
-        filesJson: asJson(item.files),
-        tagsJson: asJson(item.tags),
-        blockedByOrdinalsJson: asJson(item.blockedBy ?? []),
-        blocksOrdinalsJson: asJson(item.blocks ?? []),
-        parentOrdinal: item.parentId,
-        childOrdinalsJson: asJson(item.childIds ?? []),
-        importProvider: document.source.provider,
-        sourceContainerId: document.source.containerId,
-        sourceThread: document.source.threadUrl,
-        contentHash: hash,
-        rawFragmentJson: asJson(item),
-        projectId: project.id,
-        repositoryId: repository.id,
-        worktreeId: worktree.id,
-      };
-
-      if (existing) {
-        await transaction.actionable.update({
-          where: { externalKey: item.externalKey },
-          data,
-        });
-        updated += 1;
-      } else {
-        await transaction.actionable.create({
-          data: {
-            externalKey: item.externalKey,
-            ...data,
-            statusHistory: {
-              create: {
-                previousStatus: null,
-                newStatus: item.status,
-                origin: "reviewed-seed-import",
-              },
-            },
-            activityEvents: {
-              create: {
-                type: "status-transition",
-                summary: `Imported as ${item.status}`,
-                metadataJson: asJson({
-                  previousStatus: "",
-                  newStatus: item.status,
-                  origin: "reviewed-seed-import",
-                }),
-              },
-            },
-          },
-        });
-        created += 1;
-      }
-    }
-
-    // New databases run migrations before seed rows exist, so establish the
-    // reviewed one-level hierarchy after import. Any prior relationship
-    // (including a detached one) is left alone so re-import never undoes a
-    // user detach or reassignment.
-    for (const item of document.items.filter((candidate) => candidate.parentId)) {
-      const [child, parent] = await Promise.all([
-        transaction.actionable.findUnique({
-          where: { externalKey: item.externalKey },
-          include: { hierarchyAsChild: { where: { detachedAt: null } } },
-        }),
-        transaction.actionable.findFirst({
-          where: {
-            sourceOrdinal: item.parentId!,
-            projectId: project.id,
-            worktreeId: worktree.id,
-          },
-        }),
-      ]);
-      if (!child || !parent || child.hierarchyAsChild.length > 0) continue;
-      const prior = await transaction.hierarchyRelationship.findFirst({
-        where: { parentId: parent.id, childId: child.id },
-      });
-      if (prior) continue;
-      const relationship = await transaction.hierarchyRelationship.create({
-        data: { parentId: parent.id, childId: child.id },
-      });
-      const context = asJson({
-        hierarchyRelationshipId: relationship.id,
-        parentActionableId: parent.id,
-        childActionableId: child.id,
-        origin: "reviewed-seed-import",
-      });
-      await transaction.activityEvent.createMany({
-        data: [
-          {
-            actionableId: child.id,
-            type: "hierarchy-attached",
-            summary: "Imported as a subtask",
-            metadataJson: context,
-          },
-          {
-            actionableId: parent.id,
-            type: "hierarchy-attached",
-            summary: "Imported subtask relationship",
-            metadataJson: context,
-          },
-        ],
-      });
-    }
-
-    return { created, updated, unchanged, total: document.items.length };
+  const service = new DataImportService(prisma);
+  const preview = await service.preview(reviewedSeedToPortable(document));
+  const conflicts = Object.fromEntries(
+    preview.items
+      .filter((item) => item.classification === "conflict")
+      .map((item) => [item.id, "skip" as const]),
+  );
+  const prepared = service.prepare(preview.previewToken, {
+    contentDigest: preview.contentDigest,
+    conflictResolutions: conflicts,
+    acceptedSuggestionIds: [],
   });
+  await service.commit(preview.previewToken, {
+    contentDigest: preview.contentDigest,
+    commitToken: prepared.commitToken,
+    selectionsDigest: prepared.selectionsDigest,
+  });
+  const actionables = preview.items.filter((item) => item.recordType === "actionable");
+  return {
+    created: actionables.filter((item) => item.classification === "create").length,
+    updated: actionables.filter((item) => item.classification === "safe-update").length,
+    unchanged: actionables.filter((item) =>
+      item.classification === "no-op" || item.classification === "conflict",
+    ).length,
+    total: document.items.length,
+  };
 }

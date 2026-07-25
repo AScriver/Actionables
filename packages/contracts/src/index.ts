@@ -560,6 +560,322 @@ export const seedDocumentSchema = z.object({
   items: z.array(seedActionableSchema).length(32),
 });
 
+export const portableFormat = "actionables-portable" as const;
+export const portableSchemaVersion = 1 as const;
+
+const portableIdSchema = z.string().trim().min(1).max(240);
+const portableTimestampSchema = z.string().datetime();
+const portableArchiveSchema = z
+  .object({
+    directArchivedAt: portableTimestampSchema.nullable(),
+    inheritedFrom: z
+      .array(z.enum(["project", "repository", "worktree"]))
+      .max(3),
+  })
+  .strict();
+
+const portableProjectSchema = z
+  .object({
+    portableId: portableIdSchema,
+    name: z.string().trim().min(1).max(240),
+    archive: portableArchiveSchema,
+    createdAt: portableTimestampSchema.optional(),
+    updatedAt: portableTimestampSchema.optional(),
+  })
+  .strict();
+
+const portableRepositorySchema = z
+  .object({
+    portableId: portableIdSchema,
+    projectId: portableIdSchema,
+    name: z.string().trim().min(1).max(240),
+    localPath: z.string().max(4_096).nullable(),
+    archive: portableArchiveSchema,
+    createdAt: portableTimestampSchema.optional(),
+    updatedAt: portableTimestampSchema.optional(),
+  })
+  .strict();
+
+const portableWorktreeSchema = z
+  .object({
+    portableId: portableIdSchema,
+    projectId: portableIdSchema,
+    repositoryId: portableIdSchema,
+    name: z.string().trim().min(1).max(240),
+    localPath: z.string().max(4_096).nullable(),
+    archive: portableArchiveSchema,
+    createdAt: portableTimestampSchema.optional(),
+    updatedAt: portableTimestampSchema.optional(),
+  })
+  .strict();
+
+export const portableFieldOwnershipSchema = z.record(
+  z.string().min(1),
+  z.enum(["imported", "user-authored"]),
+);
+
+const portableActionableSchema = z
+  .object({
+    portableId: portableIdSchema,
+    projectId: portableIdSchema,
+    repositoryId: portableIdSchema,
+    worktreeId: portableIdSchema,
+    title: titleField,
+    priority: prioritySchema,
+    status: statusSchema,
+    statusProvenance: statusProvenanceSchema,
+    effort: effortSchema,
+    evidenceState: evidenceStateSchema,
+    finding: z.string().max(100_000),
+    description: z.string().max(100_000),
+    research: notesSchema,
+    validation: notesSchema,
+    files: z.array(sourceFileSchema).max(500),
+    tags: tagsSchema,
+    manualBlocker: z.string().max(100_000).nullable(),
+    dismissalReason: z.string().max(100_000).nullable(),
+    completionOverride: z.string().max(100_000).nullable(),
+    archive: portableArchiveSchema,
+    importedEvidence: z
+      .object({
+        provider: z.string().max(120),
+        containerId: z.string().max(500),
+        threadUrl: z.string().max(4_096),
+        contentHash: z.string().max(128),
+        rawFragment: z.json(),
+      })
+      .strict(),
+    provenance: z
+      .object({
+        origin: z.enum(["imported", "user-authored"]),
+        fieldOwnership: portableFieldOwnershipSchema,
+      })
+      .strict(),
+    createdAt: portableTimestampSchema.optional(),
+    updatedAt: portableTimestampSchema.optional(),
+  })
+  .strict();
+
+const portableStatusHistorySchema = z
+  .object({
+    portableId: portableIdSchema,
+    actionableId: portableIdSchema,
+    previousStatus: statusSchema.nullable(),
+    newStatus: statusSchema,
+    origin: z.string().min(1).max(200),
+    occurredAt: portableTimestampSchema,
+  })
+  .strict();
+
+const portableValidationRecordSchema = z
+  .object({
+    portableId: portableIdSchema,
+    actionableId: portableIdSchema,
+    type: validationTypeSchema,
+    outcome: validationOutcomeSchema,
+    notes: z.string().max(100_000),
+    evidence: z.string().max(100_000),
+    origin: z.string().min(1).max(200),
+    recordedAt: portableTimestampSchema,
+    supersedesId: portableIdSchema.nullable(),
+  })
+  .strict();
+
+const portableUserSourceSchema = z
+  .object({
+    portableId: portableIdSchema,
+    actionableId: portableIdSchema,
+    type: userSourceReferenceInputSchema.shape.type,
+    locator: z.string().trim().min(1).max(4_096),
+    label: z.string().trim().max(200).nullable(),
+    provenance: z.literal("user-added"),
+    createdAt: portableTimestampSchema,
+    removedAt: portableTimestampSchema.nullable(),
+  })
+  .strict();
+
+const portableActivitySchema = z
+  .object({
+    portableId: portableIdSchema,
+    actionableId: portableIdSchema,
+    type: activityTypeSchema,
+    summary: z.string().min(1).max(1_000),
+    context: z.record(z.string(), z.string()),
+    occurredAt: portableTimestampSchema,
+  })
+  .strict();
+
+const portableHierarchySchema = z
+  .object({
+    portableId: portableIdSchema,
+    parentId: portableIdSchema,
+    childId: portableIdSchema,
+    createdAt: portableTimestampSchema,
+    detachedAt: portableTimestampSchema.nullable(),
+    provenance: z.string().min(1).max(200),
+  })
+  .strict();
+
+const portableDependencySchema = z
+  .object({
+    portableId: portableIdSchema,
+    dependentId: portableIdSchema,
+    prerequisiteId: portableIdSchema,
+    createdAt: portableTimestampSchema,
+    waivedAt: portableTimestampSchema.nullable(),
+    waiverReason: z.string().max(100_000).nullable(),
+    removedAt: portableTimestampSchema.nullable(),
+    provenance: z.string().min(1).max(200),
+  })
+  .strict();
+
+export const relationshipSuggestionSchema = z
+  .object({
+    portableId: portableIdSchema,
+    kind: z.enum(["hierarchy", "dependency"]),
+    fromId: portableIdSchema,
+    toId: portableIdSchema,
+    reason: z.string().min(1).max(10_000),
+    provenance: z.string().min(1).max(500),
+  })
+  .strict();
+
+export const portableDocumentSchema = z
+  .object({
+    format: z.literal(portableFormat),
+    schemaVersion: z.literal(portableSchemaVersion),
+    exportedAt: portableTimestampSchema,
+    application: z
+      .object({
+        name: z.literal("Actionables"),
+        version: z.string().min(1).max(100),
+        schema: z.string().min(1).max(100),
+      })
+      .strict(),
+    metadata: z
+      .object({
+        sourceName: z.string().max(500).nullable(),
+        sourceKind: z.enum(["backup", "reviewed-seed", "user-json"]),
+      })
+      .strict(),
+    projects: z.array(portableProjectSchema).max(10_000),
+    repositories: z.array(portableRepositorySchema).max(10_000),
+    worktrees: z.array(portableWorktreeSchema).max(10_000),
+    actionables: z.array(portableActionableSchema).max(100_000),
+    statusHistory: z.array(portableStatusHistorySchema).max(500_000),
+    validationRecords: z.array(portableValidationRecordSchema).max(500_000),
+    userSources: z.array(portableUserSourceSchema).max(500_000),
+    activities: z.array(portableActivitySchema).max(1_000_000),
+    hierarchy: z.array(portableHierarchySchema).max(200_000),
+    dependencies: z.array(portableDependencySchema).max(500_000),
+    relationshipSuggestions: z.array(relationshipSuggestionSchema).max(500_000),
+  })
+  .strict();
+
+export const importClassificationSchema = z.enum([
+  "create",
+  "safe-update",
+  "no-op",
+  "conflict",
+  "invalid",
+  "missing-reference",
+  "integrity-failure",
+  "suggestion",
+]);
+
+export const importPreviewChangeSchema = z
+  .object({
+    field: z.string().min(1),
+    current: z.unknown().optional(),
+    incoming: z.unknown().optional(),
+    reason: z.string().min(1),
+  })
+  .strict();
+
+export const importPreviewItemSchema = z
+  .object({
+    id: z.string().min(1),
+    recordType: z.string().min(1),
+    portableId: z.string().min(1),
+    display: z.string().min(1),
+    classification: importClassificationSchema,
+    changes: z.array(importPreviewChangeSchema),
+    errors: z.array(z.string()),
+  })
+  .strict();
+
+const importCountSchema = z
+  .object({
+    creates: z.number().int().nonnegative(),
+    safeUpdates: z.number().int().nonnegative(),
+    noOps: z.number().int().nonnegative(),
+    conflicts: z.number().int().nonnegative(),
+    invalid: z.number().int().nonnegative(),
+    missingReferences: z.number().int().nonnegative(),
+    integrityFailures: z.number().int().nonnegative(),
+    suggestions: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const importPreviewResponseSchema = z
+  .object({
+    previewToken: z.string().min(1),
+    contentDigest: z.string().length(64),
+    expiresAt: portableTimestampSchema,
+    schemaVersion: z.literal(portableSchemaVersion),
+    compatibility: z.string().min(1),
+    canCommit: z.boolean(),
+    items: z.array(importPreviewItemSchema),
+    totals: importCountSchema,
+    totalsByRecordType: z.record(z.string(), importCountSchema),
+    archiveEffects: z.array(z.string()),
+    lifecycleEffects: z.array(z.string()),
+    affectedActionableIds: z.array(portableIdSchema),
+  })
+  .strict();
+
+export const prepareImportCommitRequestSchema = z
+  .object({
+    contentDigest: z.string().length(64),
+    conflictResolutions: z.record(z.string(), z.literal("skip")),
+    acceptedSuggestionIds: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export const prepareImportCommitResponseSchema = z
+  .object({
+    commitToken: z.string().min(1),
+    selectionsDigest: z.string().length(64),
+    expiresAt: portableTimestampSchema,
+  })
+  .strict();
+
+export const commitImportRequestSchema = z
+  .object({
+    contentDigest: z.string().length(64),
+    commitToken: z.string().min(1),
+    selectionsDigest: z.string().length(64),
+  })
+  .strict();
+
+export const importCommitResponseSchema = z
+  .object({
+    importRunId: z.string().min(1),
+    committedAt: portableTimestampSchema,
+    summary: importCountSchema,
+    totalsByRecordType: z.record(z.string(), importCountSchema),
+    affectedActionables: z.array(
+      z
+        .object({
+          portableId: portableIdSchema,
+          id: z.number().int().positive(),
+          title: z.string().min(1),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 export type Priority = z.infer<typeof prioritySchema>;
 export type Status = z.infer<typeof statusSchema>;
 export type Effort = z.infer<typeof effortSchema>;
@@ -603,3 +919,13 @@ export type ProblemDetails = z.infer<typeof problemDetailsSchema>;
 export type ActionableDetailResponse = z.infer<typeof actionableDetailResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type SeedDocument = z.infer<typeof seedDocumentSchema>;
+export type PortableDocument = z.infer<typeof portableDocumentSchema>;
+export type PortableActionable = PortableDocument["actionables"][number];
+export type RelationshipSuggestion = z.infer<typeof relationshipSuggestionSchema>;
+export type ImportClassification = z.infer<typeof importClassificationSchema>;
+export type ImportPreviewItem = z.infer<typeof importPreviewItemSchema>;
+export type ImportPreviewResponse = z.infer<typeof importPreviewResponseSchema>;
+export type PrepareImportCommitRequest = z.infer<typeof prepareImportCommitRequestSchema>;
+export type PrepareImportCommitResponse = z.infer<typeof prepareImportCommitResponseSchema>;
+export type CommitImportRequest = z.infer<typeof commitImportRequestSchema>;
+export type ImportCommitResponse = z.infer<typeof importCommitResponseSchema>;

@@ -18,6 +18,11 @@ import {
   setParentRequestSchema,
   statusTransitionRequestSchema,
   updateActionableRequestSchema,
+  commitImportRequestSchema,
+  importCommitResponseSchema,
+  importPreviewResponseSchema,
+  prepareImportCommitRequestSchema,
+  prepareImportCommitResponseSchema,
   type ActionableQuery,
 } from "@actionables/contracts";
 import Fastify, {
@@ -51,6 +56,8 @@ import {
   setParent,
   waiveDependency,
 } from "./relationships.js";
+import { DataImportService, PortableImportError } from "./data-import.js";
+import { exportPortableDocument } from "./portable-format.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
@@ -120,8 +127,10 @@ function normalizeActionableQuery(raw: unknown): ActionableQuery {
 }
 
 export function buildApp({ prisma, logger = false }: BuildAppOptions) {
+  const dataImports = new DataImportService(prisma);
   const app = Fastify({
     logger,
+    bodyLimit: 6 * 1024 * 1024,
     genReqId(request) {
       const incoming = request.headers["x-correlation-id"];
       return typeof incoming === "string" && incoming.trim() ? incoming : randomUUID();
@@ -134,6 +143,11 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
   });
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof PortableImportError) {
+      return problem(request, reply, error.status, error.code, error.message, {
+        errors: error.errors,
+      });
+    }
     if (error instanceof DomainValidationError) {
       return problem(request, reply, 422, error.code, error.message, {
         errors: error.fieldErrors,
@@ -157,6 +171,22 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
         detail: `Reload the target and retry from version ${error.currentVersion}.`,
       });
     }
+    const statusCode =
+      typeof error === "object" && error !== null && "statusCode" in error
+        ? Number(error.statusCode)
+        : 0;
+    if (statusCode === 400) {
+      return problem(request, reply, 400, "MALFORMED_JSON", "The uploaded JSON is malformed.");
+    }
+    if (statusCode === 413) {
+      return problem(
+        request,
+        reply,
+        413,
+        "IMPORT_TOO_LARGE",
+        "The import exceeds the 6 MB server limit.",
+      );
+    }
 
     request.log.error({ err: error }, "Unhandled request error");
     return problem(request, reply, 500, "INTERNAL_ERROR", "The request could not be completed.");
@@ -173,6 +203,56 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
 
   app.get("/api/scopes", async () => {
     return scopeOptionsResponseSchema.parse(await listScopeOptions(prisma));
+  });
+
+  app.post("/api/data/import-previews", async (request) => {
+    return importPreviewResponseSchema.parse(await dataImports.preview(request.body));
+  });
+
+  app.post<{ Params: { token: string } }>(
+    "/api/data/import-previews/:token/selections",
+    async (request, reply) => {
+      const parsed = prepareImportCommitRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return problem(request, reply, 422, "VALIDATION_ERROR", "Check the import selections.", {
+          errors: fieldErrors(parsed.error),
+        });
+      }
+      return prepareImportCommitResponseSchema.parse(
+        dataImports.prepare(request.params.token, parsed.data),
+      );
+    },
+  );
+
+  app.post<{ Params: { token: string } }>(
+    "/api/data/import-previews/:token/commit",
+    async (request, reply) => {
+      const parsed = commitImportRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return problem(request, reply, 422, "VALIDATION_ERROR", "Check the import commit.", {
+          errors: fieldErrors(parsed.error),
+        });
+      }
+      return importCommitResponseSchema.parse(
+        await dataImports.commit(request.params.token, parsed.data),
+      );
+    },
+  );
+
+  app.get("/api/data/export", async (_request, reply) => {
+    const exportedAt = new Date();
+    const stamp = exportedAt
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}Z$/, "Z")
+      .replace("T", "-");
+    reply.header(
+      "content-disposition",
+      `attachment; filename="actionables-backup-${stamp}.json"`,
+    );
+    reply.header("content-type", "application/json; charset=utf-8");
+    reply.header("x-actionables-sensitive-data", "technical paths and research notes");
+    return exportPortableDocument(prisma, { exportedAt });
   });
 
   app.get<{ Querystring: Record<string, unknown> }>("/api/actionables", async (request) => {

@@ -5,6 +5,9 @@ import {
   dashboardResponseSchema,
   problemDetailsSchema,
   scopeOptionsResponseSchema,
+  importCommitResponseSchema,
+  importPreviewResponseSchema,
+  prepareImportCommitResponseSchema,
   type ActionableDetail,
   type ActionableQuery,
   type ActionablesListResponse,
@@ -19,6 +22,11 @@ import {
   type DetachParentRequest,
   type ScopeOptionsResponse,
   type DashboardResponse,
+  type ImportCommitResponse,
+  type ImportPreviewResponse,
+  type PortableDocument,
+  type PrepareImportCommitRequest,
+  type PrepareImportCommitResponse,
   type StatusTransitionRequest,
   type SetParentRequest,
   type UpdateActionableRequest,
@@ -210,3 +218,71 @@ export const restoreDependency = (
   relationshipId: string,
   input: DependencyActionRequest,
 ) => relationshipRequest(`/api/actionables/${id}/dependencies/${relationshipId}/restore`, "POST", input);
+
+export async function previewPortableImport(
+  document: unknown,
+): Promise<ImportPreviewResponse> {
+  return importPreviewResponseSchema.parse(
+    await requestJson("/api/data/import-previews", {
+      method: "POST",
+      body: JSON.stringify(document),
+    }),
+  );
+}
+
+export async function preparePortableImport(
+  previewToken: string,
+  input: PrepareImportCommitRequest,
+): Promise<PrepareImportCommitResponse> {
+  return prepareImportCommitResponseSchema.parse(
+    await requestJson(
+      `/api/data/import-previews/${encodeURIComponent(previewToken)}/selections`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function commitPortableImport(
+  previewToken: string,
+  input: {
+    contentDigest: string;
+    commitToken: string;
+    selectionsDigest: string;
+  },
+): Promise<ImportCommitResponse> {
+  return importCommitResponseSchema.parse(
+    await requestJson(
+      `/api/data/import-previews/${encodeURIComponent(previewToken)}/commit`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+  );
+}
+
+export async function downloadPortableExport(): Promise<{
+  document: PortableDocument;
+  filename: string;
+}> {
+  const response = await fetch("/api/data/export", {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    const payload = await response.json();
+    const parsed = problemDetailsSchema.safeParse(payload);
+    if (parsed.success) throw new ApiProblem(parsed.data);
+    throw new Error(`Export failed with ${response.status}.`);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename =
+    disposition.match(/filename="([^"]+)"/)?.[1] ??
+    "actionables-backup.json";
+  return {
+    document: (await response.json()) as PortableDocument,
+    filename,
+  };
+}

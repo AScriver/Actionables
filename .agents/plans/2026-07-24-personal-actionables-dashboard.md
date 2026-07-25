@@ -11,7 +11,7 @@ A local, single-user web application can be implemented without redesigning the 
 
 ## Global constraints
 
-- The completed checkpoint authorized only T-005. Do not begin general import/export UI, authentication, T-006 or later-slice behavior, and do not mutate the representative `WWW` repository.
+- The completed checkpoint authorizes only T-006. Implement the final functional import/export MVP slice and stop before T-007; do not add release-hardening work or mutate the representative `WWW` repository.
 - Initial use is local and single-user. Do not add authentication, accounts, permissions, collaboration, notifications, cloud infrastructure, or synchronization.
 - Optimize for long, technical, Markdown-heavy findings and a dense desktop workflow; mobile is a usable companion, not the primary authoring surface.
 - Preserve hierarchy and dependency as separate relationships with separate rules and UI.
@@ -76,6 +76,7 @@ A local, single-user web application can be implemented without redesigning the 
 - Resolved 2026-07-24: the user approved the corrected T-004-before-T-003 execution order, explicit lifecycle transition matrix, and updated task authorities. T-004 is authorized.
 - Resolved 2026-07-24: the user approved T-004 and authorized T-003 hierarchy/dependency implementation, a focused T-003 commit, and a stop before T-005.
 - Resolved 2026-07-25: the user approved T-005 daily-use shell implementation, a focused T-005 commit, a clean worktree, and a stop before the next plan task.
+- Resolved 2026-07-25: the user approved T-006 as the final functional MVP slice, required one shared versioned preview/commit pipeline for the reviewed seed and uploaded JSON, authorized a focused T-006 commit, and required a stop before T-007.
 
 ## 1. Product definition
 
@@ -1288,7 +1289,7 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 | T-004 | None | Core lifecycle, evidence, research, validation, and history make completion trustworthy | T-002 | Complete |
 | T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-004 | Complete |
 | T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Complete |
-| T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Pending |
+| T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Complete |
 | T-007 | None | Responsive, accessible MVP is verified for local Windows use | T-005, T-006 | Pending |
 
 ## Task details
@@ -1341,10 +1342,10 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 
 ### T-006 — Import and export real data
 
-- Authority: Codex ingestion strategy and import/export MVP boundary.
-- Done when: the reviewed 32-item seed and versioned user JSON use one preview/commit path with no-op reimport, conflict safety, atomic failure, and equivalent export/reload.
-- Touches: import/export contracts, reconciler, seed file, Data UI, persistence, tests.
-- Verify: count/content snapshot; identical/changed/conflicting reimports; rejected atomic import; export schema and fresh-database equivalence.
+- Authority: Codex ingestion strategy and import/export MVP boundary, plus the approved T-006 brief at `C:\Users\AustinScriver\.codex\attachments\34fe4285-bcc7-4064-ae7d-199edfc667a2\pasted-text.txt`.
+- Done when: the reviewed 32-item seed and versioned user JSON use one non-mutating preview, selection authorization, and atomic commit path; stable portable identities, field-level source/local reconciliation, explicit relationship suggestions, stale/replay protection, deterministic export, and fresh-database semantic equivalence satisfy the approved brief.
+- Touches: versioned import/export contracts and documentation, shared reconciler and seed adapter, provenance/import-summary persistence, Data UI, API/client surfaces, and focused domain/integration/browser tests.
+- Verify: reviewed 32-item count/content and top-level/subtask snapshot; identical/reordered/changed/conflicting reimports; malformed/future/oversized/deep/duplicate/missing/invalid/unsafe/cyclic inputs; stale, modified, concurrent, failed, and replayed commits; all-or-nothing writes; deterministic full-state export/reload equivalence; keyboard/responsive/console review; empty-database migrations, typecheck, tests, build, and living-plan validation.
 
 ### T-007 — Verify the MVP release
 
@@ -1386,6 +1387,8 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - 2026-07-25: Deliberate visual differences — relationship management remains inside compact inspector sections and dense list indicators; no graph canvas, new navigation destination, large cards, or T-005 dashboard/archive surface was introduced.
 - 2026-07-25: T-005 complete — added server-authoritative operational queues, shared list/dashboard query semantics, canonical URL-backed discovery and selection, stable sorting, archive impact and optimistic concurrency, direct and inherited archival, archived deep links, preserved relationships/history, deliberate loading/error/offline states, and dense responsive navigation without adding later-slice features.
 - 2026-07-25: Deliberate visual differences — the dashboard uses compact two-column queue panels at desktop/laptop and one column on mobile; totals remain a thin inline strip rather than oversized cards, the existing Actionables table and inspector remain the daily detail surface, and no charts were added.
+- 2026-07-25: T-006 complete — added schema-version-1 portable backup/restore, one shared non-mutating preview and atomic commit service for seed and uploaded JSON, field-baseline conflict safety, explicit suggestion confirmation, stale/content/selection/replay protection, deterministic export, and restrained Data UI without beginning T-007.
+- 2026-07-25: Deliberate visual differences — Data remains a compact form-like management surface inside the approved shell; preview totals use a thin six-cell strip, record differences use native disclosure rows, and no wizard chrome, oversized cards, charts, or new visual system was introduced.
 
 ## Validation log
 
@@ -1425,11 +1428,20 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - T-005: `pnpm exec playwright test --reporter=list` completed with 12 passing Chromium tests covering URL refresh/history, fresh deep links, clearable filters, dashboard navigation, keyboard archive confirmation and focus return, archived detail/restore, loading/API failures, mobile return-to-results, lifecycle, relationships, responsive behavior, and clean console assertions.
 - T-005: screenshots at 1586×990, 1280×800, and 390×844 were captured under `output/playwright/t005-*.png` and visually inspected; the dashboard remains compact and information-dense, the Actionables shell retains its approved proportions, and no horizontal page overflow was observed.
 - T-005: production output measured 375.58 kB / 108.53 kB gzip for the main JavaScript chunk, 154.00 kB / 45.88 kB gzip for the lazy Markdown renderer, and 42.66 kB / 9.12 kB gzip for CSS; Vite emitted no chunk-size advisory.
+- T-006: `pnpm run typecheck`, `pnpm test`, and `pnpm run build` completed successfully; Vitest reported 38 passing API/domain/integration tests across five files, including seven focused portable-data tests.
+- T-006: the reviewed seed used the shared service to create 32 actionables and four explicit hierarchy records in a fresh database, retained 28 top-level rows, produced 32 actionable no-ops on immediate and reordered reimport, preserved the reviewed titles/Markdown/references/provenance, and reported `0 created, 0 updated, 32 unchanged` on the final setup reimport.
+- T-006: field-baseline tests proved safe source updates, source-versus-local divergence conflicts, unchanged-source local-edit preservation, explicit conflict skipping, unconfirmed relationship suggestions creating no facts, confirmed-suggestion provenance, and suppression of already represented suggestions.
+- T-006: security/failure tests covered malformed and oversized JSON, future/unknown format versions, duplicate identifiers, missing references, invalid enums/timestamps, prototype-style keys, deep input, unsafe locators as inert restored text, self/duplicate/cyclic/excessive-depth relationships, stale and expired previews, changed digests/selections, concurrent edits, forced transactional failure, and replay.
+- T-006: a deterministic fresh-database equivalence test restored representative user edits, lifecycle/status history, validation correction chain, existing hierarchy, cross-scope waived dependency, user source, tags, archive inheritance, activities, imported evidence, and provenance; canonical semantic snapshots matched after export/import/re-export.
+- T-006: all seven migrations applied from an empty temporary SQLite database and `prisma migrate status` reported the schema up to date; the temporary database was removed after verification.
+- T-006: the full Playwright suite reported 14 passing Chromium tests, and the final focused Data suite reported two passing tests covering keyboard navigation, context preservation, file preview, no mutation before commit, selection authorization, explicit commit, affected-actionable links, timestamped download, mobile overflow, and clean console behavior.
+- T-006: final desktop and mobile screenshots at 1586×990 and 390×844 were captured under `output/playwright/t006-data-*.png` and visually inspected; the Data surface remains restrained, keyboard-native, readable, and free of observed clipping or horizontal page overflow.
+- T-006: production output measured 390.12 kB / 112.03 kB gzip for the main JavaScript chunk, 154.00 kB / 45.88 kB gzip for the lazy Markdown renderer, and 46.50 kB / 9.80 kB gzip for CSS; Vite emitted no chunk-size advisory.
 
 ## Final reconciliation
 
 - Product direction: **Actionables** as the dense primary interface, with a local dependency view from Workbench and per-actionable activity/source history from Signal.
 - Technology stack: **Node.js 24 LTS, TypeScript, pnpm, React + Vite, React Router Declarative mode, TanStack Query, Fastify, Zod, Prisma + SQLite + `better-sqlite3`, React Hook Form, safe GFM Markdown, Tailwind CSS, Vitest/Testing Library, and Playwright**.
 - Exact MVP: the features listed in “MVP boundaries”; all listed non-goals remain excluded.
-- Current milestone: T-002 is complete; actionables can be captured, fully edited, triaged through server-authoritative transitions, refreshed from stable deep links, and recovered after stale-version conflicts without losing drafts or imported evidence.
-- Current milestone: T-005 is complete and committed as the daily-use shell milestone; T-006 remains Pending and has not been activated or implemented.
+- Current milestone: T-006 is complete as the final functional MVP slice; versioned portable import/export, seed reconciliation, conflict safety, atomic commit, and full-state restoration are implemented and verified.
+- Stop boundary: T-007 remains Pending and has not been activated or implemented.
