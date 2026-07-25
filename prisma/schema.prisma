@@ -11,6 +11,8 @@ model Project {
   id           String       @id @default(cuid())
   externalKey  String       @unique
   name         String
+  version      Int          @default(1)
+  archivedAt   DateTime?
   repositories Repository[]
   worktrees    Worktree[]
   actionables  Actionable[]
@@ -22,6 +24,8 @@ model Repository {
   id          String       @id @default(cuid())
   externalKey String       @unique
   name        String
+  version     Int          @default(1)
+  archivedAt  DateTime?
   localPath   String?
   projectId   String
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -35,6 +39,8 @@ model Worktree {
   id           String       @id @default(cuid())
   externalKey  String       @unique
   name         String
+  version      Int          @default(1)
+  archivedAt   DateTime?
   localPath    String?
   projectId    String
   repositoryId String
@@ -57,6 +63,7 @@ model Actionable {
   effort                 String
   evidenceState          String     @default("Unclassified")
   version                Int        @default(1)
+  archivedAt             DateTime?
   updatedLabel           String
   manualBlockerMd        String?
   dismissalReasonMd      String?
@@ -96,6 +103,8 @@ model Actionable {
 
   @@index([projectId, worktreeId, sourceOrdinal])
   @@index([priority, status])
+  @@index([archivedAt, status, updatedAt])
+  @@index([projectId, repositoryId, worktreeId, archivedAt])
 }
 
 model ActionableStatusHistory {

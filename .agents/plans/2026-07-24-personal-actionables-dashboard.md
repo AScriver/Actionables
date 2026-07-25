@@ -11,13 +11,13 @@ A local, single-user web application can be implemented without redesigning the 
 
 ## Global constraints
 
-- The current checkpoint authorizes only T-003. Do not implement dashboard/archive behavior, general import/export UI, authentication, T-005 or later-slice behavior, and do not mutate the representative `WWW` repository.
+- The completed checkpoint authorized only T-005. Do not begin general import/export UI, authentication, T-006 or later-slice behavior, and do not mutate the representative `WWW` repository.
 - Initial use is local and single-user. Do not add authentication, accounts, permissions, collaboration, notifications, cloud infrastructure, or synchronization.
 - Optimize for long, technical, Markdown-heavy findings and a dense desktop workflow; mobile is a usable companion, not the primary authoring surface.
 - Preserve hierarchy and dependency as separate relationships with separate rules and UI.
 - Preserve source wording and evidence. Imported inferences must be visibly labeled and must not silently become facts.
 - Prefer established platform behavior and a small dependency set. Defer graph canvases, real-time integration, and speculative enterprise abstractions.
-- The user requested a plan-only commit before implementation and a focused T-004 implementation commit after validation.
+- The user requested a focused T-005 implementation commit after validation, a clean worktree, and a stop before the next plan task.
 
 ## Research
 
@@ -75,6 +75,7 @@ A local, single-user web application can be implemented without redesigning the 
 - Resolved 2026-07-24: the frontend checkpoint was rendered, compared, corrected, and explicitly approved. T-001 is authorized.
 - Resolved 2026-07-24: the user approved the corrected T-004-before-T-003 execution order, explicit lifecycle transition matrix, and updated task authorities. T-004 is authorized.
 - Resolved 2026-07-24: the user approved T-004 and authorized T-003 hierarchy/dependency implementation, a focused T-003 commit, and a stop before T-005.
+- Resolved 2026-07-25: the user approved T-005 daily-use shell implementation, a focused T-005 commit, a clean worktree, and a stop before the next plan task.
 
 ## 1. Product definition
 
@@ -1286,7 +1287,7 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 | T-002 | None | Actionables can be captured, edited, and triaged | T-001 | Complete |
 | T-004 | None | Core lifecycle, evidence, research, validation, and history make completion trustworthy | T-002 | Complete |
 | T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-004 | Complete |
-| T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Pending |
+| T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Complete |
 | T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Pending |
 | T-007 | None | Responsive, accessible MVP is verified for local Windows use | T-005, T-006 | Pending |
 
@@ -1383,6 +1384,8 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - 2026-07-24: T-003 authorized — the user approved T-004 and authorized the documented hierarchy, dependency, derived-blocking, waiver, parent-completion, and child/parent-reopen policies; T-005 remains outside the boundary.
 - 2026-07-25: T-003 complete — added separate versioned hierarchy and dependency models/services/APIs, one-level same-scope hierarchy, cross-scope dependency edges with transaction and database-boundary cycle protection, explicit waiver/removal/restore activity, derived blocking, terminal-child completion gates, and atomic one-level parent reopening.
 - 2026-07-25: Deliberate visual differences — relationship management remains inside compact inspector sections and dense list indicators; no graph canvas, new navigation destination, large cards, or T-005 dashboard/archive surface was introduced.
+- 2026-07-25: T-005 complete — added server-authoritative operational queues, shared list/dashboard query semantics, canonical URL-backed discovery and selection, stable sorting, archive impact and optimistic concurrency, direct and inherited archival, archived deep links, preserved relationships/history, deliberate loading/error/offline states, and dense responsive navigation without adding later-slice features.
+- 2026-07-25: Deliberate visual differences — the dashboard uses compact two-column queue panels at desktop/laptop and one column on mobile; totals remain a thin inline strip rather than oversized cards, the existing Actionables table and inspector remain the daily detail surface, and no charts were added.
 
 ## Validation log
 
@@ -1417,6 +1420,11 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - T-003: `pnpm run typecheck`, `pnpm test`, and `pnpm run build` completed successfully; Vitest reported 25 passing tests, including hierarchy integrity, cross-scope dependency state, Dismissed/Done semantics, waiver/restore/removal, multihop and concurrent cycle safety, stale versions, parent completion, and transactional parent reopening.
 - T-003: the established Playwright suite reported 7 passing Chromium tests; the focused relationship browser test also passed with desktop/mobile navigation, compact controls, explicit derived-blocking state, responsive layout, refresh, and zero console errors.
 - T-003: desktop and mobile relationship screenshots were visually inspected; controls remain compact and readable without clipping or oversized-card regression. The pre-existing Vite chunk-size warning remains deferred.
+- T-005: `pnpm run db:setup` applied `20260725020000_daily_use_shell`, retained the 32 reviewed seed items unchanged, and `pnpm exec prisma migrate status` reported six migrations with the schema up to date.
+- T-005: `pnpm run typecheck`, `pnpm test`, and `pnpm run build` completed successfully; Vitest reported 31 passing API/domain tests, including all derived queues, dashboard/list equivalence, combined cross-scope discovery, technical-reference search, malformed-query normalization, actionable and container archive/restore, stale conflicts, inherited archival, independently archived descendants, and archived unresolved prerequisites.
+- T-005: `pnpm exec playwright test --reporter=list` completed with 12 passing Chromium tests covering URL refresh/history, fresh deep links, clearable filters, dashboard navigation, keyboard archive confirmation and focus return, archived detail/restore, loading/API failures, mobile return-to-results, lifecycle, relationships, responsive behavior, and clean console assertions.
+- T-005: screenshots at 1586×990, 1280×800, and 390×844 were captured under `output/playwright/t005-*.png` and visually inspected; the dashboard remains compact and information-dense, the Actionables shell retains its approved proportions, and no horizontal page overflow was observed.
+- T-005: production output measured 375.58 kB / 108.53 kB gzip for the main JavaScript chunk, 154.00 kB / 45.88 kB gzip for the lazy Markdown renderer, and 42.66 kB / 9.12 kB gzip for CSS; Vite emitted no chunk-size advisory.
 
 ## Final reconciliation
 
@@ -1424,4 +1432,4 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - Technology stack: **Node.js 24 LTS, TypeScript, pnpm, React + Vite, React Router Declarative mode, TanStack Query, Fastify, Zod, Prisma + SQLite + `better-sqlite3`, React Hook Form, safe GFM Markdown, Tailwind CSS, Vitest/Testing Library, and Playwright**.
 - Exact MVP: the features listed in “MVP boundaries”; all listed non-goals remain excluded.
 - Current milestone: T-002 is complete; actionables can be captured, fully edited, triaged through server-authoritative transitions, refreshed from stable deep links, and recovered after stale-version conflicts without losing drafts or imported evidence.
-- Current milestone: T-003 and its prerequisite T-004 are complete; T-005 remains Pending and was not activated or implemented.
+- Current milestone: T-005 is complete and committed as the daily-use shell milestone; T-006 remains Pending and has not been activated or implemented.

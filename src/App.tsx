@@ -1,5 +1,8 @@
 import {
   Activity,
+  Archive,
+  ArchiveRestore,
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -10,9 +13,9 @@ import {
   ExternalLink,
   FileCode2,
   GitBranch,
+  LayoutDashboard,
   List,
   Menu,
-  MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -20,6 +23,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  RefreshCw,
   Search,
   Settings,
   SlidersHorizontal,
@@ -28,7 +32,10 @@ import {
 import {
   type CreateActionableRequest,
   type ActionableDetail,
+  type ActionableQuery,
   type ActionableSummary,
+  type ArchiveImpactResponse,
+  type ArchiveTargetKind,
   type Effort,
   type EvidenceState,
   type Priority,
@@ -48,11 +55,15 @@ import {
   detachParent,
   fetchActionable,
   fetchActionables,
+  fetchArchiveImpact,
+  fetchDashboard,
   fetchScopeOptions,
   recordValidation,
   removeDependency,
   restoreDependency,
   setParent,
+  setActionableArchived,
+  setScopeArchived,
   transitionActionable,
   updateActionable,
   waiveDependency,
@@ -924,6 +935,7 @@ function Inspector({
   onMutated,
   onNavigate,
   onNotice,
+  onArchive,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
@@ -936,6 +948,7 @@ function Inspector({
   onMutated: (saved: ActionableDetail, notice: string) => void;
   onNavigate: (id: number) => void;
   onNotice: (notice: string) => void;
+  onArchive: () => void;
 }) {
   return (
     <>
@@ -947,7 +960,12 @@ function Inspector({
           <h2>{selected.title}</h2>
           <div className="inspector-actions">
             <IconButton label="Edit actionable" onClick={onEdit}><Pencil /></IconButton>
-            <IconButton label="More actionable actions"><MoreVertical /></IconButton>
+            {!selected.archiveState.isArchived && (
+              <IconButton label="Archive actionable" onClick={onArchive}><Archive /></IconButton>
+            )}
+            {selected.archiveState.directlyArchived && (
+              <IconButton label="Restore actionable" onClick={onArchive}><ArchiveRestore /></IconButton>
+            )}
           </div>
         </div>
         <div className="metadata-row">
@@ -968,7 +986,26 @@ function Inspector({
         </div>
       </header>
 
-      <LifecycleControls key={`lifecycle-${selected.id}`} selected={selected} onMutated={onMutated} />
+      {selected.archiveState.isArchived && (
+        <div className="archived-banner" role="status">
+          <Archive aria-hidden="true" />
+          <div>
+            <strong>Archived actionable</strong>
+            <span>
+              {selected.archiveState.directlyArchived
+                ? "Hidden from normal views. Restore preserves workflow, validation, relationships, and history."
+                : `Hidden by archived ${selected.archiveState.inheritedFrom.join(" and ")}. Restore that scope first.`}
+            </span>
+          </div>
+          {selected.archiveState.directlyArchived && (
+            <button type="button" onClick={onArchive}>Restore</button>
+          )}
+        </div>
+      )}
+
+      {!selected.archiveState.isArchived && (
+        <LifecycleControls key={`lifecycle-${selected.id}`} selected={selected} onMutated={onMutated} />
+      )}
 
       <nav className="inspector-tabs" aria-label="Actionable detail">
         {(["finding", "research", "validation"] as InspectorTab[]).map((tab) => (
@@ -1620,11 +1657,11 @@ function ActionableForm({
   );
 }
 
-export default function App() {
+function LegacyApp() {
   const queryClient = useQueryClient();
   const listQuery = useQuery({
     queryKey: ["actionables"],
-    queryFn: fetchActionables,
+    queryFn: () => fetchActionables(),
   });
   const scopesQuery = useQuery({
     queryKey: ["scopes"],
@@ -2053,6 +2090,7 @@ export default function App() {
               if (item) selectRow(item);
             }}
             onNotice={setNotice}
+            onArchive={() => setNotice("Archive is available in the daily-use shell.")}
           />
         ) : (
           <div className="inspector-loading" role="status">
@@ -2075,6 +2113,853 @@ export default function App() {
           scopes={scopesQuery.data}
           onClose={() => setFormMode(null)}
           onSaved={handleSaved}
+        />
+      )}
+    </div>
+  );
+}
+
+type ViewMode = "dashboard" | "actionables" | "archive";
+type QueryState = Partial<Record<keyof ActionableQuery, string>>;
+type ArchiveDialogTarget = {
+  kind: ArchiveTargetKind;
+  id: string;
+  name: string;
+  version: number;
+  archived: boolean;
+};
+
+const queryKeys: Array<keyof ActionableQuery> = [
+  "project",
+  "repository",
+  "worktree",
+  "status",
+  "manualBlocked",
+  "dependencyBlocked",
+  "priority",
+  "effort",
+  "evidence",
+  "tag",
+  "archived",
+  "parent",
+  "validation",
+  "reopened",
+  "q",
+  "sort",
+];
+
+function viewFromLocation(): ViewMode {
+  if (window.location.pathname === "/dashboard") {
+    return "dashboard";
+  }
+  if (window.location.pathname === "/archive") return "archive";
+  return "actionables";
+}
+
+function queryFromLocation(): QueryState {
+  const params = new URLSearchParams(window.location.search);
+  return Object.fromEntries(
+    queryKeys.flatMap((key) => {
+      const value = params.get(key);
+      return value ? [[key, value]] : [];
+    }),
+  ) as QueryState;
+}
+
+function selectedFromLocation() {
+  const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);
+  return match ? Number(match[1]) : null;
+}
+
+function searchFor(query: QueryState) {
+  const params = new URLSearchParams();
+  queryKeys.forEach((key) => {
+    const value = query[key];
+    if (value) params.set(key, value);
+  });
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+function routeFor(view: ViewMode, selectedId: number | null, query: QueryState) {
+  const path =
+    selectedId !== null
+      ? `/actionables/${selectedId}`
+      : view === "dashboard"
+        ? "/dashboard"
+        : view === "archive"
+          ? "/archive"
+          : "/";
+  return `${path}${searchFor(query)}`;
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof ApiProblem) {
+    return `${error.problem.title} · Request ${error.problem.requestId}`;
+  }
+  return error instanceof Error ? error.message : "The request could not be completed.";
+}
+
+function DashboardPanel({
+  data,
+  pending,
+  error,
+  onRetry,
+  onOpenQueue,
+  onOpenItem,
+}: {
+  data: Awaited<ReturnType<typeof fetchDashboard>> | undefined;
+  pending: boolean;
+  error: unknown;
+  onRetry: () => void;
+  onOpenQueue: (query: Record<string, string>) => void;
+  onOpenItem: (item: ActionableSummary) => void;
+}) {
+  if (pending) {
+    return <div className="dashboard-state" role="status"><RefreshCw className="spin" />Loading operational queues…</div>;
+  }
+  if (error || !data) {
+    return (
+      <div className="dashboard-state error-state" role="alert">
+        <AlertTriangle />
+        <strong>Could not load the dashboard</strong>
+        <span>{errorMessage(error)}</span>
+        <button type="button" onClick={onRetry}>Retry</button>
+      </div>
+    );
+  }
+  if (data.counts.total === 0) {
+    return (
+      <div className="dashboard-state">
+        <CircleDot />
+        <strong>No actionables yet</strong>
+        <span>Capture an actionable or import reviewed findings to start the daily queue.</span>
+      </div>
+    );
+  }
+  return (
+    <section className="dashboard-panel" aria-labelledby="dashboard-title">
+      <header className="dashboard-heading">
+        <div>
+          <h1 id="dashboard-title">Dashboard</h1>
+          <p>Operational queues derived from current workflow, validation, hierarchy, and dependency state.</p>
+        </div>
+        <div className="dashboard-counts" aria-label="Actionable totals">
+          <span><strong>{data.counts.total}</strong> total</span>
+          <span><strong>{data.counts.topLevel}</strong> top-level</span>
+          <span><strong>{data.counts.nested}</strong> subtasks</span>
+        </div>
+      </header>
+      <div className="queue-grid">
+        {data.queues.map((queue) => (
+          <section className="queue-panel" key={queue.key}>
+            <button type="button" className="queue-heading" onClick={() => onOpenQueue(queue.query)}>
+              <span>{queue.label}</span>
+              <strong>{queue.count}</strong>
+              <ChevronRight aria-hidden="true" />
+            </button>
+            <p>{queue.description}</p>
+            {queue.items.length ? (
+              <ol>
+                {queue.items.map((item) => (
+                  <li key={item.id}>
+                    <button type="button" onClick={() => onOpenItem(item)}>
+                      <Badge tone={item.priority}>{item.priority}</Badge>
+                      <span>{item.title}</span>
+                      {item.isDependencyBlocked && <span className="queue-blocked">blocked</span>}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <span className="queue-empty">No items in this queue.</span>
+            )}
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ArchiveDialog({
+  target,
+  impact,
+  pending,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  target: ArchiveDialogTarget;
+  impact: ArchiveImpactResponse | undefined;
+  pending: boolean;
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const action = target.archived ? "Restore" : "Archive";
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="archive-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="archive-dialog-title"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !saving) onClose();
+        }}
+      >
+        <header>
+          <Archive aria-hidden="true" />
+          <div>
+            <h2 id="archive-dialog-title">{action} {target.name}?</h2>
+            <p>
+              {target.archived
+                ? "Restoring preserves its prior workflow, validation, hierarchy, dependencies, and history."
+                : "Archiving changes visibility only. Workflow status and relationships are preserved."}
+            </p>
+          </div>
+        </header>
+        {pending ? (
+          <div className="archive-impact" role="status">Checking impact…</div>
+        ) : impact ? (
+          <div className="archive-impact">
+            <strong>Impact</strong>
+            {impact.warnings.length ? (
+              <ul>{impact.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+            ) : (
+              <p>No related active work will be hidden.</p>
+            )}
+          </div>
+        ) : null}
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        <footer>
+          <button type="button" onClick={onClose} disabled={saving} autoFocus>Cancel</button>
+          <button type="button" className="primary-action" onClick={onConfirm} disabled={pending || saving}>
+            {saving ? `${action}ing…` : `${action} ${target.name}`}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+export default function App() {
+  const queryClient = useQueryClient();
+  const [view, setView] = useState<ViewMode>(viewFromLocation);
+  const [query, setQuery] = useState<QueryState>(() => {
+    const initial = queryFromLocation();
+    return viewFromLocation() === "archive" ? { ...initial, archived: "archived" } : initial;
+  });
+  const [selectedId, setSelectedId] = useState<number | null>(selectedFromLocation);
+  const [searchInput, setSearchInput] = useState(() => queryFromLocation().q ?? "");
+  const [activeTab, setActiveTab] = useState<InspectorTab>("finding");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [inspectorHidden, setInspectorHidden] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
+    try {
+      return new Set<number>(JSON.parse(sessionStorage.getItem("expanded-actionable-parents") ?? "[]"));
+    } catch {
+      return new Set<number>();
+    }
+  });
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(
+    () => selectedFromLocation() !== null && window.matchMedia("(max-width: 760px)").matches,
+  );
+  const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
+  const [validationChecks, setValidationChecks] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState("");
+  const [online, setOnline] = useState(navigator.onLine);
+  const [archiveTarget, setArchiveTarget] = useState<ArchiveDialogTarget | null>(null);
+  const [archiveSaving, setArchiveSaving] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+  const archiveReturnFocus = useRef<HTMLElement | null>(null);
+  const tableBodyRef = useRef<HTMLDivElement | null>(null);
+
+  const listQuery = useQuery({
+    queryKey: ["actionables", query],
+    queryFn: () => fetchActionables(query),
+    enabled: view !== "dashboard" || selectedId !== null,
+  });
+  const scopesQuery = useQuery({ queryKey: ["scopes"], queryFn: fetchScopeOptions });
+  const dashboardScope = {
+    project: query.project,
+    repository: query.repository,
+    worktree: query.worktree,
+  };
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard", dashboardScope],
+    queryFn: () => fetchDashboard(dashboardScope),
+    enabled: view === "dashboard" && selectedId === null,
+  });
+  const detailQuery = useQuery({
+    queryKey: ["actionable", selectedId],
+    queryFn: () => fetchActionable(selectedId!),
+    enabled: selectedId !== null,
+  });
+  const impactQuery = useQuery({
+    queryKey: ["archive-impact", archiveTarget?.kind, archiveTarget?.id],
+    queryFn: () => fetchArchiveImpact(archiveTarget!.kind, archiveTarget!.id),
+    enabled: archiveTarget !== null,
+  });
+
+  const actionables = listQuery.data?.items ?? [];
+  const selected = detailQuery.data;
+  const scopes = scopesQuery.data?.projects ?? [];
+  const activeProject = scopes.find((item) => item.id === query.project) ?? scopes[0];
+  const repositories = activeProject?.repositories ?? [];
+  const activeRepository = repositories.find((item) => item.id === query.repository) ?? repositories[0];
+  const worktrees = activeRepository?.worktrees ?? [];
+  const activeWorktree = worktrees.find((item) => item.id === query.worktree) ?? worktrees[0];
+
+  const replaceLocation = (
+    nextView: ViewMode,
+    nextSelected: number | null,
+    nextQuery: QueryState,
+    replace = false,
+  ) => {
+    const method = replace ? "replaceState" : "pushState";
+    window.history[method]({}, "", routeFor(nextView, nextSelected, nextQuery));
+    setView(nextView);
+    setSelectedId(nextSelected);
+    setQuery(nextQuery);
+  };
+
+  const patchQuery = (patch: QueryState, nextView = view) => {
+    const next = { ...query };
+    Object.entries(patch).forEach(([key, value]) => {
+      if (!value || value === "all" || (key === "archived" && value === "active") || (key === "sort" && value === "priority")) {
+        delete next[key as keyof ActionableQuery];
+      } else {
+        next[key as keyof ActionableQuery] = value;
+      }
+    });
+    if (nextView === "archive") next.archived = "archived";
+    replaceLocation(nextView, null, next);
+  };
+
+  useEffect(() => {
+    const onPopState = () => {
+      const nextView = viewFromLocation();
+      const nextQuery = queryFromLocation();
+      if (nextView === "archive") nextQuery.archived = "archived";
+      setView(nextView);
+      setQuery(nextQuery);
+      setSearchInput(nextQuery.q ?? "");
+      const nextSelected = selectedFromLocation();
+      setSelectedId(nextSelected);
+      setMobileDetailOpen(nextSelected !== null && window.matchMedia("(max-width: 760px)").matches);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const current = query.q ?? "";
+      if (searchInput.trim() === current) return;
+      const next = { ...query };
+      if (searchInput.trim()) next.q = searchInput.trim();
+      else delete next.q;
+      replaceLocation(view === "dashboard" ? "actionables" : view, null, next, true);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!listQuery.data) return;
+    const normalized = listQuery.data.result.normalizedQuery;
+    const canonical = searchFor(normalized);
+    if (canonical !== searchFor(query)) {
+      const next = normalized as QueryState;
+      window.history.replaceState({}, "", routeFor(view, selectedId, next));
+      setQuery(next);
+      setSearchInput(next.q ?? "");
+    }
+  }, [listQuery.data]);
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 900px)");
+    const collapse = (event: MediaQueryListEvent | MediaQueryList) => {
+      if (event.matches) setSidebarCollapsed(true);
+    };
+    collapse(mobileViewport);
+    mobileViewport.addEventListener("change", collapse);
+    return () => mobileViewport.removeEventListener("change", collapse);
+  }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem("expanded-actionable-parents", JSON.stringify([...expandedParents]));
+  }, [expandedParents]);
+
+  useEffect(() => {
+    if (!listQuery.data || !tableBodyRef.current) return;
+    const saved = Number(sessionStorage.getItem("actionables-scroll-position") ?? "0");
+    if (Number.isFinite(saved)) tableBodyRef.current.scrollTop = saved;
+  }, [listQuery.data, view]);
+
+  useEffect(() => {
+    const deepLinkedId = selectedFromLocation();
+    if (deepLinkedId !== null && deepLinkedId !== selectedId) {
+      setSelectedId(deepLinkedId);
+    }
+  }, [selectedId, view]);
+
+  const discoveryActive = queryKeys.some(
+    (key) =>
+      !["project", "repository", "worktree", "sort", "archived"].includes(key) &&
+      Boolean(query[key]),
+  );
+  const visibleRows = useMemo(() => {
+    if (discoveryActive || query.parent || query.archived === "archived") return actionables;
+    const byId = new Map(actionables.map((item) => [item.id, item]));
+    return actionables
+      .filter((item) => !item.parentId)
+      .flatMap((item) => {
+        if (!item.childIds || !expandedParents.has(item.id)) return [item];
+        return [item, ...item.childIds.flatMap((id) => byId.get(id) ?? [])];
+      });
+  }, [actionables, discoveryActive, expandedParents, query.parent, query.archived]);
+
+  const selectRow = (item: ActionableSummary) => {
+    replaceLocation("actionables", item.id, query);
+    setActiveTab("finding");
+    setInspectorHidden(false);
+    if (window.matchMedia("(max-width: 760px)").matches) setMobileDetailOpen(true);
+  };
+
+  const invalidateDailyUse = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["actionables"] }),
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      queryClient.invalidateQueries({ queryKey: ["scopes"] }),
+      queryClient.invalidateQueries({ queryKey: ["actionable"] }),
+    ]);
+  };
+
+  const handleSaved = (saved: ActionableDetail, created: boolean) => {
+    queryClient.setQueryData(["actionable", saved.id], saved);
+    void invalidateDailyUse();
+    replaceLocation("actionables", saved.id, query);
+    setActiveTab("finding");
+    setInspectorHidden(false);
+    setFormMode(null);
+    setNotice(created ? "Actionable created and opened." : "Actionable changes saved.");
+  };
+
+  const handleMutated = (saved: ActionableDetail, mutationNotice: string) => {
+    queryClient.setQueryData(["actionable", saved.id], saved);
+    void invalidateDailyUse();
+    setNotice(mutationNotice);
+  };
+
+  const openArchive = (
+    kind: ArchiveTargetKind,
+    id: string | number,
+    name: string,
+    version: number,
+    archived: boolean,
+  ) => {
+    archiveReturnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setArchiveError("");
+    setArchiveTarget({ kind, id: String(id), name, version, archived });
+  };
+
+  const closeArchive = () => {
+    setArchiveTarget(null);
+    window.requestAnimationFrame(() => archiveReturnFocus.current?.focus());
+  };
+
+  const confirmArchive = async () => {
+    if (!archiveTarget) return;
+    setArchiveSaving(true);
+    setArchiveError("");
+    try {
+      if (archiveTarget.kind === "actionable") {
+        const saved = await setActionableArchived(
+          Number(archiveTarget.id),
+          archiveTarget.version,
+          !archiveTarget.archived,
+        );
+        queryClient.setQueryData(["actionable", saved.id], saved);
+      } else {
+        await setScopeArchived(
+          archiveTarget.kind,
+          archiveTarget.id,
+          archiveTarget.version,
+          !archiveTarget.archived,
+        );
+      }
+      setNotice(`${archiveTarget.name} ${archiveTarget.archived ? "restored" : "archived"}.`);
+      closeArchive();
+      await invalidateDailyUse();
+    } catch (error) {
+      setArchiveError(errorMessage(error));
+    } finally {
+      setArchiveSaving(false);
+    }
+  };
+
+  const clearFilters = () => {
+    const preserved: QueryState = {};
+    if (query.project) preserved.project = query.project;
+    if (query.repository) preserved.repository = query.repository;
+    if (query.worktree) preserved.worktree = query.worktree;
+    if (view === "archive") preserved.archived = "archived";
+    setSearchInput("");
+    replaceLocation(view, null, preserved);
+  };
+
+  const activeFilters = queryKeys.filter(
+    (key) =>
+      Boolean(query[key]) &&
+      !["project", "repository", "worktree"].includes(key) &&
+      !(key === "archived" && view === "archive"),
+  );
+  const projectName = activeProject?.name ?? listQuery.data?.project.name ?? "All projects";
+  const worktreeName = activeWorktree?.name ?? "All worktrees";
+  const totalFindings =
+    listQuery.data?.counts.total ?? dashboardQuery.data?.counts.total ?? 0;
+  const shellClasses = [
+    "app-shell",
+    sidebarCollapsed ? "sidebar-collapsed" : "",
+    inspectorHidden ? "inspector-hidden" : "",
+    mobileDetailOpen ? "mobile-detail-open" : "",
+    view === "dashboard" && selectedId === null ? "dashboard-mode" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className={shellClasses}>
+      <aside className="sidebar" aria-label="Projects and worktrees">
+        <div className="product-bar">
+          <span>Actionables</span>
+          <IconButton label="Close project navigation" onClick={() => setSidebarCollapsed(true)}>
+            <PanelLeftClose />
+          </IconButton>
+        </div>
+        <nav className="primary-navigation" aria-label="Primary">
+          <button type="button" className={view === "dashboard" ? "is-selected" : ""} onClick={() => replaceLocation("dashboard", null, {
+            ...(query.project ? { project: query.project } : {}),
+            ...(query.repository ? { repository: query.repository } : {}),
+            ...(query.worktree ? { worktree: query.worktree } : {}),
+          })}>
+            <LayoutDashboard /> Dashboard
+          </button>
+          <button type="button" className={view === "actionables" ? "is-selected" : ""} onClick={() => replaceLocation("actionables", null, {
+            ...(query.project ? { project: query.project } : {}),
+            ...(query.repository ? { repository: query.repository } : {}),
+            ...(query.worktree ? { worktree: query.worktree } : {}),
+          })}>
+            <List /> Actionables
+          </button>
+          <button type="button" className={view === "archive" ? "is-selected" : ""} onClick={() => replaceLocation("archive", null, { archived: "archived" })}>
+            <Archive /> Archive
+          </button>
+        </nav>
+        <div className="project-tree">
+          <div className="tree-label">Projects</div>
+          {scopes.map((project) => (
+            <div className="project-group" key={project.id}>
+              <div className="scope-action-row">
+                <button type="button" className="project-row" onClick={() => patchQuery({ project: project.id, repository: "", worktree: "" }, "actionables")}>
+                  <ChevronDown aria-hidden="true" />
+                  <span>{project.name}</span>
+                  {project.archivedAt && <Archive aria-label="Archived" />}
+                </button>
+                <IconButton
+                  label={`${project.archivedAt ? "Restore" : "Archive"} project ${project.name}`}
+                  onClick={() => openArchive("project", project.id, project.name, project.version, Boolean(project.archivedAt))}
+                >
+                  {project.archivedAt ? <ArchiveRestore /> : <Archive />}
+                </IconButton>
+              </div>
+              {project.repositories.map((repository) => (
+                <div key={repository.id} className="repository-group">
+                  <div className="scope-action-row repository-row">
+                    <button type="button" onClick={() => patchQuery({ project: project.id, repository: repository.id, worktree: "" }, "actionables")}>
+                      <GitBranch /> {repository.name}
+                    </button>
+                    <IconButton
+                      label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
+                      onClick={() => openArchive("repository", repository.id, repository.name, repository.version, Boolean(repository.archivedAt))}
+                    >
+                      {repository.archivedAt ? <ArchiveRestore /> : <Archive />}
+                    </IconButton>
+                  </div>
+                  {repository.worktrees.map((worktree) => (
+                    <div className="scope-action-row" key={worktree.id}>
+                      <WorktreeRow
+                        name={worktree.name}
+                        count={project.id === activeProject?.id && repository.id === activeRepository?.id && worktree.id === activeWorktree?.id ? listQuery.data?.result.scopeTotal : undefined}
+                        selected={query.worktree === worktree.id}
+                        onClick={() => patchQuery({ project: project.id, repository: repository.id, worktree: worktree.id }, "actionables")}
+                      />
+                      <IconButton
+                        label={`${worktree.archivedAt ? "Restore" : "Archive"} worktree ${worktree.name}`}
+                        onClick={() => openArchive("worktree", worktree.id, worktree.name, worktree.version, Boolean(worktree.archivedAt))}
+                      >
+                        {worktree.archivedAt ? <ArchiveRestore /> : <Archive />}
+                      </IconButton>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+          <button type="button" className="scope-row" onClick={() => replaceLocation("actionables", null, {})}>
+            <span className="scope-dot all" /> All actionables <span>{totalFindings}</span>
+          </button>
+        </div>
+        <div className="sidebar-status">
+          <span><CircleDot aria-hidden="true" />{online ? "Local API" : "Offline"}</span>
+          <span>{listQuery.isFetching && !listQuery.isPending ? "Refreshing…" : "Ready"}</span>
+        </div>
+      </aside>
+
+      <header className="topbar">
+        <div className="scope-selectors">
+          <IconButton
+            label={sidebarCollapsed ? "Open project navigation" : "Close project navigation"}
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            pressed={!sidebarCollapsed}
+            className="nav-toggle"
+          >
+            {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
+          </IconButton>
+          <button type="button" className="selector-button" onClick={() => replaceLocation("actionables", null, query)}>
+            {projectName} <ChevronDown aria-hidden="true" />
+          </button>
+          <span className="topbar-divider" />
+          <button type="button" className="selector-button mono" title={worktreeName} onClick={() => replaceLocation("actionables", null, query)}>
+            <GitBranch aria-hidden="true" />{worktreeName} <ChevronDown aria-hidden="true" />
+          </button>
+        </div>
+        <label className="global-search">
+          <Search aria-hidden="true" />
+          <span className="shortcut">⌘K</span>
+          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search titles, findings, notes, tags, paths, symbols…" aria-label="Search actionables" />
+          {searchInput && <button type="button" aria-label="Clear search" onClick={() => setSearchInput("")}><X /></button>}
+        </label>
+        <div className="topbar-actions">
+          <button type="button" className="primary-action" onClick={() => scopesQuery.data ? setFormMode("create") : setNotice("Scope options are still loading.")}>
+            <Plus /> New actionable
+          </button>
+          {view !== "dashboard" && (
+            <div className="filter-wrap">
+              <button type="button" className={`toolbar-button ${filterOpen ? "is-active" : ""}`} onClick={() => setFilterOpen((value) => !value)} aria-expanded={filterOpen}>
+                <SlidersHorizontal /> Filters {activeFilters.length > 0 && <span className="filter-count">{activeFilters.length}</span>}
+              </button>
+              {filterOpen && (
+                <div className="filter-popover advanced-filters">
+                  <label>Status<select value={query.status ?? ""} onChange={(event) => patchQuery({ status: event.target.value })}><option value="">All</option>{["Inbox", "Researching", "Ready", "In progress", "Blocked", "Done", "Dismissed"].map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label>Manual blocking<select value={query.manualBlocked ?? ""} onChange={(event) => patchQuery({ manualBlocked: event.target.value })}><option value="">All</option><option value="yes">Blocked</option><option value="no">Not manually blocked</option></select></label>
+                  <label>Dependency blocking<select value={query.dependencyBlocked ?? ""} onChange={(event) => patchQuery({ dependencyBlocked: event.target.value })}><option value="">All</option><option value="yes">Blocked</option><option value="no">Unblocked</option></select></label>
+                  <label>Priority<select value={query.priority ?? ""} onChange={(event) => patchQuery({ priority: event.target.value })}><option value="">All</option>{priorities.map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label>Effort<select value={query.effort ?? ""} onChange={(event) => patchQuery({ effort: event.target.value })}><option value="">All</option>{efforts.map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label>Evidence<select value={query.evidence ?? ""} onChange={(event) => patchQuery({ evidence: event.target.value })}><option value="">All</option>{evidenceStates.map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label>Hierarchy<select value={query.parent ?? ""} onChange={(event) => patchQuery({ parent: event.target.value })}><option value="">All</option><option value="top-level">Top-level</option><option value="subtasks">Subtasks</option></select></label>
+                  <label>Validation<select value={query.validation ?? ""} onChange={(event) => patchQuery({ validation: event.target.value })}><option value="">All</option><option value="yes">Qualifying</option><option value="no">Awaiting</option></select></label>
+                  <label>Tag<input value={query.tag ?? ""} onChange={(event) => patchQuery({ tag: event.target.value })} placeholder="Exact tag" /></label>
+                  <button type="button" onClick={clearFilters}>Clear all</button>
+                </div>
+              )}
+            </div>
+          )}
+          {view !== "dashboard" && <IconButton label={inspectorHidden ? "Show inspector" : "Hide inspector"} onClick={() => setInspectorHidden((value) => !value)} pressed={!inspectorHidden}>{inspectorHidden ? <PanelRightOpen /> : <PanelRightClose />}</IconButton>}
+        </div>
+      </header>
+
+      {view === "dashboard" && selectedId === null ? (
+        <main className="findings-panel">
+          <DashboardPanel
+            data={dashboardQuery.data}
+            pending={dashboardQuery.isPending}
+            error={dashboardQuery.error}
+            onRetry={() => void dashboardQuery.refetch()}
+            onOpenQueue={(queue) => {
+              setSearchInput(queue.q ?? "");
+              replaceLocation("actionables", null, queue as QueryState);
+            }}
+            onOpenItem={selectRow}
+          />
+        </main>
+      ) : (
+        <main className="findings-panel">
+          <div className="findings-heading">
+            <h1>{view === "archive" ? "Archive" : "Actionables"} <span>{listQuery.data?.result.matched ?? 0}</span></h1>
+            <div className="filter-chips">
+              {activeFilters.map((key) => (
+                <button type="button" className="active-filter" key={key} onClick={() => {
+                  if (key === "q") setSearchInput("");
+                  patchQuery({ [key]: "" });
+                }}>
+                  {key}: {query[key]} <X />
+                </button>
+              ))}
+              {activeFilters.length > 1 && <button type="button" className="clear-filters" onClick={clearFilters}>Clear all</button>}
+            </div>
+          </div>
+          {!online && <div className="connection-banner" role="status">Local API unreachable. Existing context is preserved; reconnect and retry.</div>}
+          {listQuery.isFetching && !listQuery.isPending && <div className="background-refresh" role="status">Refreshing results…</div>}
+          <div className="findings-table" role="table" aria-label="Actionable findings">
+            <div className="table-header table-grid" role="row">
+              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "title" })}>Finding</button>
+              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "priority" })}>Priority <ChevronDown /></button>
+              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "status" })}>Status <ChevronDown /></button>
+              <div role="columnheader">Worktree</div>
+              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "effort" })}>Effort <ChevronDown /></button>
+              <button type="button" role="columnheader" onClick={() => patchQuery({ sort: "updated-desc" })}>Updated <ChevronDown /></button>
+            </div>
+            <div
+              className="table-body"
+              role="rowgroup"
+              ref={tableBodyRef}
+              onScroll={(event) => {
+                sessionStorage.setItem(
+                  "actionables-scroll-position",
+                  String(event.currentTarget.scrollTop),
+                );
+              }}
+            >
+              {visibleRows.map((item) => {
+                const selectedRow = item.id === selectedId;
+                const isChild = Boolean(item.parentId);
+                const expanded = expandedParents.has(item.id);
+                return (
+                  <div className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`} role="row" aria-selected={selectedRow} tabIndex={0} key={item.id} onClick={() => selectRow(item)} onKeyDown={(event) => {
+                    if (event.key === "Enter") selectRow(item);
+                  }}>
+                    <div className="finding-cell" role="cell">
+                      {item.childIds && !discoveryActive ? (
+                        <button type="button" className="row-expander" aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${item.title}`} onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedParents((current) => {
+                            const next = new Set(current);
+                            if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                            return next;
+                          });
+                        }}>{expanded ? <ChevronDown /> : <ChevronRight />}</button>
+                      ) : isChild ? <span className="child-guide" /> : <span className="row-spacer" />}
+                      <span className="finding-title truncate-reveal" title={item.title}>{item.title}</span>
+                      {item.childCompletion && <span className="child-count">{item.childCompletion.terminal}/{item.childCompletion.total}</span>}
+                      {item.unresolvedDependencyCount > 0 && <span className="blocked-indicator" title={`Derived block: ${item.unresolvedDependencyCount} unresolved prerequisite${item.unresolvedDependencyCount === 1 ? "" : "s"}`}>Blocked by {item.unresolvedDependencyCount}</span>}
+                      {item.archiveState.isArchived && <span className="archived-indicator">Archived</span>}
+                    </div>
+                    <div role="cell"><Badge tone={item.priority}>{item.priority}</Badge></div>
+                    <div role="cell"><Badge tone={item.status} title={item.statusProvenance.note}>{item.status}</Badge></div>
+                    <div role="cell" className="mono worktree-cell">{item.worktree}</div>
+                    <div role="cell" className="effort-cell">{item.effort}</div>
+                    <div role="cell" className="updated-cell">{new Date(item.updatedAt).toLocaleDateString()}</div>
+                  </div>
+                );
+              })}
+              {visibleRows.length === 0 && (
+                <div className="empty-state" role={listQuery.isError ? "alert" : "status"}>
+                  {listQuery.isPending ? <RefreshCw className="spin" /> : listQuery.isError ? <AlertTriangle /> : <Search />}
+                  <strong>
+                    {listQuery.isPending
+                      ? "Loading actionables"
+                      : listQuery.isError
+                        ? "Could not load actionables"
+                        : listQuery.data?.counts.total === 0
+                          ? "No actionables yet"
+                          : listQuery.data?.result.scopeTotal === 0
+                            ? "This scope is empty"
+                            : "No results match these filters"}
+                  </strong>
+                  <span>
+                    {listQuery.isError
+                      ? errorMessage(listQuery.error)
+                      : listQuery.data?.result.scopeTotal === 0
+                        ? "Choose another project, repository, or worktree."
+                        : "Clear one or all filters to broaden the result."}
+                  </span>
+                  {listQuery.isError && <button type="button" onClick={() => void listQuery.refetch()}>Retry</button>}
+                </div>
+              )}
+            </div>
+          </div>
+          <footer className="table-footer">
+            <span>{visibleRows.length} visible rows · {listQuery.data?.result.topLevel ?? 0} top-level · {listQuery.data?.result.nested ?? 0} subtasks</span>
+            <span>{listQuery.data?.counts.total ?? 0} total actionables</span>
+          </footer>
+        </main>
+      )}
+
+      {view !== "dashboard" || selectedId !== null ? (
+        <aside className="inspector" aria-label="Selected actionable">
+          {selected ? (
+            <Inspector
+              selected={selected}
+              actionables={actionables}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              onCloseMobile={() => {
+                setMobileDetailOpen(false);
+                replaceLocation("actionables", null, query);
+              }}
+              validationChecks={validationChecks}
+              toggleValidation={(key) => setValidationChecks((current) => {
+                const next = new Set(current);
+                if (next.has(key)) next.delete(key); else next.add(key);
+                return next;
+              })}
+              onEdit={() => setFormMode("edit")}
+              onMutated={handleMutated}
+              onNavigate={(id) => {
+                const item = actionables.find((candidate) => candidate.id === id);
+                if (item) selectRow(item);
+                else replaceLocation("actionables", id, query);
+              }}
+              onNotice={setNotice}
+              onArchive={() => openArchive("actionable", selected.id, selected.title, selected.version, selected.archiveState.directlyArchived)}
+            />
+          ) : (
+            <div className="inspector-loading" role={detailQuery.isError ? "alert" : "status"}>
+              {selectedId === null ? (
+                <>
+                  <strong>No actionable selected</strong>
+                  <span>Choose a row to open its stable deep link.</span>
+                </>
+              ) : detailQuery.isError ? (
+                <>
+                  <strong>Actionable unavailable</strong>
+                  <span>{errorMessage(detailQuery.error)}</span>
+                  <button type="button" onClick={() => replaceLocation("actionables", null, query)}>Back to results</button>
+                </>
+              ) : "Loading actionable details…"}
+            </div>
+          )}
+        </aside>
+      ) : null}
+
+      {sidebarCollapsed && <button type="button" className="collapsed-brand" onClick={() => setSidebarCollapsed(false)} aria-label="Open project navigation">A</button>}
+      <div className="sr-only" aria-live="polite">{notice}{listQuery.isFetching ? " Results updating." : ""}</div>
+      {formMode && scopesQuery.data && (formMode === "create" || selected) && (
+        <ActionableForm key={formMode === "edit" && selected ? `edit-${selected.id}-${selected.version}` : "create"} item={formMode === "edit" ? selected : undefined} scopes={scopesQuery.data} onClose={() => setFormMode(null)} onSaved={handleSaved} />
+      )}
+      {archiveTarget && (
+        <ArchiveDialog
+          target={archiveTarget}
+          impact={impactQuery.data}
+          pending={impactQuery.isPending}
+          saving={archiveSaving}
+          error={archiveError || (impactQuery.isError ? errorMessage(impactQuery.error) : "")}
+          onClose={closeArchive}
+          onConfirm={() => void confirmArchive()}
         />
       )}
     </div>

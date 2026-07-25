@@ -1,12 +1,19 @@
 import { randomUUID } from "node:crypto";
 import {
+  actionableQuerySchema,
   actionableDetailSchema,
   actionableSummarySchema,
   actionablesListResponseSchema,
+  archiveImpactResponseSchema,
+  dashboardResponseSchema,
   scopeOptionsResponseSchema,
+  type ActionableQuery,
   type ActionableDetail,
   type ActionableSummary,
   type ActionablesListResponse,
+  type ArchiveImpactResponse,
+  type ArchiveTargetKind,
+  type DashboardResponse,
   type CreateActionableRequest,
   type CreateValidationRecordRequest,
   type ScopeOptionsResponse,
@@ -91,6 +98,12 @@ export class VersionConflictError extends Error {
   }
 }
 
+export class ArchiveVersionConflictError extends Error {
+  constructor(public readonly currentVersion: number) {
+    super("This record changed after the archive action began.");
+  }
+}
+
 function stringArray(value: Prisma.JsonValue): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item));
@@ -142,6 +155,19 @@ function latestQualifyingValidationId(row: ActionableRow) {
     .find((record) => qualifying.has(record.id))?.id ?? null;
 }
 
+function archiveState(row: Pick<ActionableRow, "archivedAt" | "project" | "repository" | "worktree">) {
+  const inheritedFrom: Array<"project" | "repository" | "worktree"> = [];
+  if (row.project.archivedAt) inheritedFrom.push("project");
+  if (row.repository.archivedAt) inheritedFrom.push("repository");
+  if (row.worktree.archivedAt) inheritedFrom.push("worktree");
+  return {
+    isArchived: Boolean(row.archivedAt || inheritedFrom.length),
+    directlyArchived: Boolean(row.archivedAt),
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    inheritedFrom,
+  };
+}
+
 type RelatedRow =
   | ActionableRow
   | ActionableRow["hierarchyAsParent"][number]["child"]
@@ -164,6 +190,7 @@ function relatedActionable(row: RelatedRow) {
       worktreeId: row.worktree.id,
       worktreeName: row.worktree.name,
     },
+    archiveState: archiveState(row as ActionableRow),
   };
 }
 
@@ -236,6 +263,8 @@ function toSummary(row: ActionableRow): ActionableSummary {
     evidenceState: row.evidenceState,
     version: row.version,
     updated: row.updatedLabel,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
     finding: row.finding,
     tags: stringArray(row.tagsJson),
     manualBlocker: row.manualBlockerMd,
@@ -244,6 +273,11 @@ function toSummary(row: ActionableRow): ActionableSummary {
     unresolvedDependencyCount: unresolvedDependencies.length,
     dependencyCount: row.dependenciesAsDependent.length,
     blocksCount: row.dependenciesAsPrerequisite.length,
+    hasQualifyingValidation: latestQualifyingValidationId(row) !== null,
+    wasReopened: row.activityEvents.some(
+      (event) => event.type === "reopened" || event.type === "parent-auto-reopened",
+    ),
+    archiveState: archiveState(row),
     blockedBy:
       row.dependenciesAsDependent.length > 0
         ? row.dependenciesAsDependent.map(
@@ -405,10 +439,138 @@ async function findActionableRow(
 }
 
 export async function listActionables(prisma: AppPrismaClient): Promise<ActionablesListResponse> {
-  const rows = await prisma.actionable.findMany({
+  return listActionablesWithQuery(prisma, actionableQuerySchema.parse({}));
+}
+
+const priorityRank = new Map(
+  ["Critical", "High", "Medium", "Low", "Backlog", "Unset"].map((value, index) => [
+    value,
+    index,
+  ]),
+);
+const effortRank = new Map(
+  ["XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL", "Unknown"].map(
+    (value, index) => [value, index],
+  ),
+);
+const statusRank = new Map(
+  ["Inbox", "Researching", "Ready", "In progress", "Blocked", "Done", "Dismissed"].map(
+    (value, index) => [value, index],
+  ),
+);
+
+function boolMatch(filter: "all" | "yes" | "no", value: boolean) {
+  return filter === "all" || (filter === "yes" ? value : !value);
+}
+
+function searchText(row: ActionableRow) {
+  return [
+    row.title,
+    row.finding,
+    row.description,
+    ...stringArray(row.researchJson),
+    ...stringArray(row.tagsJson),
+    row.worktree.name,
+    row.worktree.localPath ?? "",
+    row.repository.name,
+    row.repository.localPath ?? "",
+    row.project.name,
+    row.sourceThread,
+    ...sourceFiles(row.filesJson).flatMap((file) => {
+      if (!file || typeof file !== "object" || Array.isArray(file)) return [];
+      return Object.values(file).map((value) => String(value ?? ""));
+    }),
+    ...row.userSources.flatMap((source) => [source.locator, source.label ?? ""]),
+  ]
+    .join("\n")
+    .toLocaleLowerCase();
+}
+
+function matchesQuery(row: ActionableRow, query: ActionableQuery) {
+  const summary = toSummary(row);
+  const isTopLevel = row.hierarchyAsChild.length === 0;
+  if (query.project && row.project.id !== query.project) return false;
+  if (query.repository && row.repository.id !== query.repository) return false;
+  if (query.worktree && row.worktree.id !== query.worktree) return false;
+  if (query.status && summary.status !== query.status) return false;
+  if (!boolMatch(query.manualBlocked, summary.status === "Blocked")) return false;
+  if (!boolMatch(query.dependencyBlocked, summary.isDependencyBlocked)) return false;
+  if (query.priority && summary.priority !== query.priority) return false;
+  if (query.effort && summary.effort !== query.effort) return false;
+  if (query.evidence && summary.evidenceState !== query.evidence) return false;
+  if (
+    query.tag &&
+    !summary.tags.some((tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase())
+  ) return false;
+  if (
+    query.archived !== "all" &&
+    (query.archived === "archived") !== summary.archiveState.isArchived
+  ) return false;
+  if (query.parent === "top-level" && !isTopLevel) return false;
+  if (query.parent === "subtasks" && isTopLevel) return false;
+  if (!boolMatch(query.validation, summary.hasQualifyingValidation)) return false;
+  if (!boolMatch(query.reopened, summary.wasReopened)) return false;
+  if (query.q && !searchText(row).includes(query.q.toLocaleLowerCase())) return false;
+  return true;
+}
+
+function sortRows(rows: ActionableRow[], sort: ActionableQuery["sort"]) {
+  return [...rows].sort((left, right) => {
+    let result = 0;
+    if (sort === "priority") {
+      result =
+        (priorityRank.get(left.priority) ?? 99) - (priorityRank.get(right.priority) ?? 99);
+    } else if (sort === "updated-desc") {
+      result = right.updatedAt.getTime() - left.updatedAt.getTime();
+    } else if (sort === "updated-asc") {
+      result = left.updatedAt.getTime() - right.updatedAt.getTime();
+    } else if (sort === "created-desc") {
+      result = right.createdAt.getTime() - left.createdAt.getTime();
+    } else if (sort === "title") {
+      result = left.title.localeCompare(right.title);
+    } else if (sort === "status") {
+      result = (statusRank.get(left.status) ?? 99) - (statusRank.get(right.status) ?? 99);
+    } else if (sort === "effort") {
+      result = (effortRank.get(left.effort) ?? 99) - (effortRank.get(right.effort) ?? 99);
+    }
+    return result || left.sourceOrdinal - right.sourceOrdinal;
+  });
+}
+
+export function actionableQueryRecord(query: ActionableQuery) {
+  const values: Record<string, string> = {};
+  if (query.project) values.project = query.project;
+  if (query.repository) values.repository = query.repository;
+  if (query.worktree) values.worktree = query.worktree;
+  if (query.status) values.status = query.status;
+  if (query.manualBlocked !== "all") values.manualBlocked = query.manualBlocked;
+  if (query.dependencyBlocked !== "all") values.dependencyBlocked = query.dependencyBlocked;
+  if (query.priority) values.priority = query.priority;
+  if (query.effort) values.effort = query.effort;
+  if (query.evidence) values.evidence = query.evidence;
+  if (query.tag) values.tag = query.tag;
+  if (query.archived !== "active") values.archived = query.archived;
+  if (query.parent !== "all") values.parent = query.parent;
+  if (query.validation !== "all") values.validation = query.validation;
+  if (query.reopened !== "all") values.reopened = query.reopened;
+  if (query.q) values.q = query.q;
+  if (query.sort !== "priority") values.sort = query.sort;
+  return values;
+}
+
+async function allActionableRows(prisma: AppPrismaClient) {
+  return prisma.actionable.findMany({
     include: actionableInclude,
     orderBy: { sourceOrdinal: "asc" },
   });
+}
+
+export async function listActionablesWithQuery(
+  prisma: AppPrismaClient,
+  query: ActionableQuery,
+): Promise<ActionablesListResponse> {
+  const rows = await allActionableRows(prisma);
+  const matchedRows = sortRows(rows.filter((row) => matchesQuery(row, query)), query.sort);
   const first = rows[0];
   if (!first) {
     return actionablesListResponseSchema.parse({
@@ -416,10 +578,21 @@ export async function listActionables(prisma: AppPrismaClient): Promise<Actionab
       repository: { name: "Repository" },
       worktree: { name: "Worktree" },
       counts: { total: 0, topLevel: 0 },
+      result: { matched: 0, scopeTotal: 0, topLevel: 0, nested: 0, normalizedQuery: actionableQueryRecord(query) },
       items: [],
     });
   }
 
+  const resultTopLevel = matchedRows.filter(
+    (row) => row.hierarchyAsChild.length === 0,
+  ).length;
+  const scopeQuery = actionableQuerySchema.parse({
+    project: query.project,
+    repository: query.repository,
+    worktree: query.worktree,
+    archived: query.archived,
+  });
+  const scopeTotal = rows.filter((row) => matchesQuery(row, scopeQuery)).length;
   return actionablesListResponseSchema.parse({
     project: { name: first.project.name },
     repository: { name: first.repository.name },
@@ -428,7 +601,14 @@ export async function listActionables(prisma: AppPrismaClient): Promise<Actionab
       total: rows.length,
       topLevel: rows.filter((row) => row.hierarchyAsChild.length === 0).length,
     },
-    items: rows.map(toSummary),
+    result: {
+      matched: matchedRows.length,
+      scopeTotal,
+      topLevel: resultTopLevel,
+      nested: matchedRows.length - resultTopLevel,
+      normalizedQuery: actionableQueryRecord(query),
+    },
+    items: matchedRows.map(toSummary),
   });
 }
 
@@ -449,12 +629,39 @@ export async function listScopeOptions(
     projects: projects.map((project) => ({
       id: project.id,
       name: project.name,
+      version: project.version,
+      archivedAt: project.archivedAt?.toISOString() ?? null,
+      archiveState: {
+        isArchived: Boolean(project.archivedAt),
+        directlyArchived: Boolean(project.archivedAt),
+        archivedAt: project.archivedAt?.toISOString() ?? null,
+        inheritedFrom: [],
+      },
       repositories: project.repositories.map((repository) => ({
         id: repository.id,
         name: repository.name,
+        version: repository.version,
+        archivedAt: repository.archivedAt?.toISOString() ?? null,
+        archiveState: {
+          isArchived: Boolean(project.archivedAt || repository.archivedAt),
+          directlyArchived: Boolean(repository.archivedAt),
+          archivedAt: repository.archivedAt?.toISOString() ?? null,
+          inheritedFrom: project.archivedAt ? ["project"] : [],
+        },
         worktrees: repository.worktrees.map((worktree) => ({
           id: worktree.id,
           name: worktree.name,
+          version: worktree.version,
+          archivedAt: worktree.archivedAt?.toISOString() ?? null,
+          archiveState: {
+            isArchived: Boolean(project.archivedAt || repository.archivedAt || worktree.archivedAt),
+            directlyArchived: Boolean(worktree.archivedAt),
+            archivedAt: worktree.archivedAt?.toISOString() ?? null,
+            inheritedFrom: [
+              ...(project.archivedAt ? ["project" as const] : []),
+              ...(repository.archivedAt ? ["repository" as const] : []),
+            ],
+          },
         })),
       })),
     })),
@@ -467,6 +674,252 @@ export async function getActionable(
 ): Promise<ActionableDetail | null> {
   const row = await findActionableRow(prisma, sourceOrdinal);
   return row ? toDetail(row) : null;
+}
+
+export async function getDashboard(
+  prisma: AppPrismaClient,
+  scope: Pick<ActionableQuery, "project" | "repository" | "worktree">,
+): Promise<DashboardResponse> {
+  const rows = (await allActionableRows(prisma)).filter(
+    (row) =>
+      (!scope.project || row.projectId === scope.project) &&
+      (!scope.repository || row.repositoryId === scope.repository) &&
+      (!scope.worktree || row.worktreeId === scope.worktree) &&
+      !archiveState(row).isArchived,
+  );
+  const summaries = new Map(rows.map((row) => [row.id, toSummary(row)]));
+  const recent = (predicate: (row: ActionableRow) => boolean) =>
+    [...rows]
+      .filter(predicate)
+      .sort(
+        (left, right) =>
+          right.updatedAt.getTime() - left.updatedAt.getTime() ||
+          left.sourceOrdinal - right.sourceOrdinal,
+      );
+  const queue = (
+    key: DashboardResponse["queues"][number]["key"],
+    label: string,
+    description: string,
+    query: Record<string, string>,
+    matching: ActionableRow[],
+  ) => ({
+    key,
+    label,
+    description,
+    count: matching.length,
+    query: { ...actionableQueryRecord(actionableQuerySchema.parse(scope)), ...query },
+    items: matching.slice(0, 6).map((row) => summaries.get(row.id)!),
+  });
+
+  const byOrdinal = (items: ActionableRow[]) =>
+    [...items].sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
+  const queues: DashboardResponse["queues"] = [
+    queue("inbox", "Inbox requiring triage", "Captured items that still need triage.", { status: "Inbox" }, byOrdinal(rows.filter((row) => row.status === "Inbox"))),
+    queue("researching", "Researching", "Items where evidence is still being developed.", { status: "Researching" }, byOrdinal(rows.filter((row) => row.status === "Researching"))),
+    queue("ready", "Ready to start", "Ready items without manual or dependency blockers.", { status: "Ready", dependencyBlocked: "no", manualBlocked: "no" }, byOrdinal(rows.filter((row) => row.status === "Ready" && !toSummary(row).isDependencyBlocked))),
+    queue("in-progress", "In progress", "Work currently being executed.", { status: "In progress" }, byOrdinal(rows.filter((row) => row.status === "In progress"))),
+    queue("manual-blocked", "Manually blocked", "Items explicitly blocked by the user.", { manualBlocked: "yes" }, byOrdinal(rows.filter((row) => row.status === "Blocked"))),
+    queue("dependency-blocked", "Dependency-blocked", "Items with at least one unresolved active prerequisite.", { dependencyBlocked: "yes" }, byOrdinal(rows.filter((row) => toSummary(row).isDependencyBlocked))),
+    queue("awaiting-validation", "Awaiting qualifying validation", "In-progress items without a current qualifying Passed validation.", { status: "In progress", validation: "no" }, byOrdinal(rows.filter((row) => row.status === "In progress" && !latestQualifyingValidationId(row)))),
+    queue("recently-updated", "Recently updated", "Most recently changed active items.", { sort: "updated-desc" }, recent(() => true)),
+    queue("recently-completed", "Recently completed", "Most recently changed Done items.", { status: "Done", sort: "updated-desc" }, recent((row) => row.status === "Done")),
+    queue("reopened", "Reopened", "Items reopened directly or because a subtask reopened.", { reopened: "yes", sort: "updated-desc" }, recent((row) => row.activityEvents.some((event) => event.type === "reopened" || event.type === "parent-auto-reopened"))),
+  ];
+  const topLevel = rows.filter((row) => row.hierarchyAsChild.length === 0).length;
+  return dashboardResponseSchema.parse({
+    counts: { total: rows.length, topLevel, nested: rows.length - topLevel },
+    queues,
+  });
+}
+
+type ScopeArchiveRow = {
+  id: string;
+  name: string;
+  version: number;
+  archivedAt: Date | null;
+};
+
+async function scopeTarget(
+  client: AppPrismaClient | TransactionClient,
+  kind: Exclude<ArchiveTargetKind, "actionable">,
+  id: string,
+): Promise<ScopeArchiveRow | null> {
+  if (kind === "project") return client.project.findUnique({ where: { id } });
+  if (kind === "repository") return client.repository.findUnique({ where: { id } });
+  return client.worktree.findUnique({ where: { id } });
+}
+
+function scopeWhere(kind: Exclude<ArchiveTargetKind, "actionable">, id: string) {
+  if (kind === "project") return { projectId: id };
+  if (kind === "repository") return { repositoryId: id };
+  return { worktreeId: id };
+}
+
+export async function archiveImpact(
+  prisma: AppPrismaClient,
+  kind: ArchiveTargetKind,
+  id: string,
+): Promise<ArchiveImpactResponse | null> {
+  let target: ScopeArchiveRow | null;
+  let rows: ActionableRow[];
+  if (kind === "actionable") {
+    const ordinal = Number(id);
+    if (!Number.isSafeInteger(ordinal) || ordinal < 1) return null;
+    const row = await findActionableRow(prisma, ordinal);
+    if (!row) return null;
+    target = {
+      id: String(row.sourceOrdinal),
+      name: row.title,
+      version: row.version,
+      archivedAt: row.archivedAt,
+    };
+    rows = [row];
+  } else {
+    target = await scopeTarget(prisma, kind, id);
+    if (!target) return null;
+    rows = await prisma.actionable.findMany({
+      where: scopeWhere(kind, id),
+      include: actionableInclude,
+      orderBy: { sourceOrdinal: "asc" },
+    });
+  }
+  const activeSubtasks = rows.reduce(
+    (total, row) =>
+      total +
+      row.hierarchyAsParent.filter(
+        (relationship) => !["Done", "Dismissed"].includes(relationship.child.status),
+      ).length,
+    0,
+  );
+  const blocks = rows.reduce(
+    (total, row) => total + row.dependenciesAsPrerequisite.length,
+    0,
+  );
+  const unresolvedPrerequisites = rows.reduce(
+    (total, row) =>
+      total +
+      row.dependenciesAsDependent.filter(
+        (relationship) =>
+          !relationship.waivedAt && relationship.prerequisite.status !== "Done",
+      ).length,
+    0,
+  );
+  const descendants = kind === "actionable" ? activeSubtasks : rows.length;
+  const warnings: string[] = [];
+  if (activeSubtasks) warnings.push(`${activeSubtasks} active subtask${activeSubtasks === 1 ? "" : "s"} will be hidden.`);
+  if (kind === "actionable" && rows[0]!.hierarchyAsChild.length) warnings.push("This actionable is a subtask; its parent relationship will be preserved.");
+  if (blocks) warnings.push(`${blocks} dependent actionable${blocks === 1 ? "" : "s"} will keep this prerequisite relationship.`);
+  if (unresolvedPrerequisites) warnings.push(`${unresolvedPrerequisites} unresolved prerequisite${unresolvedPrerequisites === 1 ? "" : "s"} will continue to block.`);
+  if (kind !== "actionable" && descendants) warnings.push(`${descendants} actionable${descendants === 1 ? "" : "s"} will be effectively hidden without changing workflow status.`);
+  return archiveImpactResponseSchema.parse({
+    target: {
+      kind,
+      id: target.id,
+      name: target.name,
+      version: target.version,
+      directlyArchived: Boolean(target.archivedAt),
+    },
+    counts: { activeSubtasks, descendants, blocks, unresolvedPrerequisites },
+    warnings,
+  });
+}
+
+export async function setActionableArchived(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  version: number,
+  archived: boolean,
+): Promise<ActionableDetail | null> {
+  return prisma.$transaction(async (transaction) => {
+    const current = await findActionableRow(transaction, sourceOrdinal);
+    if (!current) return null;
+    if (current.version !== version) throw new VersionConflictError(toDetail(current));
+    if (!archived && archiveState(current).inheritedFrom.length) {
+      throw new DomainValidationError(
+        "ARCHIVED_ANCESTOR",
+        { archive: [`Restore the archived ${archiveState(current).inheritedFrom[0]} first.`] },
+        "This actionable remains hidden by an archived scope.",
+      );
+    }
+    const updated = await transaction.actionable.updateMany({
+      where: { id: current.id, version },
+      data: {
+        archivedAt: archived ? new Date() : null,
+        updatedLabel: "just now",
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count !== 1) throw new VersionConflictError(toDetail(current));
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: current.id,
+        type: archived ? "archived" : "restored",
+        summary: archived ? "Archived actionable" : "Restored actionable",
+        metadataJson: inputJson({ origin: "user", workflowStatus: current.status }),
+      },
+    });
+    const saved = await findActionableRow(transaction, sourceOrdinal);
+    return saved ? toDetail(saved) : null;
+  });
+}
+
+export async function setScopeArchived(
+  prisma: AppPrismaClient,
+  kind: Exclude<ArchiveTargetKind, "actionable">,
+  id: string,
+  version: number,
+  archived: boolean,
+): Promise<ScopeOptionsResponse | null> {
+  return prisma.$transaction(async (transaction) => {
+    const current = await scopeTarget(transaction, kind, id);
+    if (!current) return null;
+    if (current.version !== version) throw new ArchiveVersionConflictError(current.version);
+    if (!archived) {
+      if (kind === "repository") {
+        const repository = await transaction.repository.findUnique({
+          where: { id },
+          include: { project: true },
+        });
+        if (repository?.project.archivedAt) {
+          throw new DomainValidationError("ARCHIVED_ANCESTOR", { archive: ["Restore the project first."] }, "This repository remains hidden by an archived project.");
+        }
+      }
+      if (kind === "worktree") {
+        const worktree = await transaction.worktree.findUnique({
+          where: { id },
+          include: { project: true, repository: true },
+        });
+        if (worktree?.project.archivedAt || worktree?.repository.archivedAt) {
+          throw new DomainValidationError("ARCHIVED_ANCESTOR", { archive: ["Restore the archived project or repository first."] }, "This worktree remains hidden by an archived ancestor.");
+        }
+      }
+    }
+    const data = { archivedAt: archived ? new Date() : null, version: { increment: 1 } };
+    const result =
+      kind === "project"
+        ? await transaction.project.updateMany({ where: { id, version }, data })
+        : kind === "repository"
+          ? await transaction.repository.updateMany({ where: { id, version }, data })
+          : await transaction.worktree.updateMany({ where: { id, version }, data });
+    if (result.count !== 1) throw new ArchiveVersionConflictError(current.version);
+    const affected = await transaction.actionable.findMany({
+      where: scopeWhere(kind, id),
+      select: { id: true, status: true },
+    });
+    if (affected.length) {
+      await transaction.activityEvent.createMany({
+        data: affected.map((item) => ({
+          actionableId: item.id,
+          type: archived ? "scope-archived" : "scope-restored",
+          summary: archived
+            ? `Hidden by archived ${kind}: ${current.name}`
+            : `Visible after ${kind} restore: ${current.name}`,
+          metadataJson: inputJson({ scopeKind: kind, scopeId: id, workflowStatus: item.status }),
+        })),
+      });
+    }
+    return listScopeOptions(transaction as unknown as AppPrismaClient);
+  });
 }
 
 function sourceSignature(source: UserSourceReferenceInput) {

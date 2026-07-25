@@ -96,6 +96,10 @@ export const activityTypeSchema = z.enum([
   "dependency-waived",
   "dependency-restored",
   "parent-auto-reopened",
+  "archived",
+  "restored",
+  "scope-archived",
+  "scope-restored",
 ]);
 
 export const activityEventSchema = z.object({
@@ -127,6 +131,13 @@ export const scopeSchema = z.object({
   worktreeName: z.string().min(1),
 });
 
+export const archiveStateSchema = z.object({
+  isArchived: z.boolean(),
+  directlyArchived: z.boolean(),
+  archivedAt: z.string().datetime().nullable(),
+  inheritedFrom: z.array(z.enum(["project", "repository", "worktree"])),
+});
+
 export const statusHistoryEntrySchema = z.object({
   id: z.string().min(1),
   previousStatus: statusSchema.nullable(),
@@ -150,6 +161,7 @@ export const relatedActionableSchema = z.object({
   status: statusSchema,
   version: z.number().int().positive(),
   scope: scopeSchema,
+  archiveState: archiveStateSchema,
 });
 
 export const hierarchyRelationshipSchema = z.object({
@@ -190,6 +202,8 @@ export const actionableSummarySchema = z.object({
   evidenceState: evidenceStateSchema,
   version: z.number().int().positive(),
   updated: z.string().min(1),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
   finding: z.string(),
   tags: z.array(z.string()),
   manualBlocker: z.string().nullable(),
@@ -198,6 +212,9 @@ export const actionableSummarySchema = z.object({
   unresolvedDependencyCount: z.number().int().nonnegative(),
   dependencyCount: z.number().int().nonnegative(),
   blocksCount: z.number().int().nonnegative(),
+  hasQualifyingValidation: z.boolean(),
+  wasReopened: z.boolean(),
+  archiveState: archiveStateSchema,
   blockedBy: z.array(z.number().int().positive()).optional(),
   blocks: z.array(z.number().int().positive()).optional(),
   parentId: z.number().int().positive().optional(),
@@ -248,6 +265,13 @@ export const actionablesListResponseSchema = z.object({
     total: z.number().int().nonnegative(),
     topLevel: z.number().int().nonnegative(),
   }),
+  result: z.object({
+    matched: z.number().int().nonnegative(),
+    scopeTotal: z.number().int().nonnegative(),
+    topLevel: z.number().int().nonnegative(),
+    nested: z.number().int().nonnegative(),
+    normalizedQuery: z.record(z.string(), z.string()),
+  }),
   items: z.array(actionableSummarySchema),
 });
 
@@ -258,22 +282,122 @@ export const actionableDetailResponseSchema = z.object({
 export const scopeOptionsResponseSchema = z.object({
   projects: z.array(
     z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      repositories: z.array(
-        z.object({
           id: z.string().min(1),
           name: z.string().min(1),
-          worktrees: z.array(
+          version: z.number().int().positive(),
+          archivedAt: z.string().datetime().nullable(),
+          archiveState: archiveStateSchema,
+          repositories: z.array(
             z.object({
               id: z.string().min(1),
               name: z.string().min(1),
-            }),
-          ),
+              version: z.number().int().positive(),
+              archivedAt: z.string().datetime().nullable(),
+              archiveState: archiveStateSchema,
+              worktrees: z.array(
+                z.object({
+                  id: z.string().min(1),
+                  name: z.string().min(1),
+                  version: z.number().int().positive(),
+                  archivedAt: z.string().datetime().nullable(),
+                  archiveState: archiveStateSchema,
+                }),
+              ),
         }),
       ),
     }),
   ),
+});
+
+export const actionableSortSchema = z.enum([
+  "priority",
+  "updated-desc",
+  "updated-asc",
+  "created-desc",
+  "title",
+  "status",
+  "effort",
+]);
+export const archivedFilterSchema = z.enum(["active", "archived", "all"]);
+export const parentFilterSchema = z.enum(["all", "top-level", "subtasks"]);
+export const booleanFilterSchema = z.enum(["all", "yes", "no"]);
+
+export const actionableQuerySchema = z.object({
+  project: z.string().default(""),
+  repository: z.string().default(""),
+  worktree: z.string().default(""),
+  status: statusSchema.optional(),
+  manualBlocked: booleanFilterSchema.default("all"),
+  dependencyBlocked: booleanFilterSchema.default("all"),
+  priority: prioritySchema.optional(),
+  effort: effortSchema.optional(),
+  evidence: evidenceStateSchema.optional(),
+  tag: z.string().default(""),
+  archived: archivedFilterSchema.default("active"),
+  parent: parentFilterSchema.default("all"),
+  validation: booleanFilterSchema.default("all"),
+  reopened: booleanFilterSchema.default("all"),
+  q: z.string().trim().max(500).default(""),
+  sort: actionableSortSchema.default("priority"),
+});
+
+export const dashboardQueueKeySchema = z.enum([
+  "inbox",
+  "researching",
+  "ready",
+  "in-progress",
+  "manual-blocked",
+  "dependency-blocked",
+  "awaiting-validation",
+  "recently-updated",
+  "recently-completed",
+  "reopened",
+]);
+
+export const dashboardQueueSchema = z.object({
+  key: dashboardQueueKeySchema,
+  label: z.string().min(1),
+  description: z.string().min(1),
+  count: z.number().int().nonnegative(),
+  query: z.record(z.string(), z.string()),
+  items: z.array(actionableSummarySchema),
+});
+
+export const dashboardResponseSchema = z.object({
+  counts: z.object({
+    total: z.number().int().nonnegative(),
+    topLevel: z.number().int().nonnegative(),
+    nested: z.number().int().nonnegative(),
+  }),
+  queues: z.array(dashboardQueueSchema),
+});
+
+export const archiveMutationRequestSchema = z.object({
+  version: z.number().int().positive(),
+}).strict();
+
+export const archiveTargetKindSchema = z.enum([
+  "actionable",
+  "project",
+  "repository",
+  "worktree",
+]);
+
+export const archiveImpactResponseSchema = z.object({
+  target: z.object({
+    kind: archiveTargetKindSchema,
+    id: z.string().min(1),
+    name: z.string().min(1),
+    version: z.number().int().positive(),
+    directlyArchived: z.boolean(),
+  }),
+  counts: z.object({
+    activeSubtasks: z.number().int().nonnegative(),
+    descendants: z.number().int().nonnegative(),
+    blocks: z.number().int().nonnegative(),
+    unresolvedPrerequisites: z.number().int().nonnegative(),
+  }),
+  warnings: z.array(z.string().min(1)),
 });
 
 const titleField = z.string().trim().min(1, "Enter a title.").max(240);
@@ -440,6 +564,7 @@ export type Priority = z.infer<typeof prioritySchema>;
 export type Status = z.infer<typeof statusSchema>;
 export type Effort = z.infer<typeof effortSchema>;
 export type EvidenceState = z.infer<typeof evidenceStateSchema>;
+export type ArchiveState = z.infer<typeof archiveStateSchema>;
 export type SourceFile = z.infer<typeof sourceFileSchema>;
 export type UserSourceReferenceInput = z.infer<typeof userSourceReferenceInputSchema>;
 export type UserSourceReference = z.infer<typeof userSourceReferenceSchema>;
@@ -457,6 +582,12 @@ export type ActionableSummary = z.infer<typeof actionableSummarySchema>;
 export type ActionableDetail = z.infer<typeof actionableDetailSchema>;
 export type ActionablesListResponse = z.infer<typeof actionablesListResponseSchema>;
 export type ScopeOptionsResponse = z.infer<typeof scopeOptionsResponseSchema>;
+export type ActionableQuery = z.infer<typeof actionableQuerySchema>;
+export type ActionableSort = z.infer<typeof actionableSortSchema>;
+export type DashboardResponse = z.infer<typeof dashboardResponseSchema>;
+export type ArchiveMutationRequest = z.infer<typeof archiveMutationRequestSchema>;
+export type ArchiveTargetKind = z.infer<typeof archiveTargetKindSchema>;
+export type ArchiveImpactResponse = z.infer<typeof archiveImpactResponseSchema>;
 export type CreateActionableRequest = z.infer<typeof createActionableRequestSchema>;
 export type UpdateActionableRequest = z.infer<typeof updateActionableRequestSchema>;
 export type StatusTransitionRequest = z.infer<typeof statusTransitionRequestSchema>;

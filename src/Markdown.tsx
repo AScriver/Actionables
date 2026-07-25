@@ -1,5 +1,6 @@
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { lazy, Suspense } from "react";
+
+const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
 
 const markdownProtocols = new Set(["http:", "https:", "mailto:"]);
 
@@ -30,29 +31,9 @@ export function Markdown({
   if (!children.trim()) return null;
   return (
     <div className={`markdown ${inline ? "markdown-inline" : ""}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        urlTransform={safeMarkdownUrl}
-        components={{
-          a({ href, children: linkChildren }) {
-            if (!href) return <span>{linkChildren}</span>;
-            const external = /^https?:/i.test(href);
-            return (
-              <a
-                href={href}
-                {...(external
-                  ? { target: "_blank", rel: "noreferrer noopener" }
-                  : {})}
-              >
-                {linkChildren}
-              </a>
-            );
-          },
-        }}
-      >
-        {children}
-      </ReactMarkdown>
+      <Suspense fallback={<span className="markdown-loading">Loading formatted text…</span>}>
+        <MarkdownRenderer value={children} transformUrl={safeMarkdownUrl} />
+      </Suspense>
     </div>
   );
 }

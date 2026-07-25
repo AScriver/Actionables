@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  actionableQuerySchema,
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  archiveImpactResponseSchema,
+  archiveMutationRequestSchema,
+  archiveTargetKindSchema,
   createDependencyRequestSchema,
   createSubtaskRequestSchema,
   createValidationRecordRequestSchema,
@@ -9,10 +13,12 @@ import {
   dependencyActionRequestSchema,
   detachParentRequestSchema,
   healthResponseSchema,
+  dashboardResponseSchema,
   scopeOptionsResponseSchema,
   setParentRequestSchema,
   statusTransitionRequestSchema,
   updateActionableRequestSchema,
+  type ActionableQuery,
 } from "@actionables/contracts";
 import Fastify, {
   type FastifyBaseLogger,
@@ -22,11 +28,16 @@ import Fastify, {
 import type { AppPrismaClient } from "./database.js";
 import {
   createActionable,
+  archiveImpact,
+  ArchiveVersionConflictError,
   DomainValidationError,
+  getDashboard,
   getActionable,
-  listActionables,
+  listActionablesWithQuery,
   listScopeOptions,
   recordValidation,
+  setActionableArchived,
+  setScopeArchived,
   transitionActionable,
   updateActionable,
   VersionConflictError,
@@ -89,6 +100,25 @@ function parseRouteId(request: FastifyRequest, reply: FastifyReply, rawId: strin
   return parsed;
 }
 
+function normalizeActionableQuery(raw: unknown): ActionableQuery {
+  const defaults = actionableQuerySchema.parse({});
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaults;
+  let normalized = defaults;
+  const source = raw as Record<string, unknown>;
+  const keys: Array<keyof ActionableQuery> = [
+    "project", "repository", "worktree", "status", "manualBlocked",
+    "dependencyBlocked", "priority", "effort", "evidence", "tag", "archived",
+    "parent", "validation", "reopened", "q", "sort",
+  ];
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value !== "string") continue;
+    const parsed = actionableQuerySchema.safeParse({ ...normalized, [key]: value });
+    if (parsed.success) normalized = parsed.data;
+  }
+  return normalized;
+}
+
 export function buildApp({ prisma, logger = false }: BuildAppOptions) {
   const app = Fastify({
     logger,
@@ -122,6 +152,11 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
         },
       );
     }
+    if (error instanceof ArchiveVersionConflictError) {
+      return problem(request, reply, 409, "VERSION_CONFLICT", "This archive target has a newer saved version.", {
+        detail: `Reload the target and retry from version ${error.currentVersion}.`,
+      });
+    }
 
     request.log.error({ err: error }, "Unhandled request error");
     return problem(request, reply, 500, "INTERNAL_ERROR", "The request could not be completed.");
@@ -140,8 +175,14 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
     return scopeOptionsResponseSchema.parse(await listScopeOptions(prisma));
   });
 
-  app.get("/api/actionables", async () => {
-    return actionablesListResponseSchema.parse(await listActionables(prisma));
+  app.get<{ Querystring: Record<string, unknown> }>("/api/actionables", async (request) => {
+    const query = normalizeActionableQuery(request.query);
+    return actionablesListResponseSchema.parse(await listActionablesWithQuery(prisma, query));
+  });
+
+  app.get<{ Querystring: Record<string, unknown> }>("/api/dashboard", async (request) => {
+    const query = normalizeActionableQuery(request.query);
+    return dashboardResponseSchema.parse(await getDashboard(prisma, query));
   });
 
   app.post("/api/actionables", async (request, reply) => {
@@ -212,6 +253,59 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
       return actionableDetailResponseSchema.parse({ item });
     },
   );
+
+  app.get<{ Params: { kind: string; id: string } }>(
+    "/api/archive-impact/:kind/:id",
+    async (request, reply) => {
+      const kind = archiveTargetKindSchema.safeParse(request.params.kind);
+      if (!kind.success) {
+        return problem(request, reply, 400, "INVALID_ARCHIVE_TARGET", "The archive target is invalid.");
+      }
+      const impact = await archiveImpact(prisma, kind.data, request.params.id);
+      if (!impact) return problem(request, reply, 404, "NOT_FOUND", "Archive target not found.");
+      return archiveImpactResponseSchema.parse(impact);
+    },
+  );
+
+  const actionableArchiveMutation = (archived: boolean) => async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const id = parseRouteId(request, reply, request.params.id);
+    if (id === null) return;
+    const parsed = archiveMutationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the archive request.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    const item = await setActionableArchived(prisma, id, parsed.data.version, archived);
+    if (!item) return problem(request, reply, 404, "NOT_FOUND", "Actionable not found.");
+    return actionableDetailResponseSchema.parse({ item });
+  };
+  app.post<{ Params: { id: string } }>("/api/actionables/:id/archive", actionableArchiveMutation(true));
+  app.post<{ Params: { id: string } }>("/api/actionables/:id/restore", actionableArchiveMutation(false));
+
+  const scopeArchiveMutation = (archived: boolean) => async (
+    request: FastifyRequest<{ Params: { kind: string; id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const kind = archiveTargetKindSchema.exclude(["actionable"]).safeParse(request.params.kind);
+    if (!kind.success) {
+      return problem(request, reply, 400, "INVALID_ARCHIVE_TARGET", "The scope archive target is invalid.");
+    }
+    const parsed = archiveMutationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(request, reply, 422, "VALIDATION_ERROR", "Check the archive request.", {
+        errors: fieldErrors(parsed.error),
+      });
+    }
+    const scopes = await setScopeArchived(prisma, kind.data, request.params.id, parsed.data.version, archived);
+    if (!scopes) return problem(request, reply, 404, "NOT_FOUND", "Scope not found.");
+    return scopeOptionsResponseSchema.parse(scopes);
+  };
+  app.post<{ Params: { kind: string; id: string } }>("/api/scopes/:kind/:id/archive", scopeArchiveMutation(true));
+  app.post<{ Params: { kind: string; id: string } }>("/api/scopes/:kind/:id/restore", scopeArchiveMutation(false));
 
   app.post<{ Params: { id: string } }>(
     "/api/actionables/:id/validation-records",

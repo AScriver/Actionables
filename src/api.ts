@@ -1,10 +1,15 @@
 import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  archiveImpactResponseSchema,
+  dashboardResponseSchema,
   problemDetailsSchema,
   scopeOptionsResponseSchema,
   type ActionableDetail,
+  type ActionableQuery,
   type ActionablesListResponse,
+  type ArchiveImpactResponse,
+  type ArchiveTargetKind,
   type CreateDependencyRequest,
   type CreateSubtaskRequest,
   type CreateValidationRecordRequest,
@@ -13,6 +18,7 @@ import {
   type DependencyActionRequest,
   type DetachParentRequest,
   type ScopeOptionsResponse,
+  type DashboardResponse,
   type StatusTransitionRequest,
   type SetParentRequest,
   type UpdateActionableRequest,
@@ -44,8 +50,21 @@ async function requestJson(path: string, init?: RequestInit) {
   return payload;
 }
 
-export async function fetchActionables(): Promise<ActionablesListResponse> {
-  return actionablesListResponseSchema.parse(await requestJson("/api/actionables"));
+function queryString(query: Partial<Record<keyof ActionableQuery, string>>) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+export async function fetchActionables(
+  query: Partial<Record<keyof ActionableQuery, string>> = {},
+): Promise<ActionablesListResponse> {
+  return actionablesListResponseSchema.parse(
+    await requestJson(`/api/actionables${queryString(query)}`),
+  );
 }
 
 export async function fetchActionable(id: number): Promise<ActionableDetail> {
@@ -57,6 +76,51 @@ export async function fetchActionable(id: number): Promise<ActionableDetail> {
 
 export async function fetchScopeOptions(): Promise<ScopeOptionsResponse> {
   return scopeOptionsResponseSchema.parse(await requestJson("/api/scopes"));
+}
+
+export async function fetchDashboard(
+  query: Pick<Partial<Record<keyof ActionableQuery, string>>, "project" | "repository" | "worktree">,
+): Promise<DashboardResponse> {
+  return dashboardResponseSchema.parse(
+    await requestJson(`/api/dashboard${queryString(query)}`),
+  );
+}
+
+export async function fetchArchiveImpact(
+  kind: ArchiveTargetKind,
+  id: string | number,
+): Promise<ArchiveImpactResponse> {
+  return archiveImpactResponseSchema.parse(
+    await requestJson(`/api/archive-impact/${kind}/${encodeURIComponent(String(id))}`),
+  );
+}
+
+export async function setActionableArchived(
+  id: number,
+  version: number,
+  archived: boolean,
+): Promise<ActionableDetail> {
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/${archived ? "archive" : "restore"}`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  );
+  return response.item;
+}
+
+export async function setScopeArchived(
+  kind: Exclude<ArchiveTargetKind, "actionable">,
+  id: string,
+  version: number,
+  archived: boolean,
+): Promise<ScopeOptionsResponse> {
+  return scopeOptionsResponseSchema.parse(
+    await requestJson(`/api/scopes/${kind}/${encodeURIComponent(id)}/${archived ? "archive" : "restore"}`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  );
 }
 
 export async function createActionable(
