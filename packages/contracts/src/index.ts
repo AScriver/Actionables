@@ -8,7 +8,15 @@ export const prioritySchema = z.enum([
   "Low",
   "Backlog",
 ]);
-export const statusSchema = z.enum(["Inbox", "Researching", "Ready"]);
+export const statusSchema = z.enum([
+  "Inbox",
+  "Researching",
+  "Ready",
+  "In progress",
+  "Blocked",
+  "Done",
+  "Dismissed",
+]);
 export const sourceStatusSuggestionSchema = z.enum(["Ready", "Researching", "Blocked"]);
 export const effortSchema = z.enum([
   "Unknown",
@@ -35,10 +43,59 @@ export const sourceFileSchema = z.object({
   symbol: z.string().min(1).optional(),
 });
 
-export const userSourceReferenceSchema = z.object({
+export const userSourceReferenceInputSchema = z.object({
   type: z.enum(["File", "URL", "Command", "Commit", "Codex thread", "Text"]),
   locator: z.string().trim().min(1, "Enter a source locator."),
   label: z.string().trim().max(200).optional(),
+});
+
+export const userSourceReferenceSchema = userSourceReferenceInputSchema.extend({
+  id: z.string().min(1),
+  provenance: z.literal("user-added"),
+  createdAt: z.string().datetime(),
+});
+
+export const validationTypeSchema = z.enum([
+  "Automated test",
+  "Manual test",
+  "Command",
+  "Review",
+  "Document",
+]);
+export const validationOutcomeSchema = z.enum(["Passed", "Failed", "Partial"]);
+
+export const validationRecordSchema = z.object({
+  id: z.string().min(1),
+  type: validationTypeSchema,
+  outcome: validationOutcomeSchema,
+  notes: z.string(),
+  evidence: z.string(),
+  origin: z.string().min(1),
+  recordedAt: z.string().datetime(),
+  supersedesId: z.string().min(1).nullable(),
+  supersededById: z.string().min(1).nullable(),
+  qualifiesForCompletion: z.boolean(),
+});
+
+export const activityTypeSchema = z.enum([
+  "status-transition",
+  "manual-blocked",
+  "validation-recorded",
+  "validation-corrected",
+  "completion-validated",
+  "completion-overridden",
+  "dismissed",
+  "reopened",
+  "source-added",
+  "source-removed",
+]);
+
+export const activityEventSchema = z.object({
+  id: z.string().min(1),
+  type: activityTypeSchema,
+  summary: z.string().min(1),
+  context: z.record(z.string(), z.string()),
+  occurredAt: z.string().datetime(),
 });
 
 export const statusProvenanceSchema = z.discriminatedUnion("kind", [
@@ -94,6 +151,9 @@ export const actionableSummarySchema = z.object({
   updated: z.string().min(1),
   finding: z.string(),
   tags: z.array(z.string()),
+  manualBlocker: z.string().nullable(),
+  isDependencyBlocked: z.boolean(),
+  isEffectivelyBlocked: z.boolean(),
   blockedBy: z.array(z.number().int().positive()).optional(),
   blocks: z.array(z.number().int().positive()).optional(),
   parentId: z.number().int().positive().optional(),
@@ -110,6 +170,12 @@ export const actionableDetailSchema = actionableSummarySchema.extend({
   sourceThread: z.string(),
   permittedTransitions: z.array(statusSchema),
   statusHistory: z.array(statusHistoryEntrySchema),
+  validationRecords: z.array(validationRecordSchema),
+  activity: z.array(activityEventSchema),
+  completionEligibility: z.object({
+    qualifyingValidationRecordId: z.string().min(1).nullable(),
+    policy: z.string().min(1),
+  }),
 });
 
 export const actionablesListResponseSchema = z.object({
@@ -173,7 +239,7 @@ export const createActionableRequestSchema = z
     research: notesSchema.default([]),
     validation: notesSchema.default([]),
     tags: tagsSchema.default([]),
-    userSources: z.array(userSourceReferenceSchema).max(50).default([]),
+    userSources: z.array(userSourceReferenceInputSchema).max(50).default([]),
   })
   .strict();
 
@@ -188,7 +254,21 @@ export const statusTransitionRequestSchema = z
   .object({
     version: z.number().int().positive(),
     status: statusSchema,
+    reason: z.string().trim().max(10_000).optional(),
+    completionOverrideReason: z.string().trim().max(10_000).optional(),
     origin: z.literal("user").default("user"),
+  })
+  .strict();
+
+export const createValidationRecordRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    type: validationTypeSchema,
+    outcome: validationOutcomeSchema,
+    notes: z.string().trim().max(100_000).default(""),
+    evidence: z.string().trim().max(100_000).default(""),
+    origin: z.literal("user").default("user"),
+    supersedesId: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -266,7 +346,12 @@ export type Status = z.infer<typeof statusSchema>;
 export type Effort = z.infer<typeof effortSchema>;
 export type EvidenceState = z.infer<typeof evidenceStateSchema>;
 export type SourceFile = z.infer<typeof sourceFileSchema>;
+export type UserSourceReferenceInput = z.infer<typeof userSourceReferenceInputSchema>;
 export type UserSourceReference = z.infer<typeof userSourceReferenceSchema>;
+export type ValidationType = z.infer<typeof validationTypeSchema>;
+export type ValidationOutcome = z.infer<typeof validationOutcomeSchema>;
+export type ValidationRecord = z.infer<typeof validationRecordSchema>;
+export type ActivityEvent = z.infer<typeof activityEventSchema>;
 export type StatusProvenance = z.infer<typeof statusProvenanceSchema>;
 export type Scope = z.infer<typeof scopeSchema>;
 export type ActionableSummary = z.infer<typeof actionableSummarySchema>;
@@ -276,6 +361,9 @@ export type ScopeOptionsResponse = z.infer<typeof scopeOptionsResponseSchema>;
 export type CreateActionableRequest = z.infer<typeof createActionableRequestSchema>;
 export type UpdateActionableRequest = z.infer<typeof updateActionableRequestSchema>;
 export type StatusTransitionRequest = z.infer<typeof statusTransitionRequestSchema>;
+export type CreateValidationRecordRequest = z.infer<
+  typeof createValidationRecordRequestSchema
+>;
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>;
 export type ActionableDetailResponse = z.infer<typeof actionableDetailResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;

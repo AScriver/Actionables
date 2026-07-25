@@ -103,10 +103,11 @@ test("triage to Ready persists the required fields and server-approved status", 
   await page.locator("#finding").fill("The browser flow has a concrete finding.");
   await page.locator("#description").fill("Persist the triaged actionable.");
   await page.locator("#validation").fill("Reload the stable deep link");
-  await page.locator("#status").selectOption("Ready");
   await page.getByRole("button", { name: "Save changes" }).click();
 
   const inspector = page.getByRole("complementary", { name: "Selected actionable" });
+  await inspector.getByRole("button", { name: "Ready", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Ready" }).click();
   await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
   const deepLink = page.url();
   await page.reload();

@@ -116,17 +116,39 @@ export async function importReviewedSeed(
         worktreeId: worktree.id,
       };
 
-      await transaction.actionable.upsert({
-        where: { externalKey: item.externalKey },
-        update: data,
-        create: {
-          externalKey: item.externalKey,
-          ...data,
-        },
-      });
-
-      if (existing) updated += 1;
-      else created += 1;
+      if (existing) {
+        await transaction.actionable.update({
+          where: { externalKey: item.externalKey },
+          data,
+        });
+        updated += 1;
+      } else {
+        await transaction.actionable.create({
+          data: {
+            externalKey: item.externalKey,
+            ...data,
+            statusHistory: {
+              create: {
+                previousStatus: null,
+                newStatus: item.status,
+                origin: "reviewed-seed-import",
+              },
+            },
+            activityEvents: {
+              create: {
+                type: "status-transition",
+                summary: `Imported as ${item.status}`,
+                metadataJson: asJson({
+                  previousStatus: "",
+                  newStatus: item.status,
+                  origin: "reviewed-seed-import",
+                }),
+              },
+            },
+          },
+        });
+        created += 1;
+      }
     }
 
     return { created, updated, unchanged, total: document.items.length };

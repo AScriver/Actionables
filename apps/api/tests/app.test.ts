@@ -422,4 +422,52 @@ describe("Actionables API", () => {
     });
     expect(after).toEqual(before);
   });
+
+  it("preserves imported source evidence through dismissal and reopening", async () => {
+    const select = {
+      rawFragmentJson: true,
+      filesJson: true,
+      importProvider: true,
+      sourceContainerId: true,
+      sourceThread: true,
+      contentHash: true,
+    } as const;
+    const before = await prisma!.actionable.findUniqueOrThrow({
+      where: { sourceOrdinal: 2 },
+      select,
+    });
+    let item = (
+      await app!.inject({ method: "GET", url: "/api/actionables/2" })
+    ).json().item;
+    const dismissed = await app!.inject({
+      method: "POST",
+      url: "/api/actionables/2/status-transitions",
+      payload: {
+        version: item.version,
+        status: "Dismissed",
+        reason: "This imported outcome is no longer intended.",
+        origin: "user",
+      },
+    });
+    expect(dismissed.statusCode).toBe(200);
+    item = dismissed.json().item;
+    const reopened = await app!.inject({
+      method: "POST",
+      url: "/api/actionables/2/status-transitions",
+      payload: {
+        version: item.version,
+        status: "Ready",
+        reason: "New evidence makes the imported finding actionable again.",
+        origin: "user",
+      },
+    });
+    expect(reopened.statusCode).toBe(200);
+    expect(reopened.json().item.status).toBe("Ready");
+
+    const after = await prisma!.actionable.findUniqueOrThrow({
+      where: { sourceOrdinal: 2 },
+      select,
+    });
+    expect(after).toEqual(before);
+  });
 });

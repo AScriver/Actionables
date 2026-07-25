@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  createValidationRecordRequestSchema,
   createActionableRequestSchema,
   healthResponseSchema,
   scopeOptionsResponseSchema,
@@ -20,6 +21,7 @@ import {
   getActionable,
   listActionables,
   listScopeOptions,
+  recordValidation,
   transitionActionable,
   updateActionable,
   VersionConflictError,
@@ -190,6 +192,32 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
       }
 
       const item = await transitionActionable(prisma, id, parsed.data);
+      if (!item) {
+        return problem(request, reply, 404, "NOT_FOUND", "Actionable not found.");
+      }
+      return actionableDetailResponseSchema.parse({ item });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/actionables/:id/validation-records",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+
+      const parsed = createValidationRecordRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the validation record.",
+          { errors: fieldErrors(parsed.error) },
+        );
+      }
+
+      const item = await recordValidation(prisma, id, parsed.data);
       if (!item) {
         return problem(request, reply, 404, "NOT_FOUND", "Actionable not found.");
       }

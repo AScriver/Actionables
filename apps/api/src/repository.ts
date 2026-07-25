@@ -8,10 +8,12 @@ import {
   type ActionableSummary,
   type ActionablesListResponse,
   type CreateActionableRequest,
+  type CreateValidationRecordRequest,
   type ScopeOptionsResponse,
   type Status,
   type StatusTransitionRequest,
   type UpdateActionableRequest,
+  type UserSourceReferenceInput,
 } from "@actionables/contracts";
 import type { Prisma } from "./generated/prisma/client.js";
 import type { AppPrismaClient } from "./database.js";
@@ -29,12 +31,21 @@ const actionableInclude = {
   statusHistory: {
     orderBy: { occurredAt: "desc" as const },
   },
-} as const;
+  validationRecords: {
+    orderBy: { recordedAt: "asc" as const },
+  },
+  activityEvents: {
+    orderBy: [{ occurredAt: "asc" as const }, { id: "asc" as const }],
+  },
+  userSources: {
+    where: { removedAt: null },
+    orderBy: { createdAt: "asc" as const },
+  },
+} satisfies Prisma.ActionableInclude;
 
 type ActionableRow = Prisma.ActionableGetPayload<{
   include: typeof actionableInclude;
 }>;
-
 type TransactionClient = Prisma.TransactionClient;
 
 export class DomainValidationError extends Error {
@@ -71,15 +82,54 @@ function sourceFiles(value: Prisma.JsonValue) {
   return Array.isArray(value) ? value : [];
 }
 
+function stringContext(value: Prisma.JsonValue): Record<string, string> {
+  if (!value || Array.isArray(value) || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, String(item ?? "")]),
+  );
+}
+
+function latestInProgressAt(row: ActionableRow) {
+  return row.statusHistory.find((entry) => entry.newStatus === "In progress")?.occurredAt ?? null;
+}
+
+function qualifyingValidationIds(row: ActionableRow) {
+  const startedAt = latestInProgressAt(row);
+  if (!startedAt) return new Set<string>();
+  const superseded = new Set(
+    row.validationRecords
+      .map((record) => record.supersedesId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  return new Set(
+    row.validationRecords
+      .filter(
+        (record) =>
+          record.outcome === "Passed" &&
+          record.recordedAt >= startedAt &&
+          !superseded.has(record.id),
+      )
+      .map((record) => record.id),
+  );
+}
+
+function latestQualifyingValidationId(row: ActionableRow) {
+  const qualifying = qualifyingValidationIds(row);
+  return [...row.validationRecords]
+    .reverse()
+    .find((record) => qualifying.has(record.id))?.id ?? null;
+}
+
 function toSummary(row: ActionableRow): ActionableSummary {
   const imported = row.importProvider !== "MANUAL";
+  const status = parsePersistedStatus(row.status);
   return actionableSummarySchema.parse({
     id: row.sourceOrdinal,
     recordId: row.id,
     externalKey: row.externalKey,
     title: row.title,
     priority: row.priority,
-    status: row.status,
+    status,
     statusProvenance: imported
       ? {
           kind: "neutral-import",
@@ -105,6 +155,9 @@ function toSummary(row: ActionableRow): ActionableSummary {
     updated: row.updatedLabel,
     finding: row.finding,
     tags: stringArray(row.tagsJson),
+    manualBlocker: row.manualBlockerMd,
+    isDependencyBlocked: false,
+    isEffectivelyBlocked: status === "Blocked",
     blockedBy: numberArray(row.blockedByOrdinalsJson),
     blocks: numberArray(row.blocksOrdinalsJson),
     parentId: row.parentOrdinal ?? undefined,
@@ -115,12 +168,20 @@ function toSummary(row: ActionableRow): ActionableSummary {
 function toDetail(row: ActionableRow): ActionableDetail {
   const status = parsePersistedStatus(row.status);
   const imported = row.importProvider !== "MANUAL";
+  const qualifying = qualifyingValidationIds(row);
   return actionableDetailSchema.parse({
     ...toSummary(row),
     description: row.description,
     research: stringArray(row.researchJson),
     validation: stringArray(row.validationJson),
-    userSources: row.userSourcesJson,
+    userSources: row.userSources.map((source) => ({
+      id: source.id,
+      type: source.type,
+      locator: source.locator,
+      label: source.label ?? undefined,
+      provenance: "user-added",
+      createdAt: source.createdAt.toISOString(),
+    })),
     immutableSourceEvidence: {
       imported,
       sourceThread: imported ? row.sourceThread : "",
@@ -140,6 +201,31 @@ function toDetail(row: ActionableRow): ActionableDetail {
       origin: entry.origin,
       occurredAt: entry.occurredAt.toISOString(),
     })),
+    validationRecords: row.validationRecords.map((record) => ({
+      id: record.id,
+      type: record.type,
+      outcome: record.outcome,
+      notes: record.notesMd,
+      evidence: record.evidenceMd,
+      origin: record.origin,
+      recordedAt: record.recordedAt.toISOString(),
+      supersedesId: record.supersedesId,
+      supersededById:
+        row.validationRecords.find((candidate) => candidate.supersedesId === record.id)?.id ?? null,
+      qualifiesForCompletion: qualifying.has(record.id),
+    })),
+    activity: row.activityEvents.map((event) => ({
+      id: event.id,
+      type: event.type,
+      summary: event.summary,
+      context: stringContext(event.metadataJson),
+      occurredAt: event.occurredAt.toISOString(),
+    })),
+    completionEligibility: {
+      qualifyingValidationRecordId: latestQualifyingValidationId(row),
+      policy:
+        "A current Passed validation recorded after the latest move into In progress qualifies. Failed, Partial, and superseded records do not.",
+    },
   });
 }
 
@@ -186,7 +272,6 @@ export async function listActionables(prisma: AppPrismaClient): Promise<Actionab
     include: actionableInclude,
     orderBy: { sourceOrdinal: "asc" },
   });
-
   const first = rows[0];
   if (!first) {
     return actionablesListResponseSchema.parse({
@@ -218,11 +303,7 @@ export async function listScopeOptions(
     include: {
       repositories: {
         orderBy: { name: "asc" },
-        include: {
-          worktrees: {
-            orderBy: { name: "asc" },
-          },
-        },
+        include: { worktrees: { orderBy: { name: "asc" } } },
       },
     },
   });
@@ -251,22 +332,80 @@ export async function getActionable(
   return row ? toDetail(row) : null;
 }
 
+function sourceSignature(source: UserSourceReferenceInput) {
+  return JSON.stringify([source.type, source.locator.trim(), source.label?.trim() ?? ""]);
+}
+
+async function syncUserSources(
+  transaction: TransactionClient,
+  current: ActionableRow,
+  requested: UserSourceReferenceInput[],
+) {
+  const remaining = [...current.userSources];
+  const added: UserSourceReferenceInput[] = [];
+
+  for (const source of requested) {
+    const match = remaining.findIndex(
+      (candidate) =>
+        sourceSignature(candidate as UserSourceReferenceInput) === sourceSignature(source),
+    );
+    if (match >= 0) remaining.splice(match, 1);
+    else added.push(source);
+  }
+
+  for (const source of remaining) {
+    await transaction.userSourceReference.update({
+      where: { id: source.id },
+      data: { removedAt: new Date() },
+    });
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: current.id,
+        type: "source-removed",
+        summary: "Removed a user-added source reference",
+        metadataJson: inputJson({
+          sourceType: source.type,
+          label: source.label ?? source.locator,
+        }),
+      },
+    });
+  }
+
+  for (const source of added) {
+    await transaction.userSourceReference.create({
+      data: {
+        actionableId: current.id,
+        type: source.type,
+        locator: source.locator,
+        label: source.label || null,
+        provenance: "user-added",
+      },
+    });
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: current.id,
+        type: "source-added",
+        summary: "Added a user source reference",
+        metadataJson: inputJson({
+          sourceType: source.type,
+          label: source.label || source.locator,
+        }),
+      },
+    });
+  }
+}
+
 export async function createActionable(
   prisma: AppPrismaClient,
   input: CreateActionableRequest,
 ): Promise<ActionableDetail> {
   return prisma.$transaction(async (transaction) => {
     await validateScope(transaction, input);
-
-    const highest = await transaction.actionable.aggregate({
-      _max: { sourceOrdinal: true },
-    });
+    const highest = await transaction.actionable.aggregate({ _max: { sourceOrdinal: true } });
     const sourceOrdinal = (highest._max.sourceOrdinal ?? 0) + 1;
-    const externalKey = `manual-${randomUUID()}`;
-
     const created = await transaction.actionable.create({
       data: {
-        externalKey,
+        externalKey: `manual-${randomUUID()}`,
         sourceOrdinal,
         title: input.title,
         priority: input.priority,
@@ -295,25 +434,77 @@ export async function createActionable(
         repositoryId: input.repositoryId,
         worktreeId: input.worktreeId,
         statusHistory: {
+          create: { previousStatus: null, newStatus: "Inbox", origin: "manual-create" },
+        },
+        activityEvents: {
           create: {
-            previousStatus: null,
-            newStatus: "Inbox",
-            origin: "manual-create",
+            type: "status-transition",
+            summary: "Created as Inbox",
+            metadataJson: inputJson({ previousStatus: "", newStatus: "Inbox", origin: "manual-create" }),
           },
         },
+        userSources: {
+          create: input.userSources.map((source) => ({
+            type: source.type,
+            locator: source.locator,
+            label: source.label || null,
+            provenance: "user-added",
+          })),
+        },
       },
-      include: actionableInclude,
     });
 
-    return toDetail(created);
+    for (const source of input.userSources) {
+      await transaction.activityEvent.create({
+        data: {
+          actionableId: created.id,
+          type: "source-added",
+          summary: "Added a user source reference",
+          metadataJson: inputJson({
+            sourceType: source.type,
+            label: source.label || source.locator,
+          }),
+        },
+      });
+    }
+
+    const row = await findActionableRow(transaction, sourceOrdinal);
+    if (!row) throw new Error("Created actionable could not be read.");
+    return toDetail(row);
   });
 }
 
+type TransitionDecision = {
+  reason: string;
+  completionMode: "none" | "validated" | "override";
+  validationRecordId: string | null;
+};
+
+function requiredReason(
+  value: string | undefined,
+  field: "reason" | "completionOverrideReason",
+  message: string,
+  meaningful = false,
+) {
+  const reason = value?.trim() ?? "";
+  const isMeaningful = reason.length >= 3 && /[\p{L}\p{N}]/u.test(reason);
+  if (!reason || (meaningful && !isMeaningful)) {
+    throw new DomainValidationError(
+      "REASON_REQUIRED",
+      { [field]: [message] },
+      message,
+    );
+  }
+  return reason;
+}
+
 function validateTransition(
-  previousStatus: Status,
+  current: ActionableRow,
   nextStatus: Status,
   readiness: { finding: string; description: string; validation: string[] },
-) {
+  request: Pick<StatusTransitionRequest, "reason" | "completionOverrideReason">,
+): TransitionDecision {
+  const previousStatus = parsePersistedStatus(current.status);
   if (!canTransition(previousStatus, nextStatus)) {
     throw new DomainValidationError(
       "INVALID_STATUS_TRANSITION",
@@ -326,7 +517,11 @@ function validateTransition(
     );
   }
 
-  if (nextStatus === "Ready") {
+  if (
+    nextStatus === "Ready" &&
+    previousStatus !== "Done" &&
+    previousStatus !== "Dismissed"
+  ) {
     const errors: Record<string, string[]> = {};
     if (!readiness.finding.trim()) {
       errors.finding = ["Add the finding before moving this actionable to Ready."];
@@ -346,15 +541,132 @@ function validateTransition(
       );
     }
   }
+
+  let reason = "";
+  if (nextStatus === "Blocked") {
+    reason = requiredReason(
+      request.reason,
+      "reason",
+      "Enter a meaningful blocker note before marking this actionable Blocked.",
+      true,
+    );
+  } else if (nextStatus === "Dismissed") {
+    reason = requiredReason(
+      request.reason,
+      "reason",
+      "Enter a dismissal reason. Dismissal is not completion.",
+    );
+  } else if (
+    nextStatus === "Ready" &&
+    (previousStatus === "Done" || previousStatus === "Dismissed")
+  ) {
+    reason = requiredReason(
+      request.reason,
+      "reason",
+      `Enter a reason for reopening this ${previousStatus} actionable.`,
+    );
+  }
+
+  if (nextStatus !== "Done") {
+    return { reason, completionMode: "none", validationRecordId: null };
+  }
+
+  const override = request.completionOverrideReason?.trim() ?? "";
+  if (override) {
+    return {
+      reason: requiredReason(
+        override,
+        "completionOverrideReason",
+        "Enter a completion override reason.",
+      ),
+      completionMode: "override",
+      validationRecordId: null,
+    };
+  }
+
+  const validationRecordId = latestQualifyingValidationId(current);
+  if (!validationRecordId) {
+    throw new DomainValidationError(
+      "VALIDATION_REQUIRED",
+      {
+        status: ["Done requires a current Passed validation or a completion override."],
+        completionOverrideReason: [
+          "Record a Passed validation or provide a nonempty override reason.",
+        ],
+      },
+      "Qualifying validation is required before completion.",
+    );
+  }
+  return { reason: "", completionMode: "validated", validationRecordId };
+}
+
+async function writeTransitionHistory(
+  transaction: TransactionClient,
+  current: ActionableRow,
+  nextStatus: Status,
+  origin: string,
+  decision: TransitionDecision,
+) {
+  const previousStatus = parsePersistedStatus(current.status);
+  await transaction.actionableStatusHistory.create({
+    data: {
+      actionableId: current.id,
+      previousStatus,
+      newStatus: nextStatus,
+      origin,
+    },
+  });
+
+  let type = "status-transition";
+  let summary = `${previousStatus} → ${nextStatus}`;
+  const context: Record<string, string> = {
+    previousStatus,
+    newStatus: nextStatus,
+    origin,
+  };
+
+  if (nextStatus === "Blocked") {
+    type = "manual-blocked";
+    summary = "Marked Blocked — manual";
+    context.reason = decision.reason;
+  } else if (nextStatus === "Dismissed") {
+    type = "dismissed";
+    summary = "Dismissed — not completed";
+    context.reason = decision.reason;
+  } else if (
+    nextStatus === "Ready" &&
+    (previousStatus === "Done" || previousStatus === "Dismissed")
+  ) {
+    type = "reopened";
+    summary = `Reopened ${previousStatus} to Ready`;
+    context.reason = decision.reason;
+  } else if (decision.completionMode === "validated") {
+    type = "completion-validated";
+    summary = "Completed with qualifying validation";
+    context.validationRecordId = decision.validationRecordId ?? "";
+  } else if (decision.completionMode === "override") {
+    type = "completion-overridden";
+    summary = "Completion override used — not validated";
+    context.reason = decision.reason;
+  } else if (previousStatus === "Blocked") {
+    context.clearedManualBlocker = "true";
+  }
+
+  await transaction.activityEvent.create({
+    data: {
+      actionableId: current.id,
+      type,
+      summary,
+      metadataJson: inputJson(context),
+    },
+  });
 }
 
 async function currentOrNotFound(
   transaction: TransactionClient,
   sourceOrdinal: number,
 ) {
-  const current = await findActionableRow(transaction, sourceOrdinal);
-  if (!current) return null;
-  return current;
+  return findActionableRow(transaction, sourceOrdinal);
 }
 
 export async function updateActionable(
@@ -365,19 +677,23 @@ export async function updateActionable(
   return prisma.$transaction(async (transaction) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== input.version) {
-      throw new VersionConflictError(toDetail(current));
-    }
+    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
 
     await validateScope(transaction, input);
     const previousStatus = parsePersistedStatus(current.status);
-    if (input.status !== previousStatus) {
-      validateTransition(previousStatus, input.status, {
-        finding: input.finding,
-        description: input.description,
-        validation: input.validation,
-      });
-    }
+    const decision =
+      input.status === previousStatus
+        ? null
+        : validateTransition(
+            current,
+            input.status,
+            {
+              finding: input.finding,
+              description: input.description,
+              validation: input.validation,
+            },
+            {},
+          );
 
     const updated = await transaction.actionable.updateMany({
       where: { id: current.id, version: input.version },
@@ -397,25 +713,22 @@ export async function updateActionable(
         projectId: input.projectId,
         repositoryId: input.repositoryId,
         worktreeId: input.worktreeId,
+        manualBlockerMd:
+          previousStatus === "Blocked" && input.status !== "Blocked"
+            ? null
+            : current.manualBlockerMd,
         version: { increment: 1 },
       },
     });
-
     if (updated.count !== 1) {
       const latest = await currentOrNotFound(transaction, sourceOrdinal);
       if (!latest) return null;
       throw new VersionConflictError(toDetail(latest));
     }
 
-    if (input.status !== previousStatus) {
-      await transaction.actionableStatusHistory.create({
-        data: {
-          actionableId: current.id,
-          previousStatus,
-          newStatus: input.status,
-          origin: "user-edit",
-        },
-      });
+    await syncUserSources(transaction, current, input.userSources);
+    if (decision) {
+      await writeTransitionHistory(transaction, current, input.status, "user-edit", decision);
     }
 
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
@@ -431,37 +744,133 @@ export async function transitionActionable(
   return prisma.$transaction(async (transaction) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
-    if (current.version !== input.version) {
-      throw new VersionConflictError(toDetail(current));
-    }
+    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
 
     const previousStatus = parsePersistedStatus(current.status);
-    validateTransition(previousStatus, input.status, {
-      finding: current.finding,
-      description: current.description,
-      validation: stringArray(current.validationJson),
-    });
+    const decision = validateTransition(
+      current,
+      input.status,
+      {
+        finding: current.finding,
+        description: current.description,
+        validation: stringArray(current.validationJson),
+      },
+      input,
+    );
     const updated = await transaction.actionable.updateMany({
       where: { id: current.id, version: input.version },
       data: {
         status: input.status,
         updatedLabel: "just now",
+        manualBlockerMd:
+          input.status === "Blocked"
+            ? decision.reason
+            : previousStatus === "Blocked"
+              ? null
+              : current.manualBlockerMd,
+        dismissalReasonMd:
+          input.status === "Dismissed" ? decision.reason : current.dismissalReasonMd,
+        completionOverrideMd:
+          input.status === "Done"
+            ? decision.completionMode === "override"
+              ? decision.reason
+              : null
+            : current.completionOverrideMd,
         version: { increment: 1 },
       },
     });
-
     if (updated.count !== 1) {
       const latest = await currentOrNotFound(transaction, sourceOrdinal);
       if (!latest) return null;
       throw new VersionConflictError(toDetail(latest));
     }
 
-    await transaction.actionableStatusHistory.create({
+    await writeTransitionHistory(transaction, current, input.status, input.origin, decision);
+    const saved = await currentOrNotFound(transaction, sourceOrdinal);
+    return saved ? toDetail(saved) : null;
+  });
+}
+
+export async function recordValidation(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: CreateValidationRecordRequest,
+): Promise<ActionableDetail | null> {
+  return prisma.$transaction(async (transaction) => {
+    const current = await currentOrNotFound(transaction, sourceOrdinal);
+    if (!current) return null;
+    if (current.version !== input.version) throw new VersionConflictError(toDetail(current));
+    if (!input.notes.trim() && !input.evidence.trim()) {
+      throw new DomainValidationError(
+        "VALIDATION_EVIDENCE_REQUIRED",
+        {
+          notes: ["Add validation notes or evidence."],
+          evidence: ["Add validation notes or evidence."],
+        },
+        "Validation evidence is required.",
+      );
+    }
+
+    let superseded = null;
+    if (input.supersedesId) {
+      superseded = current.validationRecords.find(
+        (record) => record.id === input.supersedesId,
+      );
+      if (!superseded) {
+        throw new DomainValidationError(
+          "INVALID_SUPERSESSION",
+          { supersedesId: ["Choose a validation record from this actionable."] },
+          "The validation correction target is invalid.",
+        );
+      }
+      if (
+        current.validationRecords.some(
+          (record) => record.supersedesId === input.supersedesId,
+        )
+      ) {
+        throw new DomainValidationError(
+          "ALREADY_SUPERSEDED",
+          { supersedesId: ["Correct the latest record in the supersession chain."] },
+          "That validation record has already been superseded.",
+        );
+      }
+    }
+
+    const updated = await transaction.actionable.updateMany({
+      where: { id: current.id, version: input.version },
+      data: { updatedLabel: "just now", version: { increment: 1 } },
+    });
+    if (updated.count !== 1) {
+      const latest = await currentOrNotFound(transaction, sourceOrdinal);
+      if (!latest) return null;
+      throw new VersionConflictError(toDetail(latest));
+    }
+
+    const record = await transaction.validationRecord.create({
       data: {
         actionableId: current.id,
-        previousStatus,
-        newStatus: input.status,
+        type: input.type,
+        outcome: input.outcome,
+        notesMd: input.notes,
+        evidenceMd: input.evidence,
         origin: input.origin,
+        supersedesId: input.supersedesId ?? null,
+      },
+    });
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: current.id,
+        type: superseded ? "validation-corrected" : "validation-recorded",
+        summary: superseded
+          ? `Corrected validation result: ${input.outcome}`
+          : `Recorded validation result: ${input.outcome}`,
+        metadataJson: inputJson({
+          validationRecordId: record.id,
+          supersedesId: input.supersedesId ?? "",
+          validationType: input.type,
+          outcome: input.outcome,
+          origin: input.origin,
+        }),
       },
     });
 

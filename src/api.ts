@@ -5,9 +5,11 @@ import {
   scopeOptionsResponseSchema,
   type ActionableDetail,
   type ActionablesListResponse,
+  type CreateValidationRecordRequest,
   type CreateActionableRequest,
   type ProblemDetails,
   type ScopeOptionsResponse,
+  type StatusTransitionRequest,
   type UpdateActionableRequest,
 } from "@actionables/contracts";
 
@@ -71,6 +73,32 @@ export async function updateActionable(
   const response = actionableDetailResponseSchema.parse(
     await requestJson(`/api/actionables/${id}`, {
       method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
+  return response.item;
+}
+
+export async function transitionActionable(
+  id: number,
+  input: StatusTransitionRequest,
+): Promise<ActionableDetail> {
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/status-transitions`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+  return response.item;
+}
+
+export async function recordValidation(
+  id: number,
+  input: CreateValidationRecordRequest,
+): Promise<ActionableDetail> {
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/validation-records`, {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   );

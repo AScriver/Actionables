@@ -1,10 +1,12 @@
 import {
   Activity,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleDot,
   Clock3,
+  Copy,
   ExternalLink,
   FileCode2,
   GitBranch,
@@ -17,6 +19,7 @@ import {
   PanelRightOpen,
   Pencil,
   Plus,
+  RotateCcw,
   Search,
   Settings,
   SlidersHorizontal,
@@ -31,7 +34,9 @@ import {
   type Priority,
   type ScopeOptionsResponse,
   type Status,
-  type UserSourceReference,
+  type UserSourceReferenceInput,
+  type ValidationOutcome,
+  type ValidationType,
 } from "@actionables/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -41,8 +46,12 @@ import {
   fetchActionable,
   fetchActionables,
   fetchScopeOptions,
+  recordValidation,
+  transitionActionable,
   updateActionable,
 } from "./api";
+import { Markdown } from "./Markdown";
+import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
 type InspectorTab = "finding" | "research" | "validation";
 type PriorityFilter = "All" | Priority;
@@ -57,7 +66,6 @@ const priorityOrder: Record<Priority, number> = {
 };
 
 const priorities: Priority[] = ["Unset", "Critical", "High", "Medium", "Low", "Backlog"];
-const statuses: Status[] = ["Inbox", "Researching", "Ready"];
 const efforts: Effort[] = ["Unknown", "XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL"];
 const evidenceStates: EvidenceState[] = [
   "Unclassified",
@@ -143,7 +151,57 @@ function WorktreeRow({
   );
 }
 
-function SourceHistory({ selected }: { selected: ActionableDetail }) {
+async function copyText(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  }
+}
+
+function SourceActions({
+  locator,
+  openUrl,
+  onNotice,
+}: {
+  locator: string;
+  openUrl: string | null;
+  onNotice: (notice: string) => void;
+}) {
+  const copy = async () => {
+    if (await copyText(locator)) onNotice("Source locator copied.");
+    else window.prompt("Copy this source locator:", locator);
+  };
+  return (
+    <span className="source-actions">
+      {openUrl && (
+        <a href={openUrl} aria-label="Open source" title="Open source">
+          <ExternalLink aria-hidden="true" />
+        </a>
+      )}
+      <button type="button" onClick={copy} aria-label="Copy source locator" title="Copy source locator">
+        <Copy aria-hidden="true" />
+      </button>
+    </span>
+  );
+}
+
+function SourceHistory({
+  selected,
+  onNotice,
+}: {
+  selected: ActionableDetail;
+  onNotice: (notice: string) => void;
+}) {
   const imported = selected.immutableSourceEvidence.imported;
   return (
     <section className="inspector-section">
@@ -160,7 +218,10 @@ function SourceHistory({ selected }: { selected: ActionableDetail }) {
               <span>{file.lines ?? file.symbol ?? "file"}</span>
               <span>original evidence</span>
             </div>
-            <p><code>{file.path}</code></p>
+            <p>
+              <code>{file.path}</code>
+              <SourceActions locator={file.path} openUrl={null} onNotice={onNotice} />
+            </p>
           </div>
         ))}
         <div className="source-event">
@@ -184,13 +245,28 @@ function SourceHistory({ selected }: { selected: ActionableDetail }) {
               <span>{source.type}</span>
               <span>{source.label || "source reference"}</span>
             </div>
-            <p>{source.locator}</p>
+            <p>
+              <code>{source.locator}</code>
+              <SourceActions
+                locator={source.locator}
+                openUrl={safeSourceUrl(source)}
+                onNotice={onNotice}
+              />
+            </p>
+            <time dateTime={source.createdAt}>
+              Added {new Date(source.createdAt).toLocaleString()} · {source.provenance}
+            </time>
           </div>
         ))}
         {imported && selected.sourceThread && (
-          <a href={selected.sourceThread} className="source-link">
-            Open imported source thread <ExternalLink aria-hidden="true" />
-          </a>
+          <div className="source-link">
+            <span>Imported source thread</span>
+            <SourceActions
+              locator={selected.sourceThread}
+              openUrl={safeImportedSourceUrl(selected.sourceThread)}
+              onNotice={onNotice}
+            />
+          </div>
         )}
       </div>
     </section>
@@ -240,6 +316,356 @@ function RelationshipSection({
   );
 }
 
+function LifecycleControls({
+  selected,
+  onMutated,
+}: {
+  selected: ActionableDetail;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
+}) {
+  const [target, setTarget] = useState<Status | null>(null);
+  const [reason, setReason] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const needsReason =
+    target === "Blocked" ||
+    target === "Dismissed" ||
+    (target === "Ready" &&
+      (selected.status === "Done" || selected.status === "Dismissed"));
+
+  const submit = async () => {
+    if (!target) return;
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await transitionActionable(selected.id, {
+        version: selected.version,
+        status: target,
+        reason: needsReason ? reason : undefined,
+        completionOverrideReason:
+          target === "Done" && overrideReason.trim() ? overrideReason : undefined,
+        origin: "user",
+      });
+      const notice =
+        target === "Done" && overrideReason.trim()
+          ? "Completion override recorded distinctly from validated completion."
+          : `Actionable moved to ${target}.`;
+      setTarget(null);
+      setReason("");
+      setOverrideReason("");
+      onMutated(saved, notice);
+    } catch (caught) {
+      if (caught instanceof ApiProblem) {
+        setError(
+          Object.values(caught.problem.errors ?? {}).flat().join(" ") ||
+            caught.problem.title,
+        );
+        if (caught.problem.code === "VERSION_CONFLICT" && caught.problem.current) {
+          onMutated(
+            caught.problem.current,
+            "This lifecycle action was stale and was not applied. The current version is loaded; your reason remains available.",
+          );
+        }
+      } else {
+        setError("The lifecycle action could not be completed.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="lifecycle-strip" aria-label="Lifecycle actions">
+      <div className="lifecycle-heading">
+        <strong>Lifecycle</strong>
+        <span>Server-permitted actions</span>
+      </div>
+      {selected.manualBlocker && (
+        <div className="manual-blocker">
+          <strong>Blocked — manual</strong>
+          <Markdown>{selected.manualBlocker}</Markdown>
+        </div>
+      )}
+      <div className="lifecycle-actions">
+        {selected.permittedTransitions.map((status) => (
+          <button
+            type="button"
+            key={status}
+            className={status === "Done" ? "lifecycle-done" : ""}
+            onClick={() => {
+              setTarget(status);
+              setReason("");
+              setOverrideReason("");
+              setError("");
+            }}
+          >
+            {status}
+          </button>
+        ))}
+      </div>
+      {target && (
+        <div className="lifecycle-confirm" role="group" aria-label={`Move to ${target}`}>
+          <div>
+            <strong>{selected.status} → {target}</strong>
+            {target === "Done" && (
+              <p>
+                {selected.completionEligibility.qualifyingValidationRecordId
+                  ? "A current Passed validation qualifies. Leave override blank for validated completion."
+                  : "No current validation qualifies. An override is exceptional and remains visibly distinct from validation."}
+              </p>
+            )}
+            {target === "Dismissed" && (
+              <p>Dismissal means no longer intended; it is not completion.</p>
+            )}
+          </div>
+          {needsReason && (
+            <label>
+              <span>
+                {target === "Blocked"
+                  ? "Blocker note"
+                  : target === "Dismissed"
+                    ? "Dismissal reason"
+                    : "Reopening reason"}
+              </span>
+              <textarea
+                rows={2}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
+          )}
+          {target === "Done" && (
+            <label className="override-field">
+              <span>
+                Completion override reason
+                {selected.completionEligibility.qualifyingValidationRecordId
+                  ? " (optional and exceptional)"
+                  : " (required without qualifying validation)"}
+              </span>
+              <textarea
+                rows={2}
+                value={overrideReason}
+                onChange={(event) => setOverrideReason(event.target.value)}
+              />
+            </label>
+          )}
+          {error && <p className="inline-error" role="alert">{error}</p>}
+          <div className="lifecycle-confirm-actions">
+            <button type="button" onClick={() => setTarget(null)} disabled={saving}>
+              Cancel
+            </button>
+            <button type="button" className="primary-action" onClick={submit} disabled={saving}>
+              {saving
+                ? "Saving…"
+                : target === "Done" && overrideReason.trim()
+                  ? "Complete with override"
+                  : `Confirm ${target}`}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ValidationRecords({
+  selected,
+  onMutated,
+}: {
+  selected: ActionableDetail;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState<ValidationType>("Automated test");
+  const [outcome, setOutcome] = useState<ValidationOutcome>("Passed");
+  const [notes, setNotes] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [supersedesId, setSupersedesId] = useState<string | undefined>();
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setOpen(false);
+    setType("Automated test");
+    setOutcome("Passed");
+    setNotes("");
+    setEvidence("");
+    setSupersedesId(undefined);
+    setError("");
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await recordValidation(selected.id, {
+        version: selected.version,
+        type,
+        outcome,
+        notes,
+        evidence,
+        origin: "user",
+        supersedesId,
+      });
+      reset();
+      onMutated(
+        saved,
+        supersedesId
+          ? "Validation correction appended; the earlier record remains in history."
+          : "Validation result appended.",
+      );
+    } catch (caught) {
+      if (caught instanceof ApiProblem) {
+        setError(
+          Object.values(caught.problem.errors ?? {}).flat().join(" ") ||
+            caught.problem.title,
+        );
+        if (caught.problem.code === "VERSION_CONFLICT" && caught.problem.current) {
+          onMutated(
+            caught.problem.current,
+            "This validation save was stale and was not applied. The current version is loaded; your evidence remains in the form.",
+          );
+        }
+      } else {
+        setError("The validation result could not be saved.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="inspector-section validation-records">
+      <div className="section-title-row">
+        <div>
+          <h3>Validation records</h3>
+          <p className="section-help">{selected.completionEligibility.policy}</p>
+        </div>
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={() => {
+            setOpen(true);
+            setSupersedesId(undefined);
+          }}
+        >
+          Record result
+        </button>
+      </div>
+      {selected.validationRecords.map((record) => (
+        <article
+          className={`validation-record ${record.supersededById ? "is-superseded" : ""}`}
+          key={record.id}
+        >
+          <header>
+            <Badge tone={record.outcome}>{record.outcome}</Badge>
+            <strong>{record.type}</strong>
+            {record.qualifiesForCompletion && (
+              <span className="qualifying-label"><CheckCircle2 aria-hidden="true" /> Qualifying</span>
+            )}
+            {record.supersededById && <span>Superseded</span>}
+          </header>
+          {record.notes && <Markdown>{record.notes}</Markdown>}
+          {record.evidence && (
+            <div className="validation-evidence">
+              <span>Evidence</span>
+              <Markdown>{record.evidence}</Markdown>
+            </div>
+          )}
+          <footer>
+            <time dateTime={record.recordedAt}>
+              {new Date(record.recordedAt).toLocaleString()}
+            </time>
+            <span>{record.origin}</span>
+            {!record.supersededById && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(true);
+                  setSupersedesId(record.id);
+                  setType(record.type);
+                  setOutcome(record.outcome);
+                  setNotes(record.notes);
+                  setEvidence(record.evidence);
+                }}
+              >
+                <RotateCcw aria-hidden="true" /> Correct
+              </button>
+            )}
+          </footer>
+        </article>
+      ))}
+      {selected.validationRecords.length === 0 && (
+        <p className="section-help">No validation results have been recorded.</p>
+      )}
+      {open && (
+        <form className="validation-form" onSubmit={submit}>
+          <strong>{supersedesId ? "Append validation correction" : "Record validation result"}</strong>
+          {supersedesId && (
+            <p>The prior record remains unchanged and this record will point to it.</p>
+          )}
+          <div className="validation-form-grid">
+            <label>
+              <span>Type</span>
+              <select value={type} onChange={(event) => setType(event.target.value as ValidationType)}>
+                {["Automated test", "Manual test", "Command", "Review", "Document"].map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Outcome</span>
+              <select value={outcome} onChange={(event) => setOutcome(event.target.value as ValidationOutcome)}>
+                {["Passed", "Failed", "Partial"].map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>Notes</span>
+            <textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
+          </label>
+          <label>
+            <span>Evidence</span>
+            <textarea rows={3} value={evidence} onChange={(event) => setEvidence(event.target.value)} />
+          </label>
+          {error && <p className="inline-error" role="alert">{error}</p>}
+          <div className="lifecycle-confirm-actions">
+            <button type="button" onClick={reset} disabled={saving}>Cancel</button>
+            <button type="submit" className="primary-action" disabled={saving}>
+              {saving ? "Saving…" : supersedesId ? "Append correction" : "Record result"}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
+  return (
+    <section className="inspector-section activity-timeline">
+      <h3>Activity</h3>
+      {selected.activity.map((event) => (
+        <article
+          key={event.id}
+          className={event.type === "completion-overridden" ? "is-override" : ""}
+        >
+          <Activity aria-hidden="true" />
+          <div>
+            <strong>{event.summary}</strong>
+            {event.context.reason && <Markdown>{event.context.reason}</Markdown>}
+            <time dateTime={event.occurredAt}>
+              {new Date(event.occurredAt).toLocaleString()}
+            </time>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function Inspector({
   selected,
   actionables,
@@ -249,6 +675,8 @@ function Inspector({
   validationChecks,
   toggleValidation,
   onEdit,
+  onMutated,
+  onNotice,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
@@ -258,6 +686,8 @@ function Inspector({
   validationChecks: Set<string>;
   toggleValidation: (key: string) => void;
   onEdit: () => void;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
+  onNotice: (notice: string) => void;
 }) {
   return (
     <>
@@ -290,6 +720,8 @@ function Inspector({
         </div>
       </header>
 
+      <LifecycleControls key={`lifecycle-${selected.id}`} selected={selected} onMutated={onMutated} />
+
       <nav className="inspector-tabs" aria-label="Actionable detail">
         {(["finding", "research", "validation"] as InspectorTab[]).map((tab) => (
           <button
@@ -310,11 +742,15 @@ function Inspector({
           <>
             <section className="inspector-section">
               <h3>Finding</h3>
-              <p>{selected.finding || "No finding has been written yet."}</p>
+              {selected.finding
+                ? <Markdown>{selected.finding}</Markdown>
+                : <p>No finding has been written yet.</p>}
             </section>
             <section className="inspector-section">
               <h3>Description</h3>
-              <p>{selected.description || "No intended result has been written yet."}</p>
+              {selected.description
+                ? <Markdown>{selected.description}</Markdown>
+                : <p>No intended result has been written yet.</p>}
             </section>
 
             <section className="inspector-section">
@@ -333,7 +769,7 @@ function Inspector({
             <section className="inspector-section">
               <h3>Research notes</h3>
               {selected.research.length > 0
-                ? <ul className="research-list">{selected.research.map((note) => <li key={note}>{note}</li>)}</ul>
+                ? <div className="research-list">{selected.research.map((note) => <Markdown key={note}>{note}</Markdown>)}</div>
                 : <p>No research notes yet.</p>}
             </section>
 
@@ -349,14 +785,14 @@ function Inspector({
                         checked={validationChecks.has(key)}
                         onChange={() => toggleValidation(key)}
                       />
-                      <span>{step}</span>
+                      <Markdown inline>{step}</Markdown>
                     </label>
                   );
                 })}
               </div> : <p>No validation plan yet.</p>}
             </section>
             <RelationshipSection selected={selected} actionables={actionables} />
-            <SourceHistory selected={selected} />
+            <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
 
@@ -364,13 +800,13 @@ function Inspector({
           <>
             <section className="inspector-section tab-lead">
               <h3>Research notes</h3>
-              <p className="finding-callout">{selected.finding}</p>
-              <ul className="research-list expanded">
-                {selected.research.map((note) => <li key={note}>{note}</li>)}
-              </ul>
+              <div className="finding-callout"><Markdown>{selected.finding}</Markdown></div>
+              <div className="research-list expanded">
+                {selected.research.map((note) => <Markdown key={note}>{note}</Markdown>)}
+              </div>
             </section>
             <RelationshipSection selected={selected} actionables={actionables} />
-            <SourceHistory selected={selected} />
+            <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
 
@@ -378,7 +814,7 @@ function Inspector({
           <>
             <section className="inspector-section tab-lead">
               <h3>Validation procedure</h3>
-              <p className="section-help">The validation plan is persisted. These execution checkmarks remain a temporary local reading aid until immutable validation results are added in T-004.</p>
+              <p className="section-help">This is the editable plan. Completion uses the append-only records below, not these local reading checkmarks.</p>
               <div className="validation-list validation-large">
                 {selected.validation.map((step, index) => {
                   const key = `${selected.id}-${index}`;
@@ -389,32 +825,14 @@ function Inspector({
                         checked={validationChecks.has(key)}
                         onChange={() => toggleValidation(key)}
                       />
-                      <span>{step}</span>
+                      <Markdown inline>{step}</Markdown>
                     </label>
                   );
                 })}
               </div>
             </section>
-            <section className="inspector-section">
-              <h3>History</h3>
-              {selected.statusHistory.map((entry) => (
-                <div className="history-row" key={entry.id}>
-                  <Activity aria-hidden="true" />
-                  <span>
-                    {entry.previousStatus
-                      ? `${entry.previousStatus} → ${entry.newStatus}`
-                      : `Created as ${entry.newStatus}`}
-                    {" · "}{entry.origin}
-                  </span>
-                  <time dateTime={entry.occurredAt}>
-                    {new Date(entry.occurredAt).toLocaleString()}
-                  </time>
-                </div>
-              ))}
-              {selected.statusHistory.length === 0 && (
-                <p className="section-help">No status changes have been recorded yet.</p>
-              )}
-            </section>
+            <ValidationRecords key={`validation-${selected.id}`} selected={selected} onMutated={onMutated} />
+            <ActivityTimeline selected={selected} />
           </>
         )}
       </div>
@@ -436,7 +854,7 @@ type ActionableDraft = {
   researchText: string;
   validationText: string;
   tagsText: string;
-  userSources: UserSourceReference[];
+  userSources: UserSourceReferenceInput[];
   version: number;
 };
 
@@ -462,7 +880,11 @@ function draftFromItem(item: ActionableDetail): ActionableDraft {
     researchText: item.research.join("\n"),
     validationText: item.validation.join("\n"),
     tagsText: item.tags.join(", "),
-    userSources: item.userSources,
+    userSources: item.userSources.map(({ type, locator, label }) => ({
+      type,
+      locator,
+      label,
+    })),
     version: item.version,
   };
 }
@@ -590,7 +1012,7 @@ function ActionableForm({
 
   const updateSource = (
     index: number,
-    key: keyof UserSourceReference,
+    key: keyof UserSourceReferenceInput,
     value: string,
   ) => {
     const next = draft.userSources.map((source, sourceIndex) =>
@@ -769,23 +1191,16 @@ function ActionableForm({
                 <span>Workflow status</span>
                 <small>
                   {item
-                    ? `Allowed from ${item.status}: ${[item.status, ...item.permittedTransitions].join(", ")}.`
+                    ? "Use the server-permitted lifecycle actions in the inspector so guarded transitions collect their evidence."
                     : "New manual items start in Inbox; triage after creation."}
                 </small>
                 <select
                   id="status"
                   value={draft.status}
-                  disabled={!item}
-                  onChange={(event) => update("status", event.target.value as Status)}
+                  disabled
+                  onChange={() => undefined}
                 >
-                  {statuses.map((value) => (
-                    <option
-                      key={value}
-                      disabled={Boolean(item && value !== item.status && !item.permittedTransitions.includes(value))}
-                    >
-                      {value}
-                    </option>
-                  ))}
+                  <option>{draft.status}</option>
                 </select>
                 {fieldError(errors, "status")}
               </label>
@@ -1072,6 +1487,12 @@ export default function App() {
     setInspectorHidden(false);
     setFormMode(null);
     setNotice(created ? "Actionable created and opened." : "Actionable changes saved.");
+  };
+
+  const handleMutated = (saved: ActionableDetail, mutationNotice: string) => {
+    queryClient.setQueryData(["actionable", saved.id], saved);
+    void queryClient.invalidateQueries({ queryKey: ["actionables"] });
+    setNotice(mutationNotice);
   };
 
   const toggleParent = (id: number) => {
@@ -1367,6 +1788,8 @@ export default function App() {
             validationChecks={validationChecks}
             toggleValidation={toggleValidation}
             onEdit={() => setFormMode("edit")}
+            onMutated={handleMutated}
+            onNotice={setNotice}
           />
         ) : (
           <div className="inspector-loading" role="status">

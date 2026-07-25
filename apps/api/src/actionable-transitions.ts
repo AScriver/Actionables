@@ -1,9 +1,13 @@
 import { statusSchema, type Status } from "@actionables/contracts";
 
 const transitionMatrix: Readonly<Record<Status, readonly Status[]>> = {
-  Inbox: ["Researching", "Ready"],
-  Researching: ["Inbox", "Ready"],
-  Ready: ["Inbox", "Researching"],
+  Inbox: ["Researching", "Ready", "Dismissed"],
+  Researching: ["Inbox", "Ready", "Blocked", "Dismissed"],
+  Ready: ["Inbox", "Researching", "In progress", "Blocked", "Dismissed"],
+  "In progress": ["Ready", "Blocked", "Done", "Dismissed"],
+  Blocked: ["Researching", "Ready", "In progress", "Dismissed"],
+  Done: ["Ready"],
+  Dismissed: ["Ready"],
 };
 
 export function permittedTransitions(status: Status): Status[] {
@@ -19,12 +23,5 @@ export function parsePersistedStatus(status: string): Status {
 }
 
 export function transitionExplanation(status: Status) {
-  switch (status) {
-    case "Inbox":
-      return "Inbox items may move to Researching or Ready after triage.";
-    case "Researching":
-      return "Researching items may return to Inbox or move to Ready.";
-    case "Ready":
-      return "Ready items may return to Inbox or Researching in this milestone.";
-  }
+  return `${status} items may move to ${transitionMatrix[status].join(", ")}.`;
 }

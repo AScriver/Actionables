@@ -58,6 +58,9 @@ model Actionable {
   evidenceState          String     @default("Unclassified")
   version                Int        @default(1)
   updatedLabel           String
+  manualBlockerMd        String?
+  dismissalReasonMd      String?
+  completionOverrideMd   String?
   finding                String
   description            String
   researchJson           Json
@@ -81,6 +84,9 @@ model Actionable {
   repository             Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   worktree               Worktree   @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
   statusHistory          ActionableStatusHistory[]
+  validationRecords      ValidationRecord[]
+  activityEvents         ActivityEvent[]
+  userSources            UserSourceReference[]
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
 
@@ -98,4 +104,47 @@ model ActionableStatusHistory {
   actionable     Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
 
   @@index([actionableId, occurredAt])
+}
+
+model ValidationRecord {
+  id           String            @id @default(cuid())
+  actionableId String
+  type         String
+  outcome      String
+  notesMd      String
+  evidenceMd   String
+  origin       String
+  recordedAt   DateTime          @default(now())
+  supersedesId String?           @unique
+  actionable   Actionable        @relation(fields: [actionableId], references: [id], onDelete: Cascade)
+  supersedes   ValidationRecord? @relation("ValidationCorrections", fields: [supersedesId], references: [id], onDelete: Restrict)
+  supersededBy ValidationRecord? @relation("ValidationCorrections")
+
+  @@index([actionableId, recordedAt])
+}
+
+model ActivityEvent {
+  id           String     @id @default(cuid())
+  actionableId String
+  type         String
+  summary      String
+  metadataJson Json
+  occurredAt   DateTime   @default(now())
+  actionable   Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
+
+  @@index([actionableId, occurredAt])
+}
+
+model UserSourceReference {
+  id           String     @id @default(cuid())
+  actionableId String
+  type         String
+  locator      String
+  label        String?
+  provenance   String     @default("user-added")
+  createdAt    DateTime   @default(now())
+  removedAt    DateTime?
+  actionable   Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
+
+  @@index([actionableId, createdAt])
 }

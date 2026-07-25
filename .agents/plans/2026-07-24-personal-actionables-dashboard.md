@@ -74,6 +74,7 @@ A local, single-user web application can be implemented without redesigning the 
 
 - Resolved 2026-07-24: the frontend checkpoint was rendered, compared, corrected, and explicitly approved. T-001 is authorized.
 - Resolved 2026-07-24: the user approved the corrected T-004-before-T-003 execution order, explicit lifecycle transition matrix, and updated task authorities. T-004 is authorized.
+- Open 2026-07-24: approve beginning T-003 after reviewing the completed T-004 lifecycle, validation, source, Markdown, activity, and browser evidence.
 
 ## 1. Product definition
 
@@ -1283,7 +1284,7 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 | T-000 | None | Frontend-only interface matches the authoritative Actionables reference and is ready for design approval | None | Complete |
 | T-001 | None | Architecture proof reads real actionables through React → Fastify → SQLite | T-000 | Complete |
 | T-002 | None | Actionables can be captured, edited, and triaged | T-001 | Complete |
-| T-004 | None | Core lifecycle, evidence, research, validation, and history make completion trustworthy | T-002 | Ready |
+| T-004 | None | Core lifecycle, evidence, research, validation, and history make completion trustworthy | T-002 | Complete |
 | T-003 | None | Hierarchy and dependencies are distinct, safe, and usable | T-004 | Pending |
 | T-005 | None | Dashboard, discovery, archive, and restore support daily use | T-003, T-004 | Pending |
 | T-006 | None | All 32 seed items import idempotently and data exports portably | T-004 | Pending |
@@ -1376,6 +1377,9 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - 2026-07-24: Deliberate visual differences — the approved dense shell is unchanged; the inspector now has an edit affordance, an explicit Finding section, and protected imported-evidence labeling, while create/edit uses a responsive modal form.
 - 2026-07-24: Narrow support — made T-004 a prerequisite of T-003 and clarified the full lifecycle matrix because T-003's dependency-satisfaction and child-reopen rules require `Done`, `Dismissed`, and core reopen behavior; T-004 owns the statuses and core transitions, while T-003 only consumes them for relationship-specific policy.
 - 2026-07-24: T-004 authorized — the user approved the corrected dependency order, workflow matrix, updated authorities, plan-only commit, and focused T-004 implementation; T-003 remains outside the authorized boundary.
+- 2026-07-24: T-004 complete — implemented the exact seven-status server-owned matrix, meaningful manual-block evidence, dismissal/reopen reasons, append-only validation and correction chains, qualifying-validation/override completion policy, timestamped user-source provenance, chronological activity, safe GFM rendering, explicit source protocol allowlists, copy fallback, and recoverable version conflicts.
+- 2026-07-24: T-004 boundary audit — hierarchy, dependency edges, derived dependency blocking, parent completion gates, and automatic parent reopening remain unimplemented; the API exposes `isDependencyBlocked = false` separately so T-003 can extend derived state without changing manual `Blocked`.
+- 2026-07-24: Deliberate visual differences — the approved shell and dense list remain unchanged; a compact lifecycle strip was added below inspector metadata, while validation records and activity use restrained divided sections instead of large cards.
 
 ## Validation log
 
@@ -1401,6 +1405,11 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - T-002: `pnpm exec playwright test --reporter=list` completed with 4 passing Chromium tests covering invalid-capture draft preservation and unsaved-change warning, two-context 409 recovery and draft reapplication, mobile direct-link/list navigation, and persisted Ready triage through refresh.
 - T-002: Playwright CLI browser verification reported 0 console errors and 0 warnings; screenshots at 1586×990, 1280×800, and 390×844 were captured under `output/playwright/t002-*.png` and visually compared with the approved T-001 baselines.
 - T-002: manual visual inspection confirmed the desktop/laptop list density and three-pane proportions remain aligned with the approved shell; the responsive modal, mobile list, and mobile detail had no observed clipping, inaccessible controls, or unintended layout regression.
+- T-004: `pnpm run db:setup` applied the lifecycle/validation and initial-activity migrations, preserved the reviewed seed as 32 unchanged items, and `pnpm exec prisma migrate status` reported four migrations with the schema up to date.
+- T-004: `pnpm run typecheck`, `pnpm test`, and `pnpm run build` completed successfully; Vitest reported 21 passing API/domain tests covering all valid matrix transitions, representative invalid transitions from every state, required reasons, qualifying/nonqualifying validation, correction/supersession, validated and override completion, dismissal/reopening, source preservation, stale conflicts, and forced transactional rollback.
+- T-004: `pnpm exec playwright test --reporter=list` completed with 7 passing Chromium tests covering persisted lifecycle flows, failed/passed validation, validated completion, reopening, source protocol allowlisting/copy fallback, malicious and malformed Markdown, stale-action recovery, deep-link refresh, keyboard use, responsive layouts, and console checks.
+- T-004: screenshots at 1586×990, 1280×800, and 390×844 were captured under `output/playwright/t004-actionables-*.png` and visually inspected; no shell, density, clipping, or oversized-card regression was observed.
+- T-004: the final fresh-browser desktop/laptop/mobile console check reported 0 errors and 0 warnings.
 
 ## Final reconciliation
 
@@ -1408,4 +1417,4 @@ Statuses: Pending, Blocked, Ready, Active, Complete. Only dependency-eligible le
 - Technology stack: **Node.js 24 LTS, TypeScript, pnpm, React + Vite, React Router Declarative mode, TanStack Query, Fastify, Zod, Prisma + SQLite + `better-sqlite3`, React Hook Form, safe GFM Markdown, Tailwind CSS, Vitest/Testing Library, and Playwright**.
 - Exact MVP: the features listed in “MVP boundaries”; all listed non-goals remain excluded.
 - Current milestone: T-002 is complete; actionables can be captured, fully edited, triaged through server-authoritative transitions, refreshed from stable deep links, and recovered after stale-version conflicts without losing drafts or imported evidence.
-- Current milestone: T-004 is authorized and Ready; T-003 remains pending and requires explicit user continuation after T-004 before hierarchy or dependency behavior is implemented.
+- Current milestone: T-004 is complete; T-003 remains pending and requires explicit user approval before hierarchy, dependency, derived-blocking, parent-completion, or automatic-parent-reopen behavior is implemented.
