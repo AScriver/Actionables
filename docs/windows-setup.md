@@ -11,6 +11,8 @@ The repository pins pnpm through `package.json` and the intended Node release li
 
 No `.env` file is required. The default database is `file:./data/actionables.db`; set `DATABASE_URL` only when an isolated database is intentional.
 
+The agent MCP endpoint is disabled unless `ACTIONABLES_MCP_TOKEN` is set. See [Agent task MCP endpoint](mcp-agent-tasks.md) for the local token and Codex configuration.
+
 ## Clean setup
 
 Run from a normal Windows path; spaces are supported.
@@ -58,6 +60,8 @@ This migrates and seeds the configured database, then starts:
 - Health: `http://127.0.0.1:4173/api/health`
 
 Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
+
+If MCP was enabled after the app started, restart the app so the API reads the new token.
 
 ## Production-mode local operation
 
@@ -125,6 +129,12 @@ Get-NetTCPConnection -LocalPort 4173,4174 -ErrorAction SilentlyContinue |
 ```
 
 Stop the known process or use a different API port and matching Vite proxy configuration. The documented release proof uses the default ports.
+
+### MCP returns 401, 403, or 404
+
+- `404`: set a non-empty `ACTIONABLES_MCP_TOKEN` and restart the app.
+- `401`: make the MCP client read the same token and send it as a bearer token.
+- `403`: use `http://127.0.0.1:4174/mcp` or another loopback host. The MCP route rejects non-loopback Host and Origin values.
 
 ### Migrations fail
 

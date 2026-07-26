@@ -21,8 +21,9 @@ Semantic equivalence compares canonical normalized documents while excluding:
 - `exportedAt`, which is regenerated for each download;
 - `metadata.sourceName`, which describes the transfer rather than domain state;
 - database-local optimistic-concurrency versions, row identifiers, derived dashboard queues, and legacy display labels.
+- active agent task claims, claim-token hashes, and lease timestamps, which are transient coordination state.
 
-No other domain fields are excluded. Relationships, lifecycle and activity history, validation supersession, archive state, source evidence, Markdown, tags, user sources, waivers, and provenance participate in the semantic snapshot.
+No other domain fields are excluded. Relationships, lifecycle and activity history (including agent claim, release, and observed-expiry events), validation supersession, archive state, source evidence, Markdown, tags, user sources, waivers, and provenance participate in the semantic snapshot.
 
 ## Reconciliation
 

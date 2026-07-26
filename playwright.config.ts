@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const node = JSON.stringify(process.execPath);
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -27,9 +29,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm exec tsx scripts/reset-e2e-database.ts && pnpm run dev",
+    command: `${node} scripts/start-e2e.mjs`,
     url: "http://127.0.0.1:4173/api/health",
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1",
     timeout: 120_000,
     env: {
       DATABASE_URL: "file:./data/actionables-e2e.db",

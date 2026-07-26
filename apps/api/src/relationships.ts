@@ -5,6 +5,8 @@ import type {
   CreateSubtaskRequest,
   DependencyActionRequest,
   DetachParentRequest,
+  Effort,
+  Priority,
   SetParentRequest,
 } from "@actionables/contracts";
 import type { Prisma } from "./generated/prisma/client.js";
@@ -16,6 +18,16 @@ import {
 } from "./repository.js";
 
 type Transaction = Prisma.TransactionClient;
+type CreateSubtaskOptions = {
+  externalKey?: string;
+  origin?: string;
+  priority?: Priority;
+  description?: string;
+  effort?: Effort;
+  validation?: string[];
+  rawFragment?: Prisma.InputJsonValue;
+  statusProvenance?: string;
+};
 
 class StaleRelationshipError extends Error {
   constructor(public readonly ordinal: number) {
@@ -192,6 +204,7 @@ export async function createSubtask(
   prisma: AppPrismaClient,
   parentOrdinal: number,
   input: CreateSubtaskRequest,
+  options: CreateSubtaskOptions = {},
 ) {
   return runMutation(prisma, parentOrdinal, async (tx) => {
     const parent = await requireActionable(tx, parentOrdinal, "parent");
@@ -209,20 +222,21 @@ export async function createSubtask(
     const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
     const child = await tx.actionable.create({
       data: {
-        externalKey: `manual-${randomUUID()}`,
+        externalKey: options.externalKey ?? `manual-${randomUUID()}`,
         sourceOrdinal: ordinal,
         title: input.title,
-        priority: "Unset",
+        priority: options.priority ?? "Unset",
         status: "Inbox",
         statusProvenance:
+          options.statusProvenance ??
           "Created manually as a subtask with neutral Inbox status.",
-        effort: "Unknown",
+        effort: options.effort ?? "Unknown",
         evidenceState: "Unclassified",
         updatedLabel: "just now",
         finding: "",
-        description: "",
+        description: options.description ?? "",
         researchJson: json([]),
-        validationJson: json([]),
+        validationJson: json(options.validation ?? []),
         filesJson: json([]),
         tagsJson: json([]),
         userSourcesJson: json([]),
@@ -233,7 +247,8 @@ export async function createSubtask(
         sourceContainerId: "",
         sourceThread: "",
         contentHash: "",
-        rawFragmentJson: json({ kind: "manual-subtask" }),
+        rawFragmentJson:
+          options.rawFragment ?? json({ kind: "manual-subtask" }),
         projectId: parent.projectId,
         repositoryId: parent.repositoryId,
         worktreeId: parent.worktreeId,
@@ -241,7 +256,7 @@ export async function createSubtask(
           create: {
             previousStatus: null,
             newStatus: "Inbox",
-            origin: "subtask-create",
+            origin: options.origin ?? "subtask-create",
           },
         },
         activityEvents: {
@@ -251,14 +266,18 @@ export async function createSubtask(
             metadataJson: json({
               previousStatus: "",
               newStatus: "Inbox",
-              origin: "subtask-create",
+              origin: options.origin ?? "subtask-create",
             }),
           },
         },
       },
     });
     const relationship = await tx.hierarchyRelationship.create({
-      data: { parentId: parent.id, childId: child.id },
+      data: {
+        parentId: parent.id,
+        childId: child.id,
+        provenance: options.origin ?? "user",
+      },
     });
     await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
     const context = {

@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import {
   type CreateActionableRequest,
+  type CreateRepositoryResponse,
   type ActionableDetail,
   type ActionableQuery,
   type ActionableSummary,
@@ -57,6 +58,7 @@ import {
   ApiProblem,
   createDependency,
   createActionable,
+  createRepository,
   createSubtask,
   commitPortableImport,
   detachParent,
@@ -69,6 +71,7 @@ import {
   preparePortableImport,
   previewPortableImport,
   recordValidation,
+  releaseExpiredAgentClaim,
   removeDependency,
   restoreDependency,
   setParent,
@@ -1200,6 +1203,74 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
   );
 }
 
+function AgentClaimPanel({
+  selected,
+  onReleaseExpired,
+}: {
+  selected: ActionableDetail;
+  onReleaseExpired: () => void;
+}) {
+  const claim = selected.agentClaim;
+  return (
+    <section
+      className={`agent-claim-panel ${claim?.state === "expired" ? "is-expired" : ""}`}
+      aria-labelledby={`agent-claim-title-${selected.id}`}
+    >
+      <div className="agent-claim-heading">
+        <div>
+          <h3 id={`agent-claim-title-${selected.id}`} tabIndex={-1}>
+            Agent claim
+          </h3>
+          <p>
+            {claim
+              ? claim.state === "expired"
+                ? "This lease has expired and no longer permits agent work."
+                : "An agent currently holds the task lease."
+              : "No agent currently holds this task."}
+          </p>
+        </div>
+        <Badge tone={claim?.state === "expired" ? "Failed" : "Inbox"}>
+          {claim
+            ? claim.state === "expired"
+              ? "Expired"
+              : "Claimed"
+            : "Unclaimed"}
+        </Badge>
+      </div>
+      {claim && (
+        <dl className="agent-claim-details">
+          <div>
+            <dt>Claimant</dt>
+            <dd className="mono">{claim.agentId}</dd>
+          </div>
+          <div>
+            <dt>Lease expiry</dt>
+            <dd>
+              <time dateTime={claim.leaseExpiresAt}>
+                {new Date(claim.leaseExpiresAt).toLocaleString()}
+              </time>
+            </dd>
+          </div>
+          <div>
+            <dt>Task state</dt>
+            <dd>{selected.status}</dd>
+          </div>
+        </dl>
+      )}
+      {claim?.isReleasable && (
+        <button
+          type="button"
+          className="toolbar-button agent-claim-release"
+          onClick={onReleaseExpired}
+          aria-label={`Release expired claim held by ${claim.agentId}`}
+        >
+          Release stale claim
+        </button>
+      )}
+    </section>
+  );
+}
+
 function Inspector({
   selected,
   actionables,
@@ -1213,6 +1284,7 @@ function Inspector({
   onNavigate,
   onNotice,
   onArchive,
+  onReleaseExpiredClaim,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
@@ -1226,6 +1298,7 @@ function Inspector({
   onNavigate: (id: number) => void;
   onNotice: (notice: string) => void;
   onArchive: () => void;
+  onReleaseExpiredClaim: () => void;
 }) {
   return (
     <>
@@ -1303,6 +1376,11 @@ function Inspector({
           onMutated={onMutated}
         />
       )}
+
+      <AgentClaimPanel
+        selected={selected}
+        onReleaseExpired={onReleaseExpiredClaim}
+      />
 
       <nav
         className="inspector-tabs"
@@ -1519,10 +1597,25 @@ function draftFromItem(item: ActionableDetail): ActionableDraft {
   };
 }
 
-function emptyDraft(scopes: ScopeOptionsResponse): ActionableDraft {
-  const project = scopes.projects[0];
-  const repository = project?.repositories[0];
-  const worktree = repository?.worktrees[0];
+function emptyDraft(
+  scopes: ScopeOptionsResponse,
+  initialScope?: {
+    projectId?: string;
+    repositoryId?: string;
+    worktreeId?: string;
+  },
+): ActionableDraft {
+  const project =
+    scopes.projects.find((item) => item.id === initialScope?.projectId) ??
+    scopes.projects[0];
+  const repository =
+    project?.repositories.find(
+      (item) => item.id === initialScope?.repositoryId,
+    ) ?? project?.repositories[0];
+  const worktree =
+    repository?.worktrees.find(
+      (item) => item.id === initialScope?.worktreeId,
+    ) ?? repository?.worktrees[0];
   return {
     title: "",
     priority: "Unset",
@@ -1554,17 +1647,23 @@ function fieldError(errors: Record<string, string[]>, field: string) {
 function ActionableForm({
   item,
   scopes,
+  initialScope,
   onClose,
   onSaved,
 }: {
   item?: ActionableDetail;
   scopes: ScopeOptionsResponse;
+  initialScope?: {
+    projectId?: string;
+    repositoryId?: string;
+    worktreeId?: string;
+  };
   onClose: () => void;
   onSaved: (saved: ActionableDetail, created: boolean) => void;
 }) {
   const initialDraft = useMemo(
-    () => (item ? draftFromItem(item) : emptyDraft(scopes)),
-    [item, scopes],
+    () => (item ? draftFromItem(item) : emptyDraft(scopes, initialScope)),
+    [initialScope, item, scopes],
   );
   const [draft, setDraft] = useState(initialDraft);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
@@ -2800,6 +2899,9 @@ function LegacyApp() {
             onArchive={() =>
               setNotice("Archive is available in the daily-use shell.")
             }
+            onReleaseExpiredClaim={() =>
+              setNotice("Claim release is available in the daily-use shell.")
+            }
           />
         ) : (
           <div className="inspector-loading" role="status">
@@ -3409,6 +3511,177 @@ function DataPanel({
   );
 }
 
+function RepositoryDialog({
+  scopes,
+  initialProjectId,
+  onClose,
+  onCreated,
+}: {
+  scopes: ScopeOptionsResponse;
+  initialProjectId?: string;
+  onClose: () => void;
+  onCreated: (created: CreateRepositoryResponse) => void;
+}) {
+  const projects = scopes.projects.filter((project) => !project.archivedAt);
+  const initialProject =
+    projects.find((project) => project.id === initialProjectId) ?? projects[0];
+  const [projectId, setProjectId] = useState(initialProject?.id ?? "");
+  const [name, setName] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [errors, setErrors] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  useModalIsolation(dialogRef);
+  useEffect(() => nameRef.current?.focus(), []);
+
+  const clearFieldError = (field: string) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    setErrors({});
+    try {
+      onCreated(await createRepository({ projectId, name, localPath }));
+    } catch (caught) {
+      if (caught instanceof ApiProblem) {
+        setErrors(caught.problem.errors ?? {});
+        setError(caught.problem.title);
+      } else {
+        setError(errorMessage(caught));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="archive-dialog repository-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="repository-dialog-title"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !saving) onClose();
+        }}
+      >
+        <form onSubmit={(event) => void submit(event)}>
+          <header className="archive-dialog-header">
+            <GitBranch aria-hidden="true" />
+            <div>
+              <h2 id="repository-dialog-title">Add repository</h2>
+              <p>
+                Track a local repository and create its initial Default
+                worktree.
+              </p>
+            </div>
+          </header>
+          <div className="repository-form-fields">
+            <label className="form-field" htmlFor="repository-project">
+              <span>Project</span>
+              <select
+                id="repository-project"
+                value={projectId}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  clearFieldError("projectId");
+                }}
+                aria-invalid={Boolean(errors.projectId)}
+                aria-describedby={
+                  errors.projectId ? "projectId-error" : undefined
+                }
+                disabled={saving}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              {fieldError(errors, "projectId")}
+            </label>
+            <label className="form-field" htmlFor="repository-name">
+              <span>Repository name</span>
+              <input
+                ref={nameRef}
+                id="repository-name"
+                value={name}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  clearFieldError("name");
+                }}
+                aria-invalid={Boolean(errors.name)}
+                aria-describedby={errors.name ? "name-error" : undefined}
+                maxLength={240}
+                required
+                disabled={saving}
+              />
+              {fieldError(errors, "name")}
+            </label>
+            <label
+              className="form-field form-field-wide"
+              htmlFor="repository-path"
+            >
+              <span>Local path</span>
+              <input
+                id="repository-path"
+                value={localPath}
+                onChange={(event) => {
+                  setLocalPath(event.target.value);
+                  clearFieldError("localPath");
+                }}
+                aria-invalid={Boolean(errors.localPath)}
+                aria-describedby={
+                  errors.localPath ? "localPath-error" : undefined
+                }
+                placeholder="C:\repos\Example"
+                maxLength={4096}
+                required
+                disabled={saving}
+              />
+              {fieldError(errors, "localPath")}
+            </label>
+          </div>
+          {error && (
+            <div className="inline-error" role="alert">
+              {error}
+            </div>
+          )}
+          <footer>
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="primary-action"
+              disabled={saving || projects.length === 0}
+            >
+              {saving ? "Adding…" : "Add repository"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function ArchiveDialog({
   target,
   impact,
@@ -3518,6 +3791,92 @@ function ArchiveDialog({
   );
 }
 
+function ExpiredClaimDialog({
+  target,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  target: ActionableDetail;
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const claim = target.agentClaim;
+  useModalIsolation(dialogRef);
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="archive-dialog"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="expired-claim-dialog-title"
+        aria-describedby="expired-claim-dialog-description"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !saving) {
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          );
+          if (!controls?.length) return;
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
+        <div className="archive-dialog-header">
+          <AlertTriangle aria-hidden="true" />
+          <div>
+            <h2 id="expired-claim-dialog-title">Release stale claim?</h2>
+            <p id="expired-claim-dialog-description">
+              {claim
+                ? `Confirm that the expired claim held by ${claim.agentId} should be cleared from “${target.title}”.`
+                : "This claim has already been cleared."}
+            </p>
+          </div>
+        </div>
+        {error && (
+          <div className="inline-error" role="alert">
+            {error}
+          </div>
+        )}
+        <footer>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={onClose}
+            disabled={saving}
+            autoFocus
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={onConfirm}
+            disabled={saving || !claim?.isReleasable}
+          >
+            {saving ? "Releasing…" : "Release stale claim"}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewMode>(viewFromLocation);
@@ -3538,6 +3897,12 @@ export default function App() {
   const [inspectorHidden, setInspectorHidden] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [scopeMenuOpen, setScopeMenuOpen] = useState<
+    "project" | "worktree" | null
+  >(null);
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
     try {
       return new Set<number>(
@@ -3555,6 +3920,7 @@ export default function App() {
       window.matchMedia("(max-width: 760px)").matches,
   );
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
+  const [repositoryFormOpen, setRepositoryFormOpen] = useState(false);
   const [validationChecks, setValidationChecks] = useState<Set<string>>(
     new Set(),
   );
@@ -3564,7 +3930,16 @@ export default function App() {
     useState<ArchiveDialogTarget | null>(null);
   const [archiveSaving, setArchiveSaving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
+  const [claimReleaseTarget, setClaimReleaseTarget] =
+    useState<ActionableDetail | null>(null);
+  const [claimReleaseSaving, setClaimReleaseSaving] = useState(false);
+  const [claimReleaseError, setClaimReleaseError] = useState("");
   const archiveReturnFocus = useRef<HTMLElement | null>(null);
+  const claimReleaseReturnFocus = useRef<HTMLElement | null>(null);
+  const repositoryReturnFocus = useRef<HTMLElement | null>(null);
+  const scopeSelectorsRef = useRef<HTMLDivElement | null>(null);
+  const projectSelectorRef = useRef<HTMLButtonElement | null>(null);
+  const worktreeSelectorRef = useRef<HTMLButtonElement | null>(null);
   const tableBodyRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -3601,15 +3976,17 @@ export default function App() {
   const actionables = listQuery.data?.items ?? [];
   const selected = detailQuery.data;
   const scopes = scopesQuery.data?.projects ?? [];
-  const activeProject =
-    scopes.find((item) => item.id === query.project) ?? scopes[0];
+  const activeProject = query.project
+    ? scopes.find((item) => item.id === query.project)
+    : undefined;
   const repositories = activeProject?.repositories ?? [];
-  const activeRepository =
-    repositories.find((item) => item.id === query.repository) ??
-    repositories[0];
+  const activeRepository = query.repository
+    ? repositories.find((item) => item.id === query.repository)
+    : undefined;
   const worktrees = activeRepository?.worktrees ?? [];
-  const activeWorktree =
-    worktrees.find((item) => item.id === query.worktree) ?? worktrees[0];
+  const activeWorktree = query.worktree
+    ? worktrees.find((item) => item.id === query.worktree)
+    : undefined;
 
   const replaceLocation = (
     nextView: ViewMode,
@@ -3701,6 +4078,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!scopeMenuOpen) return;
+
+    const dismissOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !scopeSelectorsRef.current?.contains(event.target)
+      ) {
+        setScopeMenuOpen(null);
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const trigger =
+        scopeMenuOpen === "project"
+          ? projectSelectorRef.current
+          : worktreeSelectorRef.current;
+      setScopeMenuOpen(null);
+      trigger?.focus();
+    };
+
+    window.addEventListener("pointerdown", dismissOnOutsidePointer);
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", dismissOnOutsidePointer);
+      window.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [scopeMenuOpen]);
+
+  useEffect(() => {
     const mobileViewport = window.matchMedia("(max-width: 900px)");
     const collapse = (event: MediaQueryListEvent | MediaQueryList) => {
       if (event.matches) setSidebarCollapsed(true);
@@ -3773,6 +4179,7 @@ export default function App() {
         event.metaKey ||
         blocksGlobalShortcut(event.target) ||
         formMode !== null ||
+        repositoryFormOpen ||
         archiveTarget !== null
       ) {
         return;
@@ -3842,6 +4249,7 @@ export default function App() {
     archiveTarget,
     formMode,
     query,
+    repositoryFormOpen,
     scopesQuery.data,
     selected,
     selectedId,
@@ -3874,6 +4282,30 @@ export default function App() {
     queryClient.setQueryData(["actionable", saved.id], saved);
     void invalidateDailyUse();
     setNotice(mutationNotice);
+  };
+
+  const openRepositoryForm = () => {
+    repositoryReturnFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setRepositoryFormOpen(true);
+  };
+
+  const closeRepositoryForm = () => {
+    setRepositoryFormOpen(false);
+    window.requestAnimationFrame(() => repositoryReturnFocus.current?.focus());
+  };
+
+  const handleRepositoryCreated = (created: CreateRepositoryResponse) => {
+    queryClient.setQueryData(["scopes"], created.scopes);
+    closeRepositoryForm();
+    replaceLocation("actionables", null, {
+      project: created.projectId,
+      repository: created.repositoryId,
+      worktree: created.worktreeId,
+    });
+    setNotice("Repository added and selected.");
   };
 
   const openArchive = (
@@ -3928,6 +4360,52 @@ export default function App() {
     }
   };
 
+  const openClaimRelease = (item: ActionableDetail) => {
+    claimReleaseReturnFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setClaimReleaseError("");
+    setClaimReleaseTarget(item);
+  };
+
+  const closeClaimRelease = (released = false) => {
+    const releasedId = claimReleaseTarget?.id;
+    setClaimReleaseTarget(null);
+    window.requestAnimationFrame(() => {
+      if (released && releasedId) {
+        document.getElementById(`agent-claim-title-${releasedId}`)?.focus();
+      } else {
+        claimReleaseReturnFocus.current?.focus();
+      }
+    });
+  };
+
+  const confirmClaimRelease = async () => {
+    if (!claimReleaseTarget) return;
+    setClaimReleaseSaving(true);
+    setClaimReleaseError("");
+    try {
+      const saved = await releaseExpiredAgentClaim(claimReleaseTarget.id, {
+        version: claimReleaseTarget.version,
+      });
+      handleMutated(saved, "Expired agent claim released.");
+      closeClaimRelease(true);
+    } catch (error) {
+      if (error instanceof ApiProblem && error.problem.current) {
+        queryClient.setQueryData(
+          ["actionable", error.problem.current.id],
+          error.problem.current,
+        );
+        setClaimReleaseTarget(error.problem.current);
+        void invalidateDailyUse();
+      }
+      setClaimReleaseError(errorMessage(error));
+    } finally {
+      setClaimReleaseSaving(false);
+    }
+  };
+
   const clearFilters = () => {
     const preserved: QueryState = {};
     if (query.project) preserved.project = query.project;
@@ -3944,9 +4422,11 @@ export default function App() {
       !["project", "repository", "worktree"].includes(key) &&
       !(key === "archived" && view === "archive"),
   );
-  const projectName =
-    activeProject?.name ?? listQuery.data?.project.name ?? "All projects";
-  const worktreeName = activeWorktree?.name ?? "All worktrees";
+  const projectName = activeProject?.name ?? "All projects";
+  const worktreeName =
+    activeWorktree?.name ??
+    (activeRepository ? `${activeRepository.name} / All` : "All worktrees");
+  const activeSort = query.sort ?? "priority";
   const totalFindings =
     listQuery.data?.counts.total ?? dashboardQuery.data?.counts.total ?? 0;
   const shellClasses = [
@@ -4018,20 +4498,41 @@ export default function App() {
           {scopes.map((project) => (
             <div className="project-group" key={project.id}>
               <div className="scope-action-row">
-                <button
-                  type="button"
-                  className="project-row"
-                  onClick={() =>
-                    patchQuery(
-                      { project: project.id, repository: "", worktree: "" },
-                      "actionables",
-                    )
-                  }
-                >
-                  <ChevronDown aria-hidden="true" />
-                  <span>{project.name}</span>
-                  {project.archivedAt && <Archive aria-label="Archived" />}
-                </button>
+                <div className="project-row">
+                  <button
+                    type="button"
+                    className="project-expander"
+                    aria-label={`${collapsedProjects.has(project.id) ? "Expand" : "Collapse"} ${project.name}`}
+                    aria-expanded={!collapsedProjects.has(project.id)}
+                    onClick={() =>
+                      setCollapsedProjects((current) => {
+                        const next = new Set(current);
+                        if (next.has(project.id)) next.delete(project.id);
+                        else next.add(project.id);
+                        return next;
+                      })
+                    }
+                  >
+                    {collapsedProjects.has(project.id) ? (
+                      <ChevronRight aria-hidden="true" />
+                    ) : (
+                      <ChevronDown aria-hidden="true" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="project-select"
+                    onClick={() =>
+                      patchQuery(
+                        { project: project.id, repository: "", worktree: "" },
+                        "actionables",
+                      )
+                    }
+                  >
+                    <span>{project.name}</span>
+                    {project.archivedAt && <Archive aria-label="Archived" />}
+                  </button>
+                </div>
                 <IconButton
                   label={`${project.archivedAt ? "Restore" : "Archive"} project ${project.name}`}
                   onClick={() =>
@@ -4047,82 +4548,99 @@ export default function App() {
                   {project.archivedAt ? <ArchiveRestore /> : <Archive />}
                 </IconButton>
               </div>
-              {project.repositories.map((repository) => (
-                <div key={repository.id} className="repository-group">
-                  <div className="scope-action-row repository-row">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        patchQuery(
-                          {
-                            project: project.id,
-                            repository: repository.id,
-                            worktree: "",
-                          },
-                          "actionables",
-                        )
-                      }
-                    >
-                      <GitBranch /> {repository.name}
-                    </button>
-                    <IconButton
-                      label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
-                      onClick={() =>
-                        openArchive(
-                          "repository",
-                          repository.id,
-                          repository.name,
-                          repository.version,
-                          Boolean(repository.archivedAt),
-                        )
-                      }
-                    >
-                      {repository.archivedAt ? <ArchiveRestore /> : <Archive />}
-                    </IconButton>
-                  </div>
-                  {repository.worktrees.map((worktree) => (
-                    <div className="scope-action-row" key={worktree.id}>
-                      <WorktreeRow
-                        name={worktree.name}
-                        count={
-                          project.id === activeProject?.id &&
-                          repository.id === activeRepository?.id &&
-                          worktree.id === activeWorktree?.id
-                            ? listQuery.data?.result.scopeTotal
-                            : undefined
-                        }
-                        selected={query.worktree === worktree.id}
+              {!collapsedProjects.has(project.id) &&
+                project.repositories.map((repository) => (
+                  <div key={repository.id} className="repository-group">
+                    <div className="scope-action-row repository-row">
+                      <button
+                        type="button"
                         onClick={() =>
                           patchQuery(
                             {
                               project: project.id,
                               repository: repository.id,
-                              worktree: worktree.id,
+                              worktree: "",
                             },
                             "actionables",
                           )
                         }
-                      />
+                      >
+                        <GitBranch /> {repository.name}
+                      </button>
                       <IconButton
-                        label={`${worktree.archivedAt ? "Restore" : "Archive"} worktree ${worktree.name}`}
+                        label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
                         onClick={() =>
                           openArchive(
-                            "worktree",
-                            worktree.id,
-                            worktree.name,
-                            worktree.version,
-                            Boolean(worktree.archivedAt),
+                            "repository",
+                            repository.id,
+                            repository.name,
+                            repository.version,
+                            Boolean(repository.archivedAt),
                           )
                         }
                       >
-                        {worktree.archivedAt ? <ArchiveRestore /> : <Archive />}
+                        {repository.archivedAt ? (
+                          <ArchiveRestore />
+                        ) : (
+                          <Archive />
+                        )}
                       </IconButton>
                     </div>
-                  ))}
-                </div>
-              ))}
+                    {repository.worktrees.map((worktree) => (
+                      <div className="scope-action-row" key={worktree.id}>
+                        <WorktreeRow
+                          name={worktree.name}
+                          count={
+                            project.id === activeProject?.id &&
+                            repository.id === activeRepository?.id &&
+                            worktree.id === activeWorktree?.id
+                              ? listQuery.data?.result.scopeTotal
+                              : undefined
+                          }
+                          selected={query.worktree === worktree.id}
+                          onClick={() =>
+                            patchQuery(
+                              {
+                                project: project.id,
+                                repository: repository.id,
+                                worktree: worktree.id,
+                              },
+                              "actionables",
+                            )
+                          }
+                        />
+                        <IconButton
+                          label={`${worktree.archivedAt ? "Restore" : "Archive"} worktree ${worktree.name}`}
+                          onClick={() =>
+                            openArchive(
+                              "worktree",
+                              worktree.id,
+                              worktree.name,
+                              worktree.version,
+                              Boolean(worktree.archivedAt),
+                            )
+                          }
+                        >
+                          {worktree.archivedAt ? (
+                            <ArchiveRestore />
+                          ) : (
+                            <Archive />
+                          )}
+                        </IconButton>
+                      </div>
+                    ))}
+                  </div>
+                ))}
             </div>
           ))}
+          <button
+            type="button"
+            className="add-project"
+            onClick={openRepositoryForm}
+            disabled={!scopes.some((project) => !project.archivedAt)}
+          >
+            <Plus aria-hidden="true" /> Add repository
+          </button>
           <button
             type="button"
             className="scope-row"
@@ -4146,7 +4664,7 @@ export default function App() {
       </aside>
 
       <header className="topbar">
-        <div className="scope-selectors">
+        <div className="scope-selectors" ref={scopeSelectorsRef}>
           <IconButton
             label={
               sidebarCollapsed
@@ -4159,23 +4677,216 @@ export default function App() {
           >
             {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
           </IconButton>
-          <button
-            type="button"
-            className="selector-button"
-            onClick={() => replaceLocation("actionables", null, query)}
-          >
-            {projectName} <ChevronDown aria-hidden="true" />
-          </button>
+          <div className="scope-selector-wrap">
+            <button
+              ref={projectSelectorRef}
+              type="button"
+              className="selector-button"
+              aria-expanded={scopeMenuOpen === "project"}
+              aria-controls="project-selector-menu"
+              onClick={() => {
+                setFilterOpen(false);
+                setShortcutHelpOpen(false);
+                setScopeMenuOpen((current) =>
+                  current === "project" ? null : "project",
+                );
+              }}
+            >
+              {projectName} <ChevronDown aria-hidden="true" />
+            </button>
+            {scopeMenuOpen === "project" && (
+              <div
+                id="project-selector-menu"
+                className="scope-selector-menu"
+                role="menu"
+                aria-label="Select project"
+              >
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={!query.project}
+                  className={!query.project ? "is-selected" : ""}
+                  onClick={() => {
+                    setScopeMenuOpen(null);
+                    patchQuery(
+                      { project: "", repository: "", worktree: "" },
+                      "actionables",
+                    );
+                  }}
+                >
+                  <span>All projects</span>
+                  {!query.project && <CheckCircle2 aria-hidden="true" />}
+                </button>
+                {scopes.map((project) => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={query.project === project.id}
+                    className={
+                      query.project === project.id ? "is-selected" : ""
+                    }
+                    key={project.id}
+                    onClick={() => {
+                      setScopeMenuOpen(null);
+                      patchQuery(
+                        {
+                          project: project.id,
+                          repository: "",
+                          worktree: "",
+                        },
+                        "actionables",
+                      );
+                    }}
+                  >
+                    <span>{project.name}</span>
+                    {query.project === project.id ? (
+                      <CheckCircle2 aria-hidden="true" />
+                    ) : (
+                      project.archivedAt && <small>Archived</small>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="topbar-divider" />
-          <button
-            type="button"
-            className="selector-button mono"
-            title={worktreeName}
-            onClick={() => replaceLocation("actionables", null, query)}
-          >
-            <GitBranch aria-hidden="true" />
-            {worktreeName} <ChevronDown aria-hidden="true" />
-          </button>
+          <div className="scope-selector-wrap">
+            <button
+              ref={worktreeSelectorRef}
+              type="button"
+              className="selector-button mono"
+              title={worktreeName}
+              aria-expanded={scopeMenuOpen === "worktree"}
+              aria-controls="worktree-selector-menu"
+              onClick={() => {
+                setFilterOpen(false);
+                setShortcutHelpOpen(false);
+                setScopeMenuOpen((current) =>
+                  current === "worktree" ? null : "worktree",
+                );
+              }}
+            >
+              <GitBranch aria-hidden="true" />
+              {worktreeName} <ChevronDown aria-hidden="true" />
+            </button>
+            {scopeMenuOpen === "worktree" && (
+              <div
+                id="worktree-selector-menu"
+                className="scope-selector-menu worktree-selector-menu"
+                role="menu"
+                aria-label="Select repository or worktree"
+              >
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={!query.repository && !query.worktree}
+                  className={
+                    !query.repository && !query.worktree ? "is-selected" : ""
+                  }
+                  onClick={() => {
+                    setScopeMenuOpen(null);
+                    patchQuery(
+                      {
+                        project: activeProject?.id ?? "",
+                        repository: "",
+                        worktree: "",
+                      },
+                      "actionables",
+                    );
+                  }}
+                >
+                  <span>
+                    {activeProject
+                      ? `All worktrees in ${activeProject.name}`
+                      : "All worktrees"}
+                  </span>
+                  {!query.repository && !query.worktree && (
+                    <CheckCircle2 aria-hidden="true" />
+                  )}
+                </button>
+                {(activeProject ? [activeProject] : scopes).map((project) =>
+                  project.repositories.map((repository) => (
+                    <div
+                      className="scope-menu-group"
+                      key={repository.id}
+                      role="group"
+                      aria-label={
+                        activeProject
+                          ? repository.name
+                          : `${project.name} / ${repository.name}`
+                      }
+                    >
+                      <div className="scope-menu-label" aria-hidden="true">
+                        {activeProject
+                          ? repository.name
+                          : `${project.name} / ${repository.name}`}
+                      </div>
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={
+                          query.repository === repository.id && !query.worktree
+                        }
+                        className={
+                          query.repository === repository.id && !query.worktree
+                            ? "is-selected"
+                            : ""
+                        }
+                        onClick={() => {
+                          setScopeMenuOpen(null);
+                          patchQuery(
+                            {
+                              project: project.id,
+                              repository: repository.id,
+                              worktree: "",
+                            },
+                            "actionables",
+                          );
+                        }}
+                      >
+                        <span>All in {repository.name}</span>
+                        {query.repository === repository.id &&
+                        !query.worktree ? (
+                          <CheckCircle2 aria-hidden="true" />
+                        ) : (
+                          repository.archivedAt && <small>Archived</small>
+                        )}
+                      </button>
+                      {repository.worktrees.map((worktree) => (
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={query.worktree === worktree.id}
+                          className={
+                            query.worktree === worktree.id ? "is-selected" : ""
+                          }
+                          key={worktree.id}
+                          onClick={() => {
+                            setScopeMenuOpen(null);
+                            patchQuery(
+                              {
+                                project: project.id,
+                                repository: repository.id,
+                                worktree: worktree.id,
+                              },
+                              "actionables",
+                            );
+                          }}
+                        >
+                          <span>{worktree.name}</span>
+                          {query.worktree === worktree.id ? (
+                            <CheckCircle2 aria-hidden="true" />
+                          ) : (
+                            worktree.archivedAt && <small>Archived</small>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )),
+                )}
+              </div>
+            )}
+          </div>
         </div>
         {view !== "data" ? (
           <label className="global-search">
@@ -4210,7 +4921,11 @@ export default function App() {
               className="toolbar-button shortcut-help-button"
               aria-expanded={shortcutHelpOpen}
               aria-controls="shortcut-help"
-              onClick={() => setShortcutHelpOpen((open) => !open)}
+              onClick={() => {
+                setScopeMenuOpen(null);
+                setFilterOpen(false);
+                setShortcutHelpOpen((open) => !open);
+              }}
               title="Keyboard shortcuts"
             >
               <Keyboard aria-hidden="true" /> Shortcuts
@@ -4254,7 +4969,11 @@ export default function App() {
               <button
                 type="button"
                 className={`toolbar-button ${filterOpen ? "is-active" : ""}`}
-                onClick={() => setFilterOpen((value) => !value)}
+                onClick={() => {
+                  setScopeMenuOpen(null);
+                  setShortcutHelpOpen(false);
+                  setFilterOpen((value) => !value);
+                }}
                 aria-expanded={filterOpen}
               >
                 <SlidersHorizontal /> Filters{" "}
@@ -4482,45 +5201,104 @@ export default function App() {
             aria-label="Actionable findings"
           >
             <div className="table-header table-grid" role="row">
-              <div role="columnheader">
+              <div
+                role="columnheader"
+                aria-sort={activeSort === "title" ? "ascending" : undefined}
+              >
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "title" })}
                 >
-                  Finding
+                  Finding{" "}
+                  {activeSort === "title" && (
+                    <ChevronDown
+                      className="sort-indicator is-ascending"
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </div>
-              <div role="columnheader">
+              <div
+                role="columnheader"
+                aria-sort={activeSort === "priority" ? "ascending" : undefined}
+              >
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "priority" })}
                 >
-                  Priority <ChevronDown />
+                  Priority{" "}
+                  {activeSort === "priority" && (
+                    <ChevronDown
+                      className="sort-indicator is-ascending"
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </div>
-              <div role="columnheader">
+              <div
+                role="columnheader"
+                aria-sort={activeSort === "status" ? "ascending" : undefined}
+              >
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "status" })}
                 >
-                  Status <ChevronDown />
+                  Status{" "}
+                  {activeSort === "status" && (
+                    <ChevronDown
+                      className="sort-indicator is-ascending"
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </div>
               <div role="columnheader">Worktree</div>
-              <div role="columnheader">
+              <div
+                role="columnheader"
+                aria-sort={activeSort === "effort" ? "ascending" : undefined}
+              >
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "effort" })}
                 >
-                  Effort <ChevronDown />
+                  Effort{" "}
+                  {activeSort === "effort" && (
+                    <ChevronDown
+                      className="sort-indicator is-ascending"
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </div>
-              <div role="columnheader">
+              <div
+                role="columnheader"
+                aria-sort={
+                  activeSort === "updated-asc"
+                    ? "ascending"
+                    : activeSort === "updated-desc"
+                      ? "descending"
+                      : undefined
+                }
+              >
                 <button
                   type="button"
-                  onClick={() => patchQuery({ sort: "updated-desc" })}
+                  onClick={() =>
+                    patchQuery({
+                      sort:
+                        activeSort === "updated-desc"
+                          ? "updated-asc"
+                          : "updated-desc",
+                    })
+                  }
                 >
-                  Updated <ChevronDown />
+                  Updated{" "}
+                  {(activeSort === "updated-desc" ||
+                    activeSort === "updated-asc") && (
+                    <ChevronDown
+                      className={`sort-indicator ${activeSort === "updated-asc" ? "is-ascending" : ""}`}
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </div>
             </div>
@@ -4718,6 +5496,7 @@ export default function App() {
                   selected.archiveState.directlyArchived,
                 )
               }
+              onReleaseExpiredClaim={() => openClaimRelease(selected)}
             />
           ) : (
             <div
@@ -4771,8 +5550,21 @@ export default function App() {
           }
           item={formMode === "edit" ? selected : undefined}
           scopes={scopesQuery.data}
+          initialScope={{
+            projectId: query.project,
+            repositoryId: query.repository,
+            worktreeId: query.worktree,
+          }}
           onClose={() => setFormMode(null)}
           onSaved={handleSaved}
+        />
+      )}
+      {repositoryFormOpen && scopesQuery.data && (
+        <RepositoryDialog
+          scopes={scopesQuery.data}
+          initialProjectId={activeProject?.id}
+          onClose={closeRepositoryForm}
+          onCreated={handleRepositoryCreated}
         />
       )}
       {archiveTarget && (
@@ -4787,6 +5579,15 @@ export default function App() {
           }
           onClose={closeArchive}
           onConfirm={() => void confirmArchive()}
+        />
+      )}
+      {claimReleaseTarget && (
+        <ExpiredClaimDialog
+          target={claimReleaseTarget}
+          saving={claimReleaseSaving}
+          error={claimReleaseError}
+          onClose={closeClaimRelease}
+          onConfirm={() => void confirmClaimRelease()}
         />
       )}
     </div>

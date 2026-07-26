@@ -103,6 +103,7 @@ model Actionable {
   hierarchyAsChild       HierarchyRelationship[]  @relation("HierarchyChild")
   dependenciesAsDependent    DependencyRelationship[] @relation("DependencyDependent")
   dependenciesAsPrerequisite DependencyRelationship[] @relation("DependencyPrerequisite")
+  agentTaskClaim         AgentTaskClaim?
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
 
@@ -110,6 +111,18 @@ model Actionable {
   @@index([priority, status])
   @@index([archivedAt, status, updatedAt])
   @@index([projectId, repositoryId, worktreeId, archivedAt])
+}
+
+model AgentTaskClaim {
+  actionableId   String     @id
+  agentId        String
+  claimTokenHash String     @unique
+  leaseExpiresAt DateTime
+  claimedAt      DateTime   @default(now())
+  renewedAt      DateTime   @updatedAt
+  actionable     Actionable @relation(fields: [actionableId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, leaseExpiresAt])
 }
 
 model ImportRun {

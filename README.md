@@ -28,6 +28,7 @@ pnpm run start
 - [Windows setup, local operation, and troubleshooting](docs/windows-setup.md)
 - [Backup and restore runbook](docs/backup-restore.md)
 - [Portable JSON format](docs/portable-data-format.md)
+- [Agent task MCP endpoint](docs/mcp-agent-tasks.md)
 - [Runtime and browser support policy](docs/support-policy.md)
 - [Accessibility audit](docs/accessibility-audit.md)
 - [Release-verification report](docs/release-verification.md)
@@ -42,6 +43,8 @@ It checks formatting, types, API/domain/integration tests, browser E2E tests, au
 
 ## MVP boundary
 
-The MVP includes local project/repository/worktree scopes, actionable capture and triage, lifecycle and validation, one-level subtasks, cross-scope dependencies, dashboard/search/filtering, archive/restore, reviewed-seed import, and portable JSON backup/restore.
+The MVP includes local project/repository/worktree scopes, actionable capture and triage, lifecycle and validation, one-level subtasks, cross-scope dependencies, dashboard/search/filtering, archive/restore, reviewed-seed import, portable JSON backup/restore, and an explicitly enabled local MCP endpoint for agents to create tasks and manage claimed tasks.
 
-It does **not** provide authentication, accounts, collaboration, assignment, notifications, cloud sync, hosted deployment, live Codex integration, Git manipulation, AI-generated priority/dependencies, or generic project-management features. There is no installer, updater, published binary, or supported non-Windows deployment.
+MCP available-task discovery is intentionally scoped to one top-level feature or bug Actionable and its direct subtasks; it never falls back to arbitrary pending work.
+
+It does **not** provide user accounts, collaboration, notifications, cloud sync, hosted deployment, Git manipulation, AI-generated priority/dependencies, arbitrary MCP hierarchy/dependency editing, or generic project-management features. There is no installer, updater, published binary, or supported non-Windows deployment.

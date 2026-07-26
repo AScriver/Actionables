@@ -5,6 +5,7 @@ import {
   actionableSummarySchema,
   actionablesListResponseSchema,
   archiveImpactResponseSchema,
+  createRepositoryResponseSchema,
   dashboardResponseSchema,
   scopeOptionsResponseSchema,
   type ActionableQuery,
@@ -15,6 +16,8 @@ import {
   type ArchiveTargetKind,
   type DashboardResponse,
   type CreateActionableRequest,
+  type CreateRepositoryRequest,
+  type CreateRepositoryResponse,
   type CreateValidationRecordRequest,
   type ScopeOptionsResponse,
   type Status,
@@ -79,6 +82,7 @@ const actionableInclude = {
       },
     },
   },
+  agentTaskClaim: true,
 } satisfies Prisma.ActionableInclude;
 
 type ActionableRow = Prisma.ActionableGetPayload<{
@@ -320,8 +324,20 @@ function toDetail(row: ActionableRow): ActionableDetail {
   const status = parsePersistedStatus(row.status);
   const imported = row.importProvider !== "MANUAL";
   const qualifying = qualifyingValidationIds(row);
+  const now = new Date();
   return actionableDetailSchema.parse({
     ...toSummary(row),
+    agentClaim: row.agentTaskClaim
+      ? {
+          agentId: row.agentTaskClaim.agentId,
+          claimedAt: row.agentTaskClaim.claimedAt.toISOString(),
+          renewedAt: row.agentTaskClaim.renewedAt.toISOString(),
+          leaseExpiresAt: row.agentTaskClaim.leaseExpiresAt.toISOString(),
+          state:
+            row.agentTaskClaim.leaseExpiresAt <= now ? "expired" : "active",
+          isReleasable: row.agentTaskClaim.leaseExpiresAt <= now,
+        }
+      : null,
     description: row.description,
     research: stringArray(row.researchJson),
     validation: stringArray(row.validationJson),
@@ -672,7 +688,7 @@ export async function listActionablesWithQuery(
 }
 
 export async function listScopeOptions(
-  prisma: AppPrismaClient,
+  prisma: AppPrismaClient | TransactionClient,
 ): Promise<ScopeOptionsResponse> {
   const projects = await prisma.project.findMany({
     orderBy: { name: "asc" },
@@ -731,8 +747,101 @@ export async function listScopeOptions(
   });
 }
 
-export async function getActionable(
+export function normalizedLocalPath(value: string) {
+  const normalized = value.trim().replace(/\//g, "\\");
+  const rootLength = /^[a-zA-Z]:\\/.test(normalized)
+    ? 3
+    : normalized.startsWith("\\\\")
+      ? 2
+      : 0;
+  return normalized.length > rootLength
+    ? normalized.replace(/\\+$/, "")
+    : normalized;
+}
+
+export async function createRepository(
   prisma: AppPrismaClient,
+  input: CreateRepositoryRequest,
+): Promise<CreateRepositoryResponse> {
+  const name = input.name.trim();
+  const localPath = normalizedLocalPath(input.localPath);
+
+  return prisma.$transaction(async (transaction) => {
+    const project = await transaction.project.findUnique({
+      where: { id: input.projectId },
+    });
+    if (!project || project.archivedAt) {
+      throw new DomainValidationError(
+        "INVALID_PROJECT",
+        { projectId: ["Choose an active project."] },
+        "The selected project is unavailable.",
+      );
+    }
+
+    const repositories = await transaction.repository.findMany({
+      select: { projectId: true, name: true, localPath: true },
+    });
+    const errors: Record<string, string[]> = {};
+    if (
+      repositories.some(
+        (repository) =>
+          repository.projectId === input.projectId &&
+          repository.name.localeCompare(name, undefined, {
+            sensitivity: "accent",
+          }) === 0,
+      )
+    ) {
+      errors.name = [
+        "A repository with this name is already tracked in the project.",
+      ];
+    }
+    if (
+      repositories.some(
+        (repository) =>
+          repository.localPath &&
+          normalizedLocalPath(repository.localPath).toLowerCase() ===
+            localPath.toLowerCase(),
+      )
+    ) {
+      errors.localPath = ["This local repository path is already tracked."];
+    }
+    if (Object.keys(errors).length > 0) {
+      throw new DomainValidationError(
+        "DUPLICATE_REPOSITORY",
+        errors,
+        "This repository is already tracked.",
+      );
+    }
+
+    const repository = await transaction.repository.create({
+      data: {
+        externalKey: `manual-repository-${randomUUID()}`,
+        name,
+        localPath,
+        projectId: project.id,
+      },
+    });
+    const worktree = await transaction.worktree.create({
+      data: {
+        externalKey: `manual-worktree-${randomUUID()}`,
+        name: "Default",
+        localPath,
+        projectId: project.id,
+        repositoryId: repository.id,
+      },
+    });
+
+    return createRepositoryResponseSchema.parse({
+      projectId: project.id,
+      repositoryId: repository.id,
+      worktreeId: worktree.id,
+      scopes: await listScopeOptions(transaction),
+    });
+  });
+}
+
+export async function getActionable(
+  prisma: AppPrismaClient | TransactionClient,
   sourceOrdinal: number,
 ): Promise<ActionableDetail | null> {
   const row = await findActionableRow(prisma, sourceOrdinal);
@@ -1187,8 +1296,15 @@ async function syncUserSources(
 export async function createActionable(
   prisma: AppPrismaClient,
   input: CreateActionableRequest,
+  options: {
+    externalKey?: string;
+    origin?: string;
+    rawFragment?: Prisma.InputJsonValue;
+    statusProvenance?: string;
+  } = {},
+  existingTransaction?: TransactionClient,
 ): Promise<ActionableDetail> {
-  return prisma.$transaction(async (transaction) => {
+  const operation = async (transaction: TransactionClient) => {
     await validateScope(transaction, input);
     const highest = await transaction.actionable.aggregate({
       _max: { sourceOrdinal: true },
@@ -1196,12 +1312,14 @@ export async function createActionable(
     const sourceOrdinal = (highest._max.sourceOrdinal ?? 0) + 1;
     const created = await transaction.actionable.create({
       data: {
-        externalKey: `manual-${randomUUID()}`,
+        externalKey: options.externalKey ?? `manual-${randomUUID()}`,
         sourceOrdinal,
         title: input.title,
         priority: input.priority,
         status: "Inbox",
-        statusProvenance: "Created manually with neutral Inbox status.",
+        statusProvenance:
+          options.statusProvenance ??
+          "Created manually with neutral Inbox status.",
         sourceStatusSuggestion: null,
         effort: input.effort,
         evidenceState: input.evidenceState,
@@ -1220,7 +1338,7 @@ export async function createActionable(
         sourceContainerId: "",
         sourceThread: "",
         contentHash: "",
-        rawFragmentJson: inputJson({ kind: "manual" }),
+        rawFragmentJson: options.rawFragment ?? inputJson({ kind: "manual" }),
         projectId: input.projectId,
         repositoryId: input.repositoryId,
         worktreeId: input.worktreeId,
@@ -1228,7 +1346,7 @@ export async function createActionable(
           create: {
             previousStatus: null,
             newStatus: "Inbox",
-            origin: "manual-create",
+            origin: options.origin ?? "manual-create",
           },
         },
         activityEvents: {
@@ -1238,7 +1356,7 @@ export async function createActionable(
             metadataJson: inputJson({
               previousStatus: "",
               newStatus: "Inbox",
-              origin: "manual-create",
+              origin: options.origin ?? "manual-create",
             }),
           },
         },
@@ -1270,7 +1388,10 @@ export async function createActionable(
     const row = await findActionableRow(transaction, sourceOrdinal);
     if (!row) throw new Error("Created actionable could not be read.");
     return toDetail(row);
-  });
+  };
+  return existingTransaction
+    ? operation(existingTransaction)
+    : prisma.$transaction(operation);
 }
 
 type TransitionDecision = {
@@ -1500,8 +1621,9 @@ export async function updateActionable(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: UpdateActionableRequest,
+  existingTransaction?: TransactionClient,
 ): Promise<ActionableDetail | null> {
-  return prisma.$transaction(async (transaction) => {
+  const operation = async (transaction: TransactionClient) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
     if (current.version !== input.version)
@@ -1567,15 +1689,19 @@ export async function updateActionable(
 
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
     return saved ? toDetail(saved) : null;
-  });
+  };
+  return existingTransaction
+    ? operation(existingTransaction)
+    : prisma.$transaction(operation);
 }
 
 export async function transitionActionable(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
-  input: StatusTransitionRequest,
+  input: Omit<StatusTransitionRequest, "origin"> & { origin: string },
+  existingTransaction?: TransactionClient,
 ): Promise<ActionableDetail | null> {
-  return prisma.$transaction(async (transaction) => {
+  const operation = async (transaction: TransactionClient) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
     if (current.version !== input.version)
@@ -1691,15 +1817,19 @@ export async function transitionActionable(
     }
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
     return saved ? toDetail(saved) : null;
-  });
+  };
+  return existingTransaction
+    ? operation(existingTransaction)
+    : prisma.$transaction(operation);
 }
 
 export async function recordValidation(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
-  input: CreateValidationRecordRequest,
+  input: Omit<CreateValidationRecordRequest, "origin"> & { origin: string },
+  existingTransaction?: TransactionClient,
 ): Promise<ActionableDetail | null> {
-  return prisma.$transaction(async (transaction) => {
+  const operation = async (transaction: TransactionClient) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
     if (!current) return null;
     if (current.version !== input.version)
@@ -1786,5 +1916,8 @@ export async function recordValidation(
 
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
     return saved ? toDetail(saved) : null;
-  });
+  };
+  return existingTransaction
+    ? operation(existingTransaction)
+    : prisma.$transaction(operation);
 }

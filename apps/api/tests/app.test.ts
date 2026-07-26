@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
+import { claimAgentTask } from "../src/agent-tasks.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { importReviewedSeed, readReviewedSeed } from "../src/import-seed.js";
 
@@ -144,6 +145,110 @@ describe("Actionables API", () => {
     });
   });
 
+  it("projects non-secret claim state and only releases an expired lease at the current version", async () => {
+    const created = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: createBody("Claim controls fixture"),
+    });
+    const item = created.json().item;
+    const claimed = await claimAgentTask(prisma!, item.id, {
+      agentId: "agent:claim-controls",
+      workItemId: item.id,
+      version: item.version,
+      leaseMinutes: 30,
+    });
+
+    const active = await app!.inject({
+      method: "GET",
+      url: `/api/actionables/${item.id}`,
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.json().item.agentClaim).toMatchObject({
+      agentId: "agent:claim-controls",
+      state: "active",
+      isReleasable: false,
+    });
+    expect(active.body).not.toContain(claimed.claim.claimToken);
+
+    const activeRelease = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
+      payload: { version: active.json().item.version },
+    });
+    expect(activeRelease.statusCode).toBe(409);
+    expect(activeRelease.json()).toMatchObject({
+      code: "CLAIM_ACTIVE",
+      current: {
+        agentClaim: { state: "active", isReleasable: false },
+      },
+    });
+
+    await prisma!.agentTaskClaim.update({
+      where: { actionableId: item.recordId },
+      data: { leaseExpiresAt: new Date(Date.now() - 60_000) },
+    });
+    const expired = await app!.inject({
+      method: "GET",
+      url: `/api/actionables/${item.id}`,
+    });
+    expect(expired.json().item.agentClaim).toMatchObject({
+      agentId: "agent:claim-controls",
+      state: "expired",
+      isReleasable: true,
+    });
+
+    await prisma!.actionable.update({
+      where: { id: item.recordId },
+      data: { version: { increment: 1 } },
+    });
+    const staleRelease = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
+      payload: { version: expired.json().item.version },
+    });
+    expect(staleRelease.statusCode).toBe(409);
+    expect(staleRelease.json()).toMatchObject({
+      code: "VERSION_CONFLICT",
+      current: {
+        version: expired.json().item.version + 1,
+        agentClaim: { state: "expired", isReleasable: true },
+      },
+    });
+
+    const released = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
+      payload: { version: staleRelease.json().current.version },
+    });
+    expect(released.statusCode).toBe(200);
+    expect(released.json().item.agentClaim).toBeNull();
+    expect(
+      released
+        .json()
+        .item.activity.map((event: { type: string }) => event.type),
+    ).toContain("agent-claim-expired");
+
+    const repeatedRelease = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
+      payload: { version: released.json().item.version },
+    });
+    expect(repeatedRelease.statusCode).toBe(409);
+    expect(repeatedRelease.json()).toMatchObject({
+      code: "CLAIM_NOT_FOUND",
+      current: { agentClaim: null },
+    });
+
+    const missingRelease = await app!.inject({
+      method: "POST",
+      url: "/api/actionables/999999/agent-claim/release-expired",
+      payload: { version: 1 },
+    });
+    expect(missingRelease.statusCode).toBe(404);
+    expect(missingRelease.json()).toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("returns 404 for an unknown actionable", async () => {
     const response = await app!.inject({
       method: "GET",
@@ -174,6 +279,84 @@ describe("Actionables API", () => {
     ).toMatchObject({
       id: scope.worktreeId,
       name: "CurrentSprint",
+    });
+  });
+
+  it("adds a tracked repository with a usable default worktree", async () => {
+    const response = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectId: scope.projectId,
+        name: "Tracked API Repo",
+        localPath: "C:/repos/TrackedApiRepo/",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const payload = response.json();
+    expect(payload).toMatchObject({
+      projectId: scope.projectId,
+      repositoryId: expect.any(String),
+      worktreeId: expect.any(String),
+    });
+    const repository = payload.scopes.projects[0].repositories.find(
+      (item: { id: string }) => item.id === payload.repositoryId,
+    );
+    expect(repository).toMatchObject({
+      name: "Tracked API Repo",
+      worktrees: [
+        {
+          id: payload.worktreeId,
+          name: "Default",
+        },
+      ],
+    });
+
+    const saved = await prisma!.repository.findUniqueOrThrow({
+      where: { id: payload.repositoryId },
+      include: { worktrees: true },
+    });
+    expect(saved.localPath).toBe("C:\\repos\\TrackedApiRepo");
+    expect(saved.worktrees[0]).toMatchObject({
+      name: "Default",
+      localPath: saved.localPath,
+      projectId: scope.projectId,
+    });
+  });
+
+  it("rejects invalid and duplicate repository paths with field errors", async () => {
+    const invalid = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectId: scope.projectId,
+        name: "Relative repo",
+        localPath: "repos/relative",
+      },
+    });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      errors: { localPath: ["Enter an absolute Windows path."] },
+    });
+
+    const duplicate = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectId: scope.projectId,
+        name: "tracked api repo",
+        localPath: "c:\\repos\\TrackedApiRepo\\",
+      },
+    });
+    expect(duplicate.statusCode).toBe(422);
+    expect(duplicate.json()).toMatchObject({
+      code: "DUPLICATE_REPOSITORY",
+      errors: {
+        name: expect.any(Array),
+        localPath: expect.any(Array),
+      },
     });
   });
 

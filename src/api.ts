@@ -2,6 +2,7 @@ import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
   archiveImpactResponseSchema,
+  createRepositoryResponseSchema,
   dashboardResponseSchema,
   problemDetailsSchema,
   scopeOptionsResponseSchema,
@@ -17,6 +18,8 @@ import {
   type CreateSubtaskRequest,
   type CreateValidationRecordRequest,
   type CreateActionableRequest,
+  type CreateRepositoryRequest,
+  type CreateRepositoryResponse,
   type ProblemDetails,
   type DependencyActionRequest,
   type DetachParentRequest,
@@ -27,6 +30,7 @@ import {
   type PortableDocument,
   type PrepareImportCommitRequest,
   type PrepareImportCommitResponse,
+  type ReleaseExpiredAgentClaimRequest,
   type StatusTransitionRequest,
   type SetParentRequest,
   type UpdateActionableRequest,
@@ -82,8 +86,32 @@ export async function fetchActionable(id: number): Promise<ActionableDetail> {
   return response.item;
 }
 
+export async function releaseExpiredAgentClaim(
+  id: number,
+  input: ReleaseExpiredAgentClaimRequest,
+): Promise<ActionableDetail> {
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/agent-claim/release-expired`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+  return response.item;
+}
+
 export async function fetchScopeOptions(): Promise<ScopeOptionsResponse> {
   return scopeOptionsResponseSchema.parse(await requestJson("/api/scopes"));
+}
+
+export async function createRepository(
+  input: CreateRepositoryRequest,
+): Promise<CreateRepositoryResponse> {
+  return createRepositoryResponseSchema.parse(
+    await requestJson("/api/repositories", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export async function fetchDashboard(

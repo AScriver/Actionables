@@ -7,6 +7,8 @@ import {
   archiveMutationRequestSchema,
   archiveTargetKindSchema,
   createDependencyRequestSchema,
+  createRepositoryRequestSchema,
+  createRepositoryResponseSchema,
   createSubtaskRequestSchema,
   createValidationRecordRequestSchema,
   createActionableRequestSchema,
@@ -23,6 +25,7 @@ import {
   importPreviewResponseSchema,
   prepareImportCommitRequestSchema,
   prepareImportCommitResponseSchema,
+  releaseExpiredAgentClaimRequestSchema,
   type ActionableQuery,
 } from "@actionables/contracts";
 import Fastify, {
@@ -33,6 +36,7 @@ import Fastify, {
 import type { AppPrismaClient } from "./database.js";
 import {
   createActionable,
+  createRepository,
   archiveImpact,
   ArchiveVersionConflictError,
   DomainValidationError,
@@ -58,10 +62,17 @@ import {
 } from "./relationships.js";
 import { DataImportService, PortableImportError } from "./data-import.js";
 import { exportPortableDocument } from "./portable-format.js";
+import { registerMcpRoutes } from "./mcp.js";
+import {
+  AgentTaskClaimError,
+  ExpiredAgentClaimReleaseConflictError,
+  releaseExpiredAgentTaskClaim,
+} from "./agent-tasks.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
   logger?: boolean | FastifyBaseLogger;
+  mcpBearerToken?: string;
 };
 
 function fieldErrors(error: {
@@ -155,7 +166,11 @@ function normalizeActionableQuery(raw: unknown): ActionableQuery {
   return normalized;
 }
 
-export function buildApp({ prisma, logger = false }: BuildAppOptions) {
+export function buildApp({
+  prisma,
+  logger = false,
+  mcpBearerToken,
+}: BuildAppOptions) {
   const dataImports = new DataImportService(prisma);
   const app = Fastify({
     logger,
@@ -172,6 +187,10 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
     reply.header("x-correlation-id", request.id);
     return payload;
   });
+
+  if (mcpBearerToken?.trim()) {
+    registerMcpRoutes(app, prisma, mcpBearerToken);
+  }
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof PortableImportError) {
@@ -198,6 +217,15 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
         },
       );
     }
+    if (error instanceof ExpiredAgentClaimReleaseConflictError) {
+      return problem(request, reply, 409, error.code, error.message, {
+        detail:
+          error.code === "CLAIM_ACTIVE"
+            ? "The lease was renewed or has not expired. Reload before trying again."
+            : "The claim was already released or expired elsewhere.",
+        current: error.current,
+      });
+    }
     if (error instanceof ArchiveVersionConflictError) {
       return problem(
         request,
@@ -209,6 +237,9 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
           detail: `Reload the target and retry from version ${error.currentVersion}.`,
         },
       );
+    }
+    if (error instanceof AgentTaskClaimError && error.code === "NOT_FOUND") {
+      return problem(request, reply, 404, "NOT_FOUND", "Actionable not found.");
     }
     const statusCode =
       typeof error === "object" && error !== null && "statusCode" in error
@@ -254,6 +285,23 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
 
   app.get("/api/scopes", async () => {
     return scopeOptionsResponseSchema.parse(await listScopeOptions(prisma));
+  });
+
+  app.post("/api/repositories", async (request, reply) => {
+    const parsed = createRepositoryRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(
+        request,
+        reply,
+        422,
+        "VALIDATION_ERROR",
+        "Check the repository details.",
+        { errors: fieldErrors(parsed.error) },
+      );
+    }
+
+    const created = await createRepository(prisma, parsed.data);
+    return reply.code(201).send(createRepositoryResponseSchema.parse(created));
   });
 
   app.post("/api/data/import-previews", async (request) => {
@@ -414,6 +462,29 @@ export function buildApp({ prisma, logger = false }: BuildAppOptions) {
           "Actionable not found.",
         );
       }
+      return actionableDetailResponseSchema.parse({ item });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/actionables/:id/agent-claim/release-expired",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+      const parsed = releaseExpiredAgentClaimRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the expired claim release.",
+          { errors: fieldErrors(parsed.error) },
+        );
+      }
+      const item = await releaseExpiredAgentTaskClaim(prisma, id, parsed.data);
       return actionableDetailResponseSchema.parse({ item });
     },
   );

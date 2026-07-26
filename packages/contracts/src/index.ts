@@ -48,9 +48,20 @@ export const sourceFileSchema = z.object({
 });
 
 export const userSourceReferenceInputSchema = z.object({
-  type: z.enum(["File", "URL", "Command", "Commit", "Codex thread", "Text"]),
-  locator: z.string().trim().min(1, "Enter a source locator."),
-  label: z.string().trim().max(200).optional(),
+  type: z
+    .enum(["File", "URL", "Command", "Commit", "Codex thread", "Text"])
+    .describe("Kind of source reference."),
+  locator: z
+    .string()
+    .trim()
+    .min(1, "Enter a source locator.")
+    .describe("Path, URL, command, commit, thread, or text locator."),
+  label: z
+    .string()
+    .trim()
+    .max(200)
+    .optional()
+    .describe("Optional human-readable source label."),
 });
 
 export const userSourceReferenceSchema = userSourceReferenceInputSchema.extend({
@@ -104,6 +115,10 @@ export const activityTypeSchema = z.enum([
   "restored",
   "scope-archived",
   "scope-restored",
+  "agent-claimed",
+  "agent-released",
+  "agent-claim-expired",
+  "agent-updated",
 ]);
 
 export const activityEventSchema = z.object({
@@ -232,6 +247,17 @@ export const actionableSummarySchema = z.object({
 });
 
 export const actionableDetailSchema = actionableSummarySchema.extend({
+  agentClaim: z
+    .object({
+      agentId: z.string().min(1).max(120),
+      claimedAt: z.string().datetime(),
+      renewedAt: z.string().datetime(),
+      leaseExpiresAt: z.string().datetime(),
+      state: z.enum(["active", "expired"]),
+      isReleasable: z.boolean(),
+    })
+    .strict()
+    .nullable(),
   description: z.string(),
   research: z.array(z.string()),
   validation: z.array(z.string()),
@@ -313,6 +339,29 @@ export const scopeOptionsResponseSchema = z.object({
   ),
 });
 
+export const createRepositoryRequestSchema = z
+  .object({
+    projectId: z.string().min(1, "Choose a project."),
+    name: z.string().trim().min(1, "Enter a repository name.").max(240),
+    localPath: z
+      .string()
+      .trim()
+      .min(1, "Enter the local repository path.")
+      .max(4_096)
+      .refine(
+        (value) => /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(value),
+        "Enter an absolute Windows path.",
+      ),
+  })
+  .strict();
+
+export const createRepositoryResponseSchema = z.object({
+  projectId: z.string().min(1),
+  repositoryId: z.string().min(1),
+  worktreeId: z.string().min(1),
+  scopes: scopeOptionsResponseSchema,
+});
+
 export const actionableSortSchema = z.enum([
   "priority",
   "updated-desc",
@@ -375,6 +424,167 @@ export const dashboardResponseSchema = z.object({
   }),
   queues: z.array(dashboardQueueSchema),
 });
+
+export const agentIdSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter an agent ID.")
+  .max(120)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/,
+    "Use letters, numbers, and . _ : @ / - only.",
+  )
+  .describe("Stable ID for this agent task session.");
+export const agentTaskLeaseMinutesSchema = z
+  .number()
+  .int()
+  .min(5)
+  .max(120)
+  .describe("Claim lease duration in minutes, from 5 through 120.");
+export const agentTaskListViewSchema = z
+  .enum(["available", "mine"])
+  .describe("Use mine for owned claims or available within one work item.");
+
+export const agentTaskSummarySchema = z
+  .object({
+    id: z.number().int().positive(),
+    recordId: z.string().min(1),
+    workItemId: z.number().int().positive(),
+    parentId: z.number().int().positive().nullable(),
+    childIds: z.array(z.number().int().positive()).max(100),
+    title: z.string().min(1).max(240),
+    findingExcerpt: z.string().max(300),
+    tags: z.array(z.string().min(1).max(60)).max(10),
+    priority: prioritySchema,
+    status: statusSchema,
+    effort: effortSchema,
+    evidenceState: evidenceStateSchema,
+    isEffectivelyBlocked: z.boolean(),
+    unresolvedDependencyCount: z.number().int().nonnegative(),
+    version: z.number().int().positive(),
+    scope: scopeSchema,
+    updatedAt: z.string().datetime(),
+    claim: z
+      .object({
+        agentId: agentIdSchema,
+        claimedAt: z.string().datetime(),
+        renewedAt: z.string().datetime(),
+        leaseExpiresAt: z.string().datetime(),
+      })
+      .nullable(),
+  })
+  .strict();
+
+export const listAgentTasksRequestSchema = z
+  .object({
+    agentId: agentIdSchema,
+    view: agentTaskListViewSchema.default("mine"),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Top-level Actionable ID for the current feature or bug; required for available.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(25)
+      .describe("Maximum tasks to return, from 1 through 100."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.view === "available" && input.workItemId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["workItemId"],
+        message:
+          "Available tasks require the top-level feature or bug work-item ID.",
+      });
+    }
+  });
+
+export const listAgentTasksResponseSchema = z
+  .object({
+    items: z.array(agentTaskSummarySchema).max(100),
+  })
+  .strict();
+
+export const claimAgentTaskRequestSchema = z
+  .object({
+    agentId: agentIdSchema,
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Top-level Actionable ID for the current feature or bug."),
+    version: z
+      .number()
+      .int()
+      .positive()
+      .describe("Exact task version returned by list_tasks."),
+    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+  })
+  .strict();
+
+export const agentTaskClaimCredentialSchema = z
+  .object({
+    agentId: agentIdSchema,
+    claimToken: z.string().min(32).max(256),
+    claimedAt: z.string().datetime(),
+    renewedAt: z.string().datetime(),
+    leaseExpiresAt: z.string().datetime(),
+  })
+  .strict();
+
+export const claimAgentTaskResponseSchema = z
+  .object({
+    task: agentTaskSummarySchema,
+    claim: agentTaskClaimCredentialSchema,
+  })
+  .strict();
+
+export const renewAgentTaskClaimRequestSchema = z
+  .object({
+    claimToken: z
+      .string()
+      .min(32)
+      .max(256)
+      .describe("Secret claim token returned by claim_task."),
+    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+  })
+  .strict();
+
+export const renewAgentTaskClaimResponseSchema = z
+  .object({
+    task: agentTaskSummarySchema,
+  })
+  .strict();
+
+export const releaseAgentTaskClaimRequestSchema = z
+  .object({
+    claimToken: z
+      .string()
+      .min(32)
+      .max(256)
+      .describe("Secret claim token returned by claim_task."),
+  })
+  .strict();
+
+export const releaseAgentTaskClaimResponseSchema = z
+  .object({
+    task: agentTaskSummarySchema,
+  })
+  .strict();
+
+export const releaseExpiredAgentClaimRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+  })
+  .strict();
 
 export const archiveMutationRequestSchema = z
   .object({
@@ -458,12 +668,289 @@ export const createValidationRecordRequestSchema = z
   })
   .strict();
 
+const claimedAgentMutationFields = {
+  claimToken: z
+    .string()
+    .min(32)
+    .max(256)
+    .describe("Secret claim token returned by claim_task."),
+  version: z
+    .number()
+    .int()
+    .positive()
+    .describe("Latest task version returned by the preceding operation."),
+};
+
+export const updateClaimedAgentTaskRequestSchema = z
+  .object({
+    ...claimedAgentMutationFields,
+    title: titleField.optional().describe("Replace the task title."),
+    priority: prioritySchema.optional().describe("Replace task priority."),
+    effort: effortSchema.optional().describe("Replace the effort estimate."),
+    evidenceState: evidenceStateSchema
+      .optional()
+      .describe("Replace the evidence classification."),
+    finding: markdownField.optional().describe("Replace the finding Markdown."),
+    description: markdownField
+      .optional()
+      .describe("Replace the intended-result Markdown."),
+    research: notesSchema
+      .optional()
+      .describe(
+        "Replace all research notes; do not combine with appendResearch.",
+      ),
+    appendResearch: notesSchema
+      .optional()
+      .describe("Append research notes while preserving existing notes."),
+    plannedValidation: notesSchema
+      .optional()
+      .describe(
+        "Replace all planned validation; do not combine with appendPlannedValidation.",
+      ),
+    appendPlannedValidation: notesSchema
+      .optional()
+      .describe("Append planned checks while preserving existing checks."),
+    tags: tagsSchema.optional().describe("Replace all task tags."),
+    userSources: z
+      .array(userSourceReferenceInputSchema)
+      .max(50)
+      .optional()
+      .describe(
+        "Replace all user-added sources; do not combine with addUserSources.",
+      ),
+    addUserSources: z
+      .array(userSourceReferenceInputSchema)
+      .max(50)
+      .optional()
+      .describe("Add new exact-deduplicated user sources."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    for (const [replaceField, appendField] of [
+      ["research", "appendResearch"],
+      ["plannedValidation", "appendPlannedValidation"],
+      ["userSources", "addUserSources"],
+    ] as const) {
+      if (
+        input[replaceField] !== undefined &&
+        input[appendField] !== undefined
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: [appendField],
+          message: `Use either ${replaceField} or ${appendField}, not both.`,
+        });
+      }
+    }
+  })
+  .refine(
+    (input) =>
+      [
+        "title",
+        "priority",
+        "effort",
+        "evidenceState",
+        "finding",
+        "description",
+        "research",
+        "appendResearch",
+        "plannedValidation",
+        "appendPlannedValidation",
+        "tags",
+        "userSources",
+        "addUserSources",
+      ].some((field) => input[field as keyof typeof input] !== undefined),
+    {
+      message: "Provide at least one task field to update.",
+      path: ["update"],
+    },
+  );
+
+export const transitionClaimedAgentTaskRequestSchema = z
+  .object({
+    ...claimedAgentMutationFields,
+    status: statusSchema.describe("Permitted lifecycle status to move into."),
+    reason: z
+      .string()
+      .trim()
+      .max(10_000)
+      .optional()
+      .describe("Required explanation for blocking, dismissal, or reopening."),
+  })
+  .strict();
+
+export const recordClaimedAgentTaskValidationRequestSchema = z
+  .object({
+    ...claimedAgentMutationFields,
+    type: validationTypeSchema.describe("Kind of validation performed."),
+    outcome: validationOutcomeSchema.describe("Observed validation outcome."),
+    notes: z
+      .string()
+      .trim()
+      .max(100_000)
+      .default("")
+      .describe("Concise validation notes."),
+    evidence: z
+      .string()
+      .trim()
+      .max(100_000)
+      .default("")
+      .describe("Actual command, result, or other validation evidence."),
+    supersedesId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Validation record ID corrected by this new record."),
+  })
+  .strict();
+
 export const createSubtaskRequestSchema = z
   .object({
     version: z.number().int().positive(),
     title: titleField,
   })
   .strict();
+
+export const createAgentTaskRequestSchema = z
+  .object({
+    idempotencyKey: z
+      .string()
+      .uuid()
+      .describe(
+        "Caller-generated UUID; reuse it only when retrying this exact creation request.",
+      ),
+    parentId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Optional parent Actionable ID. Omit for a top-level task; provide it for a direct subtask.",
+      ),
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Project ID; required only for a top-level task."),
+    repositoryId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Repository ID; required only for a top-level task."),
+    worktreeId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe(
+        "Worktree ID; required with projectId and repositoryId for an existing top-level scope.",
+      ),
+    repositoryPath: z
+      .string()
+      .trim()
+      .min(1, "Enter the local repository path.")
+      .max(4_096)
+      .refine(
+        (value) => /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(value),
+        "Enter an absolute Windows path.",
+      )
+      .optional()
+      .describe(
+        "Local Git repository or worktree path used to resolve or provision a top-level scope.",
+      ),
+    ensureScope: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Set true with repositoryPath to create missing project, repository, or worktree scope records.",
+      ),
+    title: titleField.describe("Clear title for the new task."),
+    priority: prioritySchema
+      .default("Unset")
+      .describe("Optional task priority."),
+    description: markdownField
+      .default("")
+      .describe("Optional intended-result Markdown."),
+    effort: effortSchema
+      .default("Unknown")
+      .describe("Optional effort estimate."),
+    plannedValidation: notesSchema
+      .default([])
+      .describe("Optional checks planned for this task."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const scopeFields = ["projectId", "repositoryId", "worktreeId"] as const;
+    const hasScopeIds = scopeFields.some((field) => input[field] !== undefined);
+    const hasRepositoryPlacement =
+      input.repositoryPath !== undefined || input.ensureScope !== undefined;
+    if (input.parentId === undefined) {
+      if (hasScopeIds && hasRepositoryPlacement) {
+        for (const field of ["repositoryPath", "ensureScope"] as const) {
+          context.addIssue({
+            code: "custom",
+            path: [field],
+            message: `${field} must be omitted when scope IDs are provided.`,
+          });
+        }
+        return;
+      }
+      if (hasScopeIds) {
+        for (const field of scopeFields) {
+          if (input[field] === undefined) {
+            context.addIssue({
+              code: "custom",
+              path: [field],
+              message: `${field} is required with the other scope IDs.`,
+            });
+          }
+        }
+        return;
+      }
+      if (hasRepositoryPlacement) {
+        if (input.repositoryPath === undefined) {
+          context.addIssue({
+            code: "custom",
+            path: ["repositoryPath"],
+            message: "repositoryPath is required when ensureScope is true.",
+          });
+        }
+        if (input.ensureScope !== true) {
+          context.addIssue({
+            code: "custom",
+            path: ["ensureScope"],
+            message:
+              "Set ensureScope to true to provision scope from repositoryPath.",
+          });
+        }
+        return;
+      }
+      for (const field of scopeFields) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} is required for an existing top-level scope.`,
+        });
+      }
+      return;
+    }
+    for (const field of [
+      ...scopeFields,
+      "repositoryPath",
+      "ensureScope",
+    ] as const) {
+      if (input[field] !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} must be omitted when parentId supplies the task scope.`,
+        });
+      }
+    }
+  });
 
 export const setParentRequestSchema = z
   .object({
@@ -910,9 +1397,39 @@ export type ActionablesListResponse = z.infer<
   typeof actionablesListResponseSchema
 >;
 export type ScopeOptionsResponse = z.infer<typeof scopeOptionsResponseSchema>;
+export type CreateRepositoryRequest = z.infer<
+  typeof createRepositoryRequestSchema
+>;
+export type CreateRepositoryResponse = z.infer<
+  typeof createRepositoryResponseSchema
+>;
 export type ActionableQuery = z.infer<typeof actionableQuerySchema>;
 export type ActionableSort = z.infer<typeof actionableSortSchema>;
 export type DashboardResponse = z.infer<typeof dashboardResponseSchema>;
+export type AgentTaskSummary = z.infer<typeof agentTaskSummarySchema>;
+export type ListAgentTasksRequest = z.infer<typeof listAgentTasksRequestSchema>;
+export type ListAgentTasksResponse = z.infer<
+  typeof listAgentTasksResponseSchema
+>;
+export type ClaimAgentTaskRequest = z.infer<typeof claimAgentTaskRequestSchema>;
+export type ClaimAgentTaskResponse = z.infer<
+  typeof claimAgentTaskResponseSchema
+>;
+export type RenewAgentTaskClaimRequest = z.infer<
+  typeof renewAgentTaskClaimRequestSchema
+>;
+export type RenewAgentTaskClaimResponse = z.infer<
+  typeof renewAgentTaskClaimResponseSchema
+>;
+export type ReleaseAgentTaskClaimRequest = z.infer<
+  typeof releaseAgentTaskClaimRequestSchema
+>;
+export type ReleaseAgentTaskClaimResponse = z.infer<
+  typeof releaseAgentTaskClaimResponseSchema
+>;
+export type ReleaseExpiredAgentClaimRequest = z.infer<
+  typeof releaseExpiredAgentClaimRequestSchema
+>;
 export type ArchiveMutationRequest = z.infer<
   typeof archiveMutationRequestSchema
 >;
@@ -930,7 +1447,19 @@ export type StatusTransitionRequest = z.infer<
 export type CreateValidationRecordRequest = z.infer<
   typeof createValidationRecordRequestSchema
 >;
+export type UpdateClaimedAgentTaskRequest = z.infer<
+  typeof updateClaimedAgentTaskRequestSchema
+>;
+export type TransitionClaimedAgentTaskRequest = z.infer<
+  typeof transitionClaimedAgentTaskRequestSchema
+>;
+export type RecordClaimedAgentTaskValidationRequest = z.infer<
+  typeof recordClaimedAgentTaskValidationRequestSchema
+>;
 export type CreateSubtaskRequest = z.infer<typeof createSubtaskRequestSchema>;
+export type CreateAgentTaskRequest = z.infer<
+  typeof createAgentTaskRequestSchema
+>;
 export type SetParentRequest = z.infer<typeof setParentRequestSchema>;
 export type DetachParentRequest = z.infer<typeof detachParentRequestSchema>;
 export type CreateDependencyRequest = z.infer<

@@ -2,7 +2,11 @@ import { buildApp } from "./app.js";
 import { createPrismaClient } from "./database.js";
 
 const prisma = createPrismaClient();
-const app = buildApp({ prisma, logger: true });
+const app = buildApp({
+  prisma,
+  logger: true,
+  mcpBearerToken: process.env.ACTIONABLES_MCP_TOKEN,
+});
 
 async function close() {
   await app.close();
