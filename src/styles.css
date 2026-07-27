@@ -2595,6 +2595,94 @@ button {
   border-bottom: 1px solid var(--border-soft);
 }
 
+.activity-session {
+  margin-top: 8px;
+  overflow: hidden;
+  border: 1px solid #34434b;
+  border-radius: 5px;
+  background: rgba(13, 21, 25, 0.52);
+}
+
+.activity-session > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px 5px;
+}
+
+.activity-session > header div > span,
+.activity-session > header strong {
+  display: block;
+}
+
+.activity-session > header div > span {
+  color: var(--text-faint);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.activity-session > header strong {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.activity-session-state,
+.activity-event-category {
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.activity-session-state {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  color: #a9bac2;
+  border: 1px solid #42555f;
+  background: rgba(66, 85, 95, 0.2);
+}
+
+.activity-session-state.is-active {
+  color: #7dd8bf;
+  border-color: #2d6b5d;
+  background: rgba(45, 107, 93, 0.2);
+}
+
+.activity-session-state.is-expired {
+  color: #efaaa3;
+  border-color: #754740;
+  background: rgba(117, 71, 64, 0.2);
+}
+
+.activity-session-state.is-handed-off {
+  color: #d9bd81;
+  border-color: #6d5d38;
+  background: rgba(109, 93, 56, 0.2);
+}
+
+.activity-session-time {
+  margin: 0;
+  padding: 0 9px 7px;
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.activity-session-events {
+  padding: 0 9px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.activity-event-category {
+  display: inline-block;
+  margin-bottom: 2px;
+  color: var(--text-faint);
+}
+
 .activity-timeline article > svg {
   width: 13px;
   color: var(--accent);
@@ -2621,6 +2709,14 @@ button {
   padding: 8px 7px;
   border-left: 2px solid #db9f54;
   background: rgba(219, 159, 84, 0.08);
+}
+
+.activity-timeline article.is-failure {
+  margin: 4px -7px;
+  padding-right: 7px;
+  padding-left: 7px;
+  border-left: 2px solid #c9685f;
+  background: rgba(201, 104, 95, 0.08);
 }
 
 .form-backdrop {

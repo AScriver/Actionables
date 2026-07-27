@@ -92,6 +92,10 @@ import {
   updateActionable,
   waiveDependency,
 } from "./api";
+import {
+  activityEventCategory,
+  groupActivityByAgentSession,
+} from "./activity-timeline";
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
@@ -1432,28 +1436,76 @@ function ValidationRecords({
 }
 
 function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
+  const groups = groupActivityByAgentSession(selected.activity);
+
+  const eventRow = (event: ActionableDetail["activity"][number]) => {
+    const category = activityEventCategory(event);
+    return (
+      <article
+        key={event.id}
+        className={[
+          event.type === "completion-overridden" ? "is-override" : "",
+          category === "Failure" ? "is-failure" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <Activity aria-hidden="true" />
+        <div>
+          <span className="activity-event-category">{category}</span>
+          <strong>{event.summary}</strong>
+          {event.context.reason && <Markdown>{event.context.reason}</Markdown>}
+          <time dateTime={event.occurredAt}>
+            {new Date(event.occurredAt).toLocaleString()}
+          </time>
+        </div>
+      </article>
+    );
+  };
+
   return (
     <section className="inspector-section activity-timeline">
       <h3>Activity</h3>
-      {selected.activity.map((event) => (
-        <article
-          key={event.id}
-          className={
-            event.type === "completion-overridden" ? "is-override" : ""
-          }
-        >
-          <Activity aria-hidden="true" />
-          <div>
-            <strong>{event.summary}</strong>
-            {event.context.reason && (
-              <Markdown>{event.context.reason}</Markdown>
-            )}
-            <time dateTime={event.occurredAt}>
-              {new Date(event.occurredAt).toLocaleString()}
-            </time>
+      {groups.map((group) =>
+        group.kind === "session" ? (
+          <section className="activity-session" key={group.id}>
+            <header>
+              <div>
+                <span>Agent session</span>
+                <strong className="mono">{group.agentId}</strong>
+              </div>
+              <span
+                className={`activity-session-state is-${group.state
+                  .toLowerCase()
+                  .replace(" ", "-")}`}
+              >
+                {group.state}
+              </span>
+            </header>
+            <p className="activity-session-time">
+              <time dateTime={group.startedAt}>
+                Started {new Date(group.startedAt).toLocaleString()}
+              </time>
+              {group.endedAt && (
+                <>
+                  {" · "}
+                  <time dateTime={group.endedAt}>
+                    Ended {new Date(group.endedAt).toLocaleString()}
+                  </time>
+                </>
+              )}
+            </p>
+            <div className="activity-session-events">
+              {group.events.map(eventRow)}
+            </div>
+          </section>
+        ) : (
+          <div className="activity-other-events" key={group.id}>
+            {group.events.map(eventRow)}
           </div>
-        </article>
-      ))}
+        ),
+      )}
+      {groups.length === 0 && <p>No activity has been recorded.</p>}
     </section>
   );
 }
