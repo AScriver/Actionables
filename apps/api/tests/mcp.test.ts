@@ -242,6 +242,17 @@ describe("Actionables MCP", () => {
           "actionables.release_task",
         ].sort(),
       );
+      const claimTaskTool = tools.find(
+        (tool) => tool.name === "actionables.claim_task",
+      );
+      for (const responsePath of ["task.version", "claim.claimToken"]) {
+        expect(client.getInstructions()).toEqual(
+          expect.stringContaining(responsePath),
+        );
+        expect(claimTaskTool?.description).toEqual(
+          expect.stringContaining(responsePath),
+        );
+      }
       for (const tool of tools) {
         const properties = describedProperties(tool.inputSchema);
         expect(properties.length, tool.name).toBeGreaterThan(0);

@@ -82,7 +82,14 @@ Automatic scope provisioning is explicit rather than silent: `repositoryPath` al
 
 Claim tokens are secret capabilities. Do not put them in chat, code, files, logs, task text, or validation evidence.
 
-After claim, the token identifies the stored agent claim. Get, update, transition, validation, and release calls do not repeat `agentId`; only explicit renewal accepts a new `leaseMinutes`. Successful mutations use the server's default renewal period.
+A successful `actionables.claim_task` call returns `{ task, claim }`. Read the
+latest version from `task.version` and the secret token from
+`claim.claimToken` for later claimed-task calls.
+
+After claim, the token identifies the stored agent claim. Get, update,
+transition, validation, and release calls do not repeat `agentId`; only
+explicit renewal accepts a new `leaseMinutes`. Successful mutations use the
+server's default renewal period.
 
 Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate appended research notes and added source references are ignored.
 
