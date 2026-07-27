@@ -1850,6 +1850,92 @@ button {
   font-weight: 650;
 }
 
+.settings-panel {
+  min-width: 0;
+  overflow: auto;
+  padding: 24px clamp(18px, 4vw, 56px) 48px;
+}
+
+.settings-heading,
+.settings-form,
+.settings-state {
+  max-width: 1100px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.settings-heading {
+  margin-bottom: 16px;
+}
+
+.settings-heading h1 {
+  margin: 0 0 5px;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.settings-heading p,
+.settings-form section > div > p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-form > section {
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.settings-form section > div {
+  margin-bottom: 12px;
+}
+
+.settings-form h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-form textarea {
+  min-height: 230px;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.settings-form footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 36px;
+}
+
+.settings-form footer span {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.settings-state {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.settings-state svg {
+  width: 18px;
+  height: 18px;
+}
+
 .file-picker {
   display: inline-flex;
   align-items: center;
@@ -2085,6 +2171,20 @@ button {
 @media (max-width: 760px) {
   .data-panel {
     padding: 16px 10px 36px;
+  }
+
+  .settings-panel {
+    padding: 16px 10px 36px;
+  }
+
+  .settings-form footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-form footer .primary-action {
+    justify-content: center;
+    width: 100%;
   }
 
   .data-heading {

@@ -24,6 +24,7 @@ import {
   type CreateRepositoryResponse,
   type GroomActionableNotesRequest,
   type GroomActionableNotesResponse,
+  type HelperAgentSettings,
   type ProblemDetails,
   type DependencyActionRequest,
   type DetachParentRequest,
@@ -39,9 +40,11 @@ import {
   type SetParentRequest,
   type UpdateActionableRequest,
   groomActionableNotesResponseSchema,
+  helperAgentSettingsSchema,
   relationshipAuditResponseSchema,
   type AuditActionableRelationshipsRequest,
   type RelationshipAuditResponse,
+  type UpdateHelperAgentSettingsRequest,
 } from "@actionables/contracts";
 
 export class ApiProblem extends Error {
@@ -109,6 +112,23 @@ export async function releaseExpiredAgentClaim(
 
 export async function fetchScopeOptions(): Promise<ScopeOptionsResponse> {
   return scopeOptionsResponseSchema.parse(await requestJson("/api/scopes"));
+}
+
+export async function fetchHelperAgentSettings(): Promise<HelperAgentSettings> {
+  return helperAgentSettingsSchema.parse(
+    await requestJson("/api/settings/helper-agents"),
+  );
+}
+
+export async function updateHelperAgentSettings(
+  input: UpdateHelperAgentSettingsRequest,
+): Promise<HelperAgentSettings> {
+  return helperAgentSettingsSchema.parse(
+    await requestJson("/api/settings/helper-agents", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export async function createRepository(

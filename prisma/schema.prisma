@@ -7,6 +7,14 @@ datasource db {
   provider = "sqlite"
 }
 
+model HelperAgentSettings {
+  id                        String   @id
+  noteGroomerPrompt         String
+  relationshipAuditorPrompt String
+  version                   Int      @default(1)
+  updatedAt                 DateTime @updatedAt
+}
+
 model Project {
   id           String       @id @default(cuid())
   externalKey  String       @unique

@@ -44,6 +44,7 @@ import {
   type Effort,
   type EvidenceState,
   type GroomActionableNotesProposal,
+  type HelperAgentSettings,
   type RelationshipAuditResponse,
   type Priority,
   type ImportCommitResponse,
@@ -78,6 +79,7 @@ import {
   fetchActionables,
   fetchArchiveImpact,
   fetchDashboard,
+  fetchHelperAgentSettings,
   fetchScopeOptions,
   groomActionableNotes,
   downloadPortableExport,
@@ -92,6 +94,7 @@ import {
   setScopeArchived,
   transitionActionable,
   updateActionable,
+  updateHelperAgentSettings,
   waiveDependency,
 } from "./api";
 import {
@@ -3516,7 +3519,7 @@ function LegacyApp() {
   );
 }
 
-type ViewMode = "dashboard" | "actionables" | "archive" | "data";
+type ViewMode = "dashboard" | "actionables" | "archive" | "data" | "settings";
 type QueryState = Partial<Record<keyof ActionableQuery, string>>;
 type ArchiveDialogTarget = {
   kind: ArchiveTargetKind;
@@ -3551,6 +3554,7 @@ function viewFromLocation(): ViewMode {
   }
   if (window.location.pathname === "/archive") return "archive";
   if (window.location.pathname === "/data") return "data";
+  if (window.location.pathname === "/settings") return "settings";
   return "actionables";
 }
 
@@ -3593,7 +3597,9 @@ function routeFor(
           ? "/archive"
           : view === "data"
             ? "/data"
-            : "/";
+            : view === "settings"
+              ? "/settings"
+              : "/";
   return `${path}${searchFor(query)}`;
 }
 
@@ -4140,6 +4146,198 @@ function DataPanel({
   );
 }
 
+function SettingsPanel() {
+  const queryClient = useQueryClient();
+  const settingsQuery = useQuery({
+    queryKey: ["helper-agent-settings"],
+    queryFn: fetchHelperAgentSettings,
+  });
+  const [noteGroomerPrompt, setNoteGroomerPrompt] = useState("");
+  const [relationshipAuditorPrompt, setRelationshipAuditorPrompt] =
+    useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  const loadDraft = (settings: HelperAgentSettings) => {
+    setNoteGroomerPrompt(settings.noteGroomerPrompt);
+    setRelationshipAuditorPrompt(settings.relationshipAuditorPrompt);
+  };
+
+  useEffect(() => {
+    if (settingsQuery.data) loadDraft(settingsQuery.data);
+  }, [settingsQuery.data]);
+
+  const dirty = Boolean(
+    settingsQuery.data &&
+    (noteGroomerPrompt !== settingsQuery.data.noteGroomerPrompt ||
+      relationshipAuditorPrompt !==
+        settingsQuery.data.relationshipAuditorPrompt),
+  );
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!settingsQuery.data) return;
+    setSaving(true);
+    setNotice("");
+    setError("");
+    try {
+      const saved = await updateHelperAgentSettings({
+        version: settingsQuery.data.version,
+        noteGroomerPrompt,
+        relationshipAuditorPrompt,
+      });
+      queryClient.setQueryData(["helper-agent-settings"], saved);
+      loadDraft(saved);
+      setNotice("Helper agent prompts saved.");
+    } catch (caught) {
+      if (
+        caught instanceof ApiProblem &&
+        caught.problem.code === "VERSION_CONFLICT"
+      ) {
+        try {
+          const current = await fetchHelperAgentSettings();
+          queryClient.setQueryData(["helper-agent-settings"], current);
+          loadDraft(current);
+          setError(
+            "A newer saved version was loaded. Review it before editing again.",
+          );
+        } catch (reloadError) {
+          setError(errorMessage(reloadError));
+        }
+      } else {
+        setError(errorMessage(caught));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (settingsQuery.isPending) {
+    return (
+      <section className="settings-panel" aria-busy="true">
+        <div className="settings-state" role="status">
+          <RefreshCw className="spin" aria-hidden="true" />
+          Loading helper agent prompts…
+        </div>
+      </section>
+    );
+  }
+
+  if (settingsQuery.isError || !settingsQuery.data) {
+    return (
+      <section className="settings-panel">
+        <div className="settings-state" role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <strong>Could not load helper agent prompts</strong>
+          <span>{errorMessage(settingsQuery.error)}</span>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={() => void settingsQuery.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="settings-panel">
+      <header className="settings-heading">
+        <div>
+          <h1>Settings</h1>
+          <p>
+            Customize the instructions sent to local Codex for built-in helper
+            actions.
+          </p>
+        </div>
+      </header>
+      <form className="settings-form" onSubmit={(event) => void save(event)}>
+        <section aria-labelledby="note-groomer-prompt-title">
+          <div>
+            <h2 id="note-groomer-prompt-title">Groom notes with local Codex</h2>
+            <p>
+              Controls how description, research, and planned validation are
+              reorganized.
+            </p>
+          </div>
+          <label className="form-field" htmlFor="note-groomer-prompt">
+            <span>Prompt instructions</span>
+            <textarea
+              id="note-groomer-prompt"
+              value={noteGroomerPrompt}
+              onChange={(event) => {
+                setNoteGroomerPrompt(event.target.value);
+                setNotice("");
+              }}
+              rows={13}
+              maxLength={20_000}
+              required
+              disabled={saving}
+            />
+            <small>
+              Task data, output schema instructions, and prompt-injection
+              boundaries are appended by the application.
+            </small>
+          </label>
+        </section>
+        <section aria-labelledby="relationship-auditor-prompt-title">
+          <div>
+            <h2 id="relationship-auditor-prompt-title">Relationship auditor</h2>
+            <p>
+              Controls how hierarchy and dependency recommendations are
+              evaluated.
+            </p>
+          </div>
+          <label className="form-field" htmlFor="relationship-auditor-prompt">
+            <span>Prompt instructions</span>
+            <textarea
+              id="relationship-auditor-prompt"
+              value={relationshipAuditorPrompt}
+              onChange={(event) => {
+                setRelationshipAuditorPrompt(event.target.value);
+                setNotice("");
+              }}
+              rows={13}
+              maxLength={20_000}
+              required
+              disabled={saving}
+            />
+            <small>
+              Work-item data, output schema instructions, and safety boundaries
+              remain application-controlled.
+            </small>
+          </label>
+        </section>
+        {error && (
+          <div className="inline-error" role="alert">
+            {error}
+          </div>
+        )}
+        <footer>
+          <span role="status" aria-live="polite">
+            {notice}
+          </span>
+          <button
+            type="submit"
+            className="primary-action"
+            disabled={
+              saving ||
+              !dirty ||
+              !noteGroomerPrompt.trim() ||
+              !relationshipAuditorPrompt.trim()
+            }
+          >
+            {saving ? "Saving…" : "Save prompts"}
+          </button>
+        </footer>
+      </form>
+    </section>
+  );
+}
+
 function RepositoryDialog({
   scopes,
   initialProjectId,
@@ -4580,7 +4778,8 @@ export default function App() {
   const listQuery = useQuery({
     queryKey: ["actionables", query],
     queryFn: () => fetchActionables(query),
-    enabled: view !== "dashboard" || selectedId !== null,
+    enabled:
+      view === "actionables" || view === "archive" || selectedId !== null,
   });
   const scopesQuery = useQuery({
     queryKey: ["scopes"],
@@ -4829,12 +5028,16 @@ export default function App() {
         return;
       }
 
-      if (event.key === "/" && view !== "data") {
+      if (event.key === "/" && view !== "data" && view !== "settings") {
         event.preventDefault();
         searchInputRef.current?.focus();
         return;
       }
-      if (event.key.toLowerCase() === "c" && view !== "data") {
+      if (
+        event.key.toLowerCase() === "c" &&
+        view !== "data" &&
+        view !== "settings"
+      ) {
         event.preventDefault();
         if (scopesQuery.data) setFormMode("create");
         else setNotice("Scope options are still loading.");
@@ -5095,7 +5298,9 @@ export default function App() {
     inspectorResizing ? "inspector-resizing" : "",
     mobileDetailOpen ? "mobile-detail-open" : "",
     view === "dashboard" && selectedId === null ? "dashboard-mode" : "",
-    view === "data" && selectedId === null ? "data-mode" : "",
+    (view === "data" || view === "settings") && selectedId === null
+      ? "data-mode"
+      : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -5158,6 +5363,13 @@ export default function App() {
             onClick={() => replaceLocation("data", null, query)}
           >
             <Database /> Data
+          </button>
+          <button
+            type="button"
+            className={view === "settings" ? "is-selected" : ""}
+            onClick={() => replaceLocation("settings", null, query)}
+          >
+            <Settings /> Settings
           </button>
         </nav>
         <div className="project-tree">
@@ -5555,7 +5767,7 @@ export default function App() {
             )}
           </div>
         </div>
-        {view !== "data" ? (
+        {view !== "data" && view !== "settings" ? (
           <label className="global-search">
             <Search aria-hidden="true" />
             <kbd className="shortcut">/</kbd>
@@ -5578,7 +5790,15 @@ export default function App() {
           </label>
         ) : (
           <div className="data-context">
-            <Database aria-hidden="true" /> Import / Export
+            {view === "settings" ? (
+              <>
+                <Settings aria-hidden="true" /> Helper agents
+              </>
+            ) : (
+              <>
+                <Database aria-hidden="true" /> Import / Export
+              </>
+            )}
           </div>
         )}
         <div className="topbar-actions">
@@ -5617,7 +5837,7 @@ export default function App() {
               </div>
             )}
           </div>
-          {view !== "data" && (
+          {view !== "data" && view !== "settings" && (
             <button
               type="button"
               className="primary-action"
@@ -5795,7 +6015,11 @@ export default function App() {
         </div>
       </header>
 
-      {view === "data" && selectedId === null ? (
+      {view === "settings" && selectedId === null ? (
+        <main className="findings-panel" id="main-content" tabIndex={-1}>
+          <SettingsPanel />
+        </main>
+      ) : view === "data" && selectedId === null ? (
         <main className="findings-panel" id="main-content" tabIndex={-1}>
           <DataPanel
             onCommitted={invalidateDailyUse}
@@ -6123,7 +6347,8 @@ export default function App() {
         </main>
       )}
 
-      {(view !== "dashboard" && view !== "data") || selectedId !== null ? (
+      {(view !== "dashboard" && view !== "data" && view !== "settings") ||
+      selectedId !== null ? (
         <aside
           className="inspector"
           id="actionable-inspector"

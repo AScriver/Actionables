@@ -684,6 +684,21 @@ export const groomActionableNotesRequestSchema = z
   })
   .strict();
 
+const helperAgentPromptSchema = z.string().trim().min(1).max(20_000);
+
+export const helperAgentSettingsSchema = z
+  .object({
+    noteGroomerPrompt: helperAgentPromptSchema,
+    relationshipAuditorPrompt: helperAgentPromptSchema,
+    version: z.number().int().positive(),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const updateHelperAgentSettingsRequestSchema = helperAgentSettingsSchema
+  .omit({ updatedAt: true })
+  .strict();
+
 export const groomActionableNotesProposalSchema = z
   .object({
     description: markdownField.describe(
@@ -1646,6 +1661,10 @@ export type UpdateActionableRequest = z.infer<
 >;
 export type GroomActionableNotesRequest = z.infer<
   typeof groomActionableNotesRequestSchema
+>;
+export type HelperAgentSettings = z.infer<typeof helperAgentSettingsSchema>;
+export type UpdateHelperAgentSettingsRequest = z.infer<
+  typeof updateHelperAgentSettingsRequestSchema
 >;
 export type GroomActionableNotesProposal = z.infer<
   typeof groomActionableNotesProposalSchema

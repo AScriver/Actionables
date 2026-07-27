@@ -20,10 +20,12 @@ import {
   dashboardResponseSchema,
   groomActionableNotesRequestSchema,
   groomActionableNotesResponseSchema,
+  helperAgentSettingsSchema,
   scopeOptionsResponseSchema,
   setParentRequestSchema,
   statusTransitionRequestSchema,
   updateActionableRequestSchema,
+  updateHelperAgentSettingsRequestSchema,
   commitImportRequestSchema,
   importCommitResponseSchema,
   importPreviewResponseSchema,
@@ -81,6 +83,11 @@ import {
 } from "./assistant-runner.js";
 import { groomActionableNotes } from "./note-groomer.js";
 import { auditWorkItemRelationships } from "./relationship-auditor.js";
+import {
+  getHelperAgentSettings,
+  HelperAgentSettingsVersionConflictError,
+  updateHelperAgentSettings,
+} from "./helper-agent-settings.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
@@ -232,6 +239,19 @@ export function buildApp({
         },
       );
     }
+    if (error instanceof HelperAgentSettingsVersionConflictError) {
+      return problem(
+        request,
+        reply,
+        409,
+        "VERSION_CONFLICT",
+        "The helper agent settings have a newer saved version.",
+        {
+          detail: "Review the saved prompts before reapplying your changes.",
+          current: error.current,
+        },
+      );
+    }
     if (error instanceof ExpiredAgentClaimReleaseConflictError) {
       return problem(request, reply, 409, error.code, error.message, {
         detail:
@@ -332,6 +352,31 @@ export function buildApp({
 
   app.get("/api/scopes", async () => {
     return scopeOptionsResponseSchema.parse(await listScopeOptions(prisma));
+  });
+
+  app.get("/api/settings/helper-agents", async () => {
+    return helperAgentSettingsSchema.parse(
+      await getHelperAgentSettings(prisma),
+    );
+  });
+
+  app.patch("/api/settings/helper-agents", async (request, reply) => {
+    const parsed = updateHelperAgentSettingsRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return problem(
+        request,
+        reply,
+        422,
+        "VALIDATION_ERROR",
+        "Check the helper agent prompts.",
+        { errors: fieldErrors(parsed.error) },
+      );
+    }
+    return helperAgentSettingsSchema.parse(
+      await updateHelperAgentSettings(prisma, parsed.data),
+    );
   });
 
   app.post("/api/repositories", async (request, reply) => {
@@ -514,8 +559,13 @@ export function buildApp({
           "No local assistant runner is configured.",
         );
       }
+      const settings = await getHelperAgentSettings(prisma);
       return groomActionableNotesResponseSchema.parse(
-        await groomActionableNotes(assistantRunner, item),
+        await groomActionableNotes(
+          assistantRunner,
+          item,
+          settings.noteGroomerPrompt,
+        ),
       );
     },
   );
@@ -557,8 +607,14 @@ export function buildApp({
           "No local assistant runner is configured.",
         );
       }
+      const settings = await getHelperAgentSettings(prisma);
       return relationshipAuditResponseSchema.parse(
-        await auditWorkItemRelationships(prisma, assistantRunner, item),
+        await auditWorkItemRelationships(
+          prisma,
+          assistantRunner,
+          item,
+          settings.relationshipAuditorPrompt,
+        ),
       );
     },
   );

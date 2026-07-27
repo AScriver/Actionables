@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import process from "node:process";
 
 const databasePath = "data/actionables-e2e.db";
+const webPort = process.env.WEB_PORT ?? "4173";
 for (const suffix of ["", "-journal", "-shm", "-wal"]) {
   await rm(`${databasePath}${suffix}`, { force: true });
 }
@@ -31,7 +32,7 @@ const children = [
   ),
   spawn(
     process.execPath,
-    ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "4173"],
+    ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", webPort],
     { stdio: "inherit", env: process.env },
   ),
 ];
