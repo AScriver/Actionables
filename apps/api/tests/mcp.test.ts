@@ -215,6 +215,16 @@ describe("Actionables MCP", () => {
   it("exposes exactly the bounded task tools through the official client", async () => {
     const { client, transport } = await connectClient();
     try {
+      expect(client.getInstructions()).toEqual(
+        expect.stringContaining(
+          "A task may remain Researching between turns only while additional investigation is genuinely required",
+        ),
+      );
+      expect(client.getInstructions()).toEqual(
+        expect.stringContaining(
+          "Never claim completion while an owned task remains Researching",
+        ),
+      );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
       expect(names).toEqual(
@@ -271,6 +281,15 @@ describe("Actionables MCP", () => {
         destructiveHint: false,
         idempotentHint: false,
       });
+      const descriptions = Object.fromEntries(
+        tools.map((tool) => [tool.name, tool.description]),
+      );
+      expect(descriptions["actionables.transition_task"]).toContain(
+        "use Ready when research is sufficient but implementation remains",
+      );
+      expect(descriptions["actionables.release_task"]).toContain(
+        "record findings so far, remaining questions, and the next research step",
+      );
     } finally {
       await transport.close();
     }
@@ -810,7 +829,10 @@ describe("Actionables MCP", () => {
   });
 
   it("runs list, claim-with-detail, update, transition, validation, and release", async () => {
-    const task = await createTask({ title: "End-to-end MCP workflow" });
+    const task = await createTask({
+      status: "Inbox",
+      title: "End-to-end MCP workflow",
+    });
     const { client, transport } = await connectClient();
     try {
       const listed = output<{ items: Array<{ id: number; version: number }> }>(
@@ -863,12 +885,98 @@ describe("Actionables MCP", () => {
       );
       expect(renewed.task.version).toBe(claimed.task.version);
 
-      const inProgress = output<{ status: string; version: number }>(
+      const skippedResearch = errorOutput(
         await client.callTool({
           name: "actionables.transition_task",
           arguments: {
             ...credentials,
             version: claimed.task.version,
+            status: "Ready",
+          },
+        }),
+      );
+      expect(skippedResearch).toMatchObject({
+        code: "RESEARCH_PHASE_REQUIRED",
+        retryable: true,
+        nextAction: expect.stringContaining("Researching"),
+      });
+
+      const researching = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            status: "Researching",
+          },
+        }),
+      );
+      expect(researching.status).toBe("Researching");
+
+      const missingResearch = errorOutput(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: researching.version,
+            status: "Ready",
+          },
+        }),
+      );
+      expect(missingResearch).toMatchObject({
+        code: "RESEARCH_REQUIRED",
+        retryable: true,
+        nextAction: expect.stringContaining("appendResearch"),
+      });
+
+      const researched = output<{
+        id: number;
+        version: number;
+        status: string;
+        appended: number;
+        duplicatesIgnored: number;
+        lifecycleGuidance?: string;
+      }>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: researching.version,
+            appendResearch: [
+              "The lifecycle authority is the correct boundary.",
+            ],
+          },
+        }),
+      );
+      expect(researched).toEqual({
+        id: task.sourceOrdinal,
+        version: researching.version + 1,
+        status: "Researching",
+        appended: 1,
+        duplicatesIgnored: 0,
+        lifecycleGuidance: expect.stringContaining(
+          "otherwise transition it to Ready",
+        ),
+      });
+
+      const ready = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: researched.version,
+            status: "Ready",
+          },
+        }),
+      );
+      expect(ready.status).toBe("Ready");
+
+      const inProgress = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: ready.version,
             status: "In progress",
           },
         }),

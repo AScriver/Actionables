@@ -429,6 +429,18 @@ function recovery(code: string) {
         retryable: false,
         nextAction: "Correct the reported input fields before calling again.",
       };
+    case "RESEARCH_PHASE_REQUIRED":
+      return {
+        retryable: true,
+        nextAction:
+          "Call actionables.transition_task with status Researching, then begin investigation.",
+      };
+    case "RESEARCH_REQUIRED":
+      return {
+        retryable: true,
+        nextAction:
+          "Call actionables.update_task with appendResearch, then retry Ready using the returned version.",
+      };
     case "NOT_FOUND":
     case "ARCHIVED":
     case "TERMINAL":
@@ -544,7 +556,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. After claim, use the latest version and secret claim token; record actual validation before Done; release nonterminal claims on handoff. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. After claim, use the latest version and secret claim token. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Release nonterminal claims on handoff. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -692,7 +704,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Transition claimed Actionable",
       description:
-        "Move a claimed task through a permitted lifecycle transition. Done requires qualifying validation and releases the claim.",
+        "Move a claimed task through Inbox to Researching to Ready to In progress. Keep Researching while investigation remains; use Ready when research is sufficient but implementation remains. Ready requires a non-empty Research note, and implementation changes must wait until In progress. Done requires qualifying validation and releases the claim.",
       inputSchema: transitionTaskSchema,
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, destructiveHint: true },
@@ -741,7 +753,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Release Actionable claim",
       description:
-        "Release a valid nonterminal claim when abandoning or handing off work.",
+        "Release a valid nonterminal claim when abandoning or handing off work. Before releasing a Researching task, record findings so far, remaining questions, and the next research step.",
       inputSchema: releaseTaskSchema,
       outputSchema: releaseAgentTaskClaimResponseSchema,
       annotations: {

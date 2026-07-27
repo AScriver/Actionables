@@ -97,7 +97,7 @@ const body = (title: string, selectedScope = scope) => ({
   ...selectedScope,
   finding: "A bounded finding",
   description: "A bounded result",
-  research: [],
+  research: ["The relationship lifecycle was reviewed."],
   validation: ["Verify it"],
   tags: [],
   userSources: [],
@@ -330,6 +330,7 @@ describe("dependency relationships", () => {
     expect(transitiveCycle.json().code).toBe("DEPENDENCY_CYCLE");
 
     prerequisite = await get(prerequisite.id);
+    prerequisite = await move(prerequisite, "Researching");
     prerequisite = await move(prerequisite, "Ready");
     prerequisite = await move(prerequisite, "In progress");
     prerequisite = await move(prerequisite, "Done", {
@@ -444,6 +445,7 @@ describe("parent lifecycle integration", () => {
     });
     child = attached.json().item;
     parent = await get(parent.id);
+    parent = await move(parent, "Researching");
     parent = await move(parent, "Ready");
     parent = await move(parent, "In progress");
 
@@ -459,6 +461,7 @@ describe("parent lifecycle integration", () => {
     });
     expect(premature.json().code).toBe("INCOMPLETE_SUBTASKS");
 
+    child = await move(child, "Researching");
     child = await move(child, "Ready");
     child = await move(child, "In progress");
     child = await move(child, "Done", {

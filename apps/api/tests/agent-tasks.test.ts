@@ -34,6 +34,10 @@ async function createTask(
     archivedAt?: Date | null;
     title?: string;
     creatorThreadId?: string;
+    finding?: string;
+    description?: string;
+    research?: string[];
+    validation?: string[];
   } = {},
 ) {
   const ordinal = nextOrdinal++;
@@ -49,10 +53,10 @@ async function createTask(
       evidenceState: "Confirmed",
       archivedAt: overrides.archivedAt ?? null,
       updatedLabel: "fixture",
-      finding: "",
-      description: "",
-      researchJson: json([]),
-      validationJson: json([]),
+      finding: overrides.finding ?? "",
+      description: overrides.description ?? "",
+      researchJson: json(overrides.research ?? []),
+      validationJson: json(overrides.validation ?? []),
       filesJson: json([]),
       tagsJson: json([]),
       userSourcesJson: json([]),
@@ -944,6 +948,74 @@ describe("agent task claims", () => {
         where: { actionableId: expiringTask.id },
       }),
     ).toBeNull();
+  });
+
+  it("requires claimed work to record research before implementation", async () => {
+    const task = await createTask({
+      status: "Inbox",
+      finding: "The lifecycle needs a research-first guard.",
+      description: "Require research before implementation.",
+      validation: ["Run the focused lifecycle tests."],
+    });
+    const claimed = await claimAgentTask(prisma, task.sourceOrdinal, {
+      agentId: "codex:research-first",
+      workItemId: task.sourceOrdinal,
+      version: task.version,
+      leaseMinutes: 30,
+    });
+    const credentials = { claimToken: claimed.claim.claimToken };
+
+    await expect(
+      transitionClaimedAgentTask(prisma, task.sourceOrdinal, {
+        ...credentials,
+        version: claimed.task.version,
+        status: "Ready",
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_PHASE_REQUIRED" });
+
+    const researching = await transitionClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        ...credentials,
+        version: claimed.task.version,
+        status: "Researching",
+      },
+    );
+    await expect(
+      transitionClaimedAgentTask(prisma, task.sourceOrdinal, {
+        ...credentials,
+        version: researching.version,
+        status: "Ready",
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_REQUIRED" });
+
+    const researched = await updateClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        ...credentials,
+        version: researching.version,
+        appendResearch: [
+          "The shared transition guard is the correct boundary.",
+        ],
+      },
+    );
+    const ready = await transitionClaimedAgentTask(prisma, task.sourceOrdinal, {
+      ...credentials,
+      version: researched.version,
+      status: "Ready",
+    });
+    const inProgress = await transitionClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        ...credentials,
+        version: ready.version,
+        status: "In progress",
+      },
+    );
+    expect(inProgress.status).toBe("In progress");
   });
 
   it("preserves lifecycle and validation rules, agent origins, renewal, and terminal release", async () => {

@@ -1421,10 +1421,26 @@ function requiredReason(
 function validateTransition(
   current: ActionableRow,
   nextStatus: Status,
-  readiness: { finding: string; description: string; validation: string[] },
+  readiness: {
+    finding: string;
+    description: string;
+    research: string[];
+    validation: string[];
+  },
   request: Pick<StatusTransitionRequest, "reason" | "completionOverrideReason">,
 ): TransitionDecision {
   const previousStatus = parsePersistedStatus(current.status);
+  if (previousStatus === "Inbox" && nextStatus === "Ready") {
+    throw new DomainValidationError(
+      "RESEARCH_PHASE_REQUIRED",
+      {
+        status: [
+          "Move this actionable to Researching before attempting Ready.",
+        ],
+      },
+      "The research phase must begin before this actionable can be ready.",
+    );
+  }
   if (!canTransition(previousStatus, nextStatus)) {
     throw new DomainValidationError(
       "INVALID_STATUS_TRANSITION",
@@ -1442,6 +1458,18 @@ function validateTransition(
     previousStatus !== "Done" &&
     previousStatus !== "Dismissed"
   ) {
+    if (!readiness.research.some((note) => note.trim())) {
+      throw new DomainValidationError(
+        "RESEARCH_REQUIRED",
+        {
+          research: [
+            "Add at least one non-empty Research note before moving to Ready.",
+          ],
+          status: ["Ready requires a recorded Research note."],
+        },
+        "This actionable needs recorded research before it can be ready.",
+      );
+    }
     const errors: Record<string, string[]> = {};
     if (!readiness.finding.trim()) {
       errors.finding = [
@@ -1640,6 +1668,7 @@ export async function updateActionable(
             {
               finding: input.finding,
               description: input.description,
+              research: input.research,
               validation: input.validation,
             },
             {},
@@ -1720,6 +1749,7 @@ export async function transitionActionable(
       {
         finding: current.finding,
         description: current.description,
+        research: stringArray(current.researchJson),
         validation: stringArray(current.validationJson),
       },
       input,

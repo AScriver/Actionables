@@ -42,10 +42,16 @@ The server instructions direct agents to use this sequence:
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
 5. Start from the compact task detail returned by claim; fetch again only when reconciling newer state.
-6. Mutate with the latest version and secret claim token.
-7. Record actual validation evidence before transitioning to Done.
-8. Release a nonterminal claim when abandoning or handing off work.
-9. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
+6. For a newly claimed Inbox task, transition to `Researching` before investigation.
+7. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
+8. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
+9. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient.
+10. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
+11. Mutate with the latest version and secret claim token.
+12. If research is the entire requested outcome, advance the task through the permitted lifecycle, record actual validation, and move it to `Done`.
+13. Never claim completion while an owned task remains `Researching`.
+14. Release a nonterminal claim when abandoning or handing off work.
+15. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
@@ -84,6 +90,16 @@ questions and the next research step while investigation remains; otherwise
 transition it to `Ready` before reporting research complete. A turn ending
 alone does not force that transition. Updates without `appendResearch` retain
 the compact task response.
+
+The enforced implementation path is `Inbox → Researching → Ready → In progress`.
+`Inbox → Ready` is rejected, active work cannot become `Ready` without a
+non-empty Research note, and `In progress` is reachable only from `Ready`.
+Rejections include machine-readable recovery guidance such as
+`appendResearch`. `Dismissed` remains an intentional terminal escape hatch.
+
+This lifecycle authority governs Actionables mutations; it cannot prevent an
+agent or another process from editing files outside the MCP. A hard filesystem
+write gate requires orchestration support and is outside this endpoint.
 
 The endpoint exposes exactly these tools:
 

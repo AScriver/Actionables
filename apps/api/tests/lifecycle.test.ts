@@ -115,13 +115,13 @@ describe("T-004 lifecycle authority", () => {
     if (status === "Inbox") return item;
     if (status === "Researching")
       return (await move(item, "Researching")).json().item;
+    item = (await move(item, "Researching")).json().item;
     if (status === "Ready") return (await move(item, "Ready")).json().item;
     if (status === "In progress") {
       item = (await move(item, "Ready")).json().item;
       return (await move(item, "In progress")).json().item;
     }
     if (status === "Blocked") {
-      item = (await move(item, "Researching")).json().item;
       return (
         await move(item, "Blocked", { reason: "Waiting for test access." })
       ).json().item;
@@ -143,11 +143,11 @@ describe("T-004 lifecycle authority", () => {
   }
 
   const matrix: Record<Status, Status[]> = {
-    Inbox: ["Researching", "Ready", "Dismissed"],
+    Inbox: ["Researching", "Dismissed"],
     Researching: ["Inbox", "Ready", "Blocked", "Dismissed"],
     Ready: ["Inbox", "Researching", "In progress", "Blocked", "Dismissed"],
     "In progress": ["Ready", "Blocked", "Done", "Dismissed"],
-    Blocked: ["Researching", "Ready", "In progress", "Dismissed"],
+    Blocked: ["Researching", "Ready", "Dismissed"],
     Done: ["Ready"],
     Dismissed: ["Ready"],
   };
@@ -189,6 +189,35 @@ describe("T-004 lifecycle authority", () => {
         code: "INVALID_STATUS_TRANSITION",
       });
     }
+  });
+
+  it("requires the Researching phase and a non-empty Research note before Ready", async () => {
+    let item = await createItem();
+    expect((await move(item, "Ready", {}, 422)).json()).toMatchObject({
+      code: "RESEARCH_PHASE_REQUIRED",
+      errors: { status: expect.any(Array) },
+    });
+
+    const stored = await prisma!.actionable.update({
+      where: { sourceOrdinal: item.id },
+      data: { researchJson: [] },
+    });
+    expect(stored.version).toBe(item.version);
+    item = (await move(item, "Researching")).json().item;
+    expect((await move(item, "Ready", {}, 422)).json()).toMatchObject({
+      code: "RESEARCH_REQUIRED",
+      errors: {
+        research: expect.any(Array),
+        status: expect.any(Array),
+      },
+    });
+  });
+
+  it("allows In progress only from Ready", async () => {
+    const blocked = await prepareStatus("Blocked");
+    expect((await move(blocked, "In progress", {}, 422)).json()).toMatchObject({
+      code: "INVALID_STATUS_TRANSITION",
+    });
   });
 
   it("requires blocker, dismissal, reopening, and override evidence", async () => {

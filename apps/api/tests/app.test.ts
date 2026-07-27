@@ -771,6 +771,50 @@ describe("Actionables API", () => {
     });
   });
 
+  it("does not bypass the research-first lifecycle through a same-save status edit", async () => {
+    const fields = {
+      ...createBody("Research-first edit"),
+      finding: "The shared lifecycle guard must cover edits.",
+      description: "Prevent status edits from bypassing research.",
+      validation: ["Run the API lifecycle tests."],
+    };
+    const created = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: fields,
+    });
+    let item = created.json().item;
+
+    const skippedResearch = await app!.inject({
+      method: "PATCH",
+      url: `/api/actionables/${item.id}`,
+      payload: { ...fields, version: item.version, status: "Ready" },
+    });
+    expect(skippedResearch.statusCode).toBe(422);
+    expect(skippedResearch.json()).toMatchObject({
+      code: "RESEARCH_PHASE_REQUIRED",
+    });
+
+    const researching = await app!.inject({
+      method: "PATCH",
+      url: `/api/actionables/${item.id}`,
+      payload: { ...fields, version: item.version, status: "Researching" },
+    });
+    expect(researching.statusCode).toBe(200);
+    item = researching.json().item;
+
+    const missingResearch = await app!.inject({
+      method: "PATCH",
+      url: `/api/actionables/${item.id}`,
+      payload: { ...fields, version: item.version, status: "Ready" },
+    });
+    expect(missingResearch.statusCode).toBe(422);
+    expect(missingResearch.json()).toMatchObject({
+      code: "RESEARCH_REQUIRED",
+      errors: { research: expect.any(Array) },
+    });
+  });
+
   it("performs every approved triage transition and rejects unavailable transitions", async () => {
     const created = await app!.inject({
       method: "POST",
@@ -779,6 +823,7 @@ describe("Actionables API", () => {
         ...createBody("Transition matrix"),
         finding: "The item has a finding.",
         description: "The item has a bounded result.",
+        research: ["The transition paths were reviewed."],
         validation: ["Verify the result."],
       },
     });
@@ -798,6 +843,7 @@ describe("Actionables API", () => {
     await transition("Researching");
     await transition("Ready");
     await transition("Inbox");
+    await transition("Researching");
     await transition("Ready");
     await transition("Researching");
     await transition("Inbox");
@@ -811,16 +857,30 @@ describe("Actionables API", () => {
     expect(sameStatus.json()).toMatchObject({
       code: "INVALID_STATUS_TRANSITION",
     });
-    expect(item.statusHistory).toHaveLength(7);
+    expect(item.statusHistory).toHaveLength(8);
   });
 
   it("requires finding, description, and validation before Ready", async () => {
     const created = await app!.inject({
       method: "POST",
       url: "/api/actionables",
-      payload: createBody("Not ready yet"),
+      payload: {
+        ...createBody("Not ready yet"),
+        research: ["The missing readiness fields were reviewed."],
+      },
     });
-    const item = created.json().item;
+    let item = created.json().item;
+    const researching = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/status-transitions`,
+      payload: {
+        version: item.version,
+        status: "Researching",
+        origin: "user",
+      },
+    });
+    expect(researching.statusCode).toBe(200);
+    item = researching.json().item;
 
     const response = await app!.inject({
       method: "POST",

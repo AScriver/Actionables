@@ -1,11 +1,11 @@
 import { statusSchema, type Status } from "@actionables/contracts";
 
 const transitionMatrix: Readonly<Record<Status, readonly Status[]>> = {
-  Inbox: ["Researching", "Ready", "Dismissed"],
+  Inbox: ["Researching", "Dismissed"],
   Researching: ["Inbox", "Ready", "Blocked", "Dismissed"],
   Ready: ["Inbox", "Researching", "In progress", "Blocked", "Dismissed"],
   "In progress": ["Ready", "Blocked", "Done", "Dismissed"],
-  Blocked: ["Researching", "Ready", "In progress", "Dismissed"],
+  Blocked: ["Researching", "Ready", "Dismissed"],
   Done: ["Ready"],
   Dismissed: ["Ready"],
 };
