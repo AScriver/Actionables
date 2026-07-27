@@ -33,7 +33,7 @@ import {
   releaseAgentTaskClaim,
   renewAgentTaskClaim,
   transitionClaimedAgentTask,
-  updateClaimedAgentTask,
+  updateClaimedAgentTaskWithReceipt,
 } from "./agent-tasks.js";
 import { DomainValidationError, VersionConflictError } from "./repository.js";
 
@@ -231,6 +231,28 @@ const compactTaskSchema = z
       .strict(),
   })
   .strict();
+
+const researchUpdateReceiptSchema = z
+  .object({
+    id: z.number().int().positive(),
+    version: z.number().int().positive(),
+    status: z.string().max(40),
+    appended: z.number().int().nonnegative(),
+    duplicatesIgnored: z.number().int().nonnegative(),
+    lifecycleGuidance: z.string().min(1).max(600).optional(),
+  })
+  .strict();
+
+const updateTaskOutputSchema = compactTaskSchema.partial().extend({
+  id: compactTaskSchema.shape.id,
+  version: compactTaskSchema.shape.version,
+  status: compactTaskSchema.shape.status,
+  appended: researchUpdateReceiptSchema.shape.appended.optional(),
+  duplicatesIgnored:
+    researchUpdateReceiptSchema.shape.duplicatesIgnored.optional(),
+  lifecycleGuidance:
+    researchUpdateReceiptSchema.shape.lifecycleGuidance.optional(),
+});
 
 const claimTaskOutputSchema = z
   .object({
@@ -634,15 +656,36 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Update claimed Actionable",
       description:
-        "Update only supplied user-authored task fields using the claim token and latest version. Prefer append fields when adding research, planned checks, or sources.",
+        "Update only supplied user-authored task fields using the claim token and latest version. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts; newly persisted research on a Researching task also returns conditional lifecycle guidance.",
       inputSchema: updateTaskSchema,
-      outputSchema: compactTaskSchema,
+      outputSchema: updateTaskOutputSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(async () =>
-        compactTask(await updateClaimedAgentTask(prisma, id, input)),
-      ),
+      runTool(async () => {
+        const result = await updateClaimedAgentTaskWithReceipt(
+          prisma,
+          id,
+          input,
+        );
+        if (!result.researchAppend) return compactTask(result.task);
+        const shouldGuideLifecycle =
+          result.researchAppend.appended > 0 &&
+          result.task.status === "Researching";
+        return researchUpdateReceiptSchema.parse({
+          id: result.task.id,
+          version: result.task.version,
+          status: result.task.status,
+          appended: result.researchAppend.appended,
+          duplicatesIgnored: result.researchAppend.duplicatesIgnored,
+          ...(shouldGuideLifecycle
+            ? {
+                lifecycleGuidance:
+                  "Keep this task Researching and record remaining questions and the next research step when investigation remains; otherwise transition it to Ready before reporting research complete. Do not force a transition solely because a turn ended.",
+              }
+            : {}),
+        });
+      }),
   );
   server.registerTool(
     "actionables.transition_task",

@@ -804,7 +804,11 @@ describe("agent task claims", () => {
       {
         claimToken: claimed.claim.claimToken,
         version: updatedPlanAndSources.version,
-        appendResearch: ["Additional research"],
+        appendResearch: [
+          "New research",
+          "Additional research",
+          "Additional research",
+        ],
         appendPlannedValidation: ["Run the second focused check."],
         addUserSources: [
           {

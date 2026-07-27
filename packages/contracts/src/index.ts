@@ -779,7 +779,9 @@ export const updateClaimedAgentTaskRequestSchema = z
       ),
     appendResearch: notesSchema
       .optional()
-      .describe("Append research notes while preserving existing notes."),
+      .describe(
+        "Append exact-deduplicated research notes while preserving existing notes.",
+      ),
     plannedValidation: notesSchema
       .optional()
       .describe(

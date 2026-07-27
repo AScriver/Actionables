@@ -886,7 +886,6 @@ describe("Actionables MCP", () => {
             ...credentials,
             version: inProgress.version,
             finding: "The official MCP client completed a real request.",
-            appendResearch: ["The stateless JSON transport is interoperable."],
           },
         }),
       );
@@ -926,6 +925,140 @@ describe("Actionables MCP", () => {
       expect(released.task).toMatchObject({
         claim: null,
         version: validated.version + 1,
+      });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("returns lean authoritative research receipts with conditional lifecycle guidance", async () => {
+    const researchingTask = await createTask({
+      status: "Researching",
+      title: "Research receipt",
+    });
+    await prisma.actionable.update({
+      where: { id: researchingTask.id },
+      data: { researchJson: json(["Existing note"]) },
+    });
+    const readyTask = await createTask({
+      status: "Ready",
+      title: "Ready research receipt",
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const researchingClaim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: researchingTask.sourceOrdinal,
+            workItemId: researchingTask.sourceOrdinal,
+            version: researchingTask.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: researchingTask.sourceOrdinal,
+        claimToken: researchingClaim.claim.claimToken,
+      };
+
+      const mixed = output<{
+        id: number;
+        version: number;
+        status: string;
+        appended: number;
+        duplicatesIgnored: number;
+        lifecycleGuidance?: string;
+      }>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: researchingClaim.task.version,
+            appendResearch: [
+              "Existing note",
+              "New note",
+              "New note",
+              "Another note",
+            ],
+          },
+        }),
+      );
+      expect(mixed).toEqual({
+        id: researchingTask.sourceOrdinal,
+        version: researchingClaim.task.version + 1,
+        status: "Researching",
+        appended: 2,
+        duplicatesIgnored: 2,
+        lifecycleGuidance: expect.any(String),
+      });
+      expect(mixed.lifecycleGuidance).toContain("Keep this task Researching");
+      expect(mixed.lifecycleGuidance).toContain("remaining questions");
+      expect(mixed.lifecycleGuidance).toContain("next research step");
+      expect(mixed.lifecycleGuidance).toContain(
+        "otherwise transition it to Ready",
+      );
+      expect(mixed.lifecycleGuidance).toContain(
+        "Do not force a transition solely because a turn ended",
+      );
+      expect(
+        (
+          await prisma.actionable.findUniqueOrThrow({
+            where: { id: researchingTask.id },
+          })
+        ).researchJson,
+      ).toEqual(["Existing note", "New note", "Another note"]);
+
+      const duplicatesOnly = output<Record<string, unknown>>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: mixed.version,
+            appendResearch: ["Existing note", "New note"],
+          },
+        }),
+      );
+      expect(duplicatesOnly).toEqual({
+        id: researchingTask.sourceOrdinal,
+        version: mixed.version + 1,
+        status: "Researching",
+        appended: 0,
+        duplicatesIgnored: 2,
+      });
+
+      const readyClaim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: readyTask.sourceOrdinal,
+            workItemId: readyTask.sourceOrdinal,
+            version: readyTask.version,
+          },
+        }),
+      );
+      const readyReceipt = output<Record<string, unknown>>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            id: readyTask.sourceOrdinal,
+            claimToken: readyClaim.claim.claimToken,
+            version: readyClaim.task.version,
+            appendResearch: ["Ready-state note"],
+          },
+        }),
+      );
+      expect(readyReceipt).toEqual({
+        id: readyTask.sourceOrdinal,
+        version: readyClaim.task.version + 1,
+        status: "Ready",
+        appended: 1,
+        duplicatesIgnored: 0,
       });
     } finally {
       await transport.close();

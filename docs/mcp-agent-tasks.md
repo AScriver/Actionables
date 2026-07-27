@@ -73,7 +73,17 @@ Claim tokens are secret capabilities. Do not put them in chat, code, files, logs
 
 After claim, the token identifies the stored agent claim. Get, update, transition, validation, and release calls do not repeat `agentId`; only explicit renewal accepts a new `leaseMinutes`. Successful mutations use the server's default renewal period.
 
-Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate added source references are ignored.
+Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate appended research notes and added source references are ignored.
+
+An `actionables.update_task` call with `appendResearch` returns only the
+authoritative research mutation receipt: `id`, latest `version`, current
+`status`, `appended`, and `duplicatesIgnored`. When at least one note was
+persisted and the resulting status remains `Researching`, the receipt also
+includes `lifecycleGuidance`: keep the task `Researching` and record remaining
+questions and the next research step while investigation remains; otherwise
+transition it to `Ready` before reporting research complete. A turn ending
+alone does not force that transition. Updates without `appendResearch` retain
+the compact task response.
 
 The endpoint exposes exactly these tools:
 

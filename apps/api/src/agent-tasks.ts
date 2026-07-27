@@ -103,6 +103,13 @@ type AgentTaskMutationRow = Prisma.ActionableGetPayload<{
   include: typeof agentTaskMutationInclude;
 }>;
 type TransactionClient = Prisma.TransactionClient;
+export type UpdateClaimedAgentTaskResult = {
+  task: ActionableDetail;
+  researchAppend?: {
+    appended: number;
+    duplicatesIgnored: number;
+  };
+};
 
 export class AgentTaskClaimError extends Error {
   constructor(
@@ -507,6 +514,20 @@ function appendUniqueUserSources<
       return true;
     }),
   ];
+}
+
+function appendUniqueStrings(current: string[], additions: string[]) {
+  const seen = new Set(current);
+  const appended = additions.filter((addition) => {
+    if (seen.has(addition)) return false;
+    seen.add(addition);
+    return true;
+  });
+  return {
+    values: [...current, ...appended],
+    appended: appended.length,
+    duplicatesIgnored: additions.length - appended.length,
+  };
 }
 
 async function renewClaimAfterMutation(
@@ -1087,12 +1108,12 @@ export async function getClaimedAgentTask(
   return result.task;
 }
 
-export async function updateClaimedAgentTask(
+async function updateClaimedAgentTaskResult(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: UpdateClaimedAgentTaskRequest,
   now = new Date(),
-): Promise<ActionableDetail> {
+): Promise<UpdateClaimedAgentTaskResult> {
   const request = parseInput(updateClaimedAgentTaskRequestSchema, input);
   return runClaimedMutation(
     prisma,
@@ -1107,6 +1128,9 @@ export async function updateClaimedAgentTask(
       }));
       const currentResearch = persistedStringArray(row.researchJson);
       const currentPlannedValidation = persistedStringArray(row.validationJson);
+      const researchAppend = request.appendResearch
+        ? appendUniqueStrings(currentResearch, request.appendResearch)
+        : undefined;
       const update = parseInput(updateActionableRequestSchema, {
         version: request.version,
         title: request.title ?? row.title,
@@ -1119,11 +1143,7 @@ export async function updateClaimedAgentTask(
         status: row.status,
         finding: request.finding ?? row.finding,
         description: request.description ?? row.description,
-        research:
-          request.research ??
-          (request.appendResearch
-            ? [...currentResearch, ...request.appendResearch]
-            : currentResearch),
+        research: request.research ?? researchAppend?.values ?? currentResearch,
         validation:
           request.plannedValidation ??
           (request.appendPlannedValidation
@@ -1168,9 +1188,38 @@ export async function updateClaimedAgentTask(
         },
       });
       await renewClaimAfterMutation(tx, row, now);
-      return saved;
+      return {
+        task: saved,
+        ...(researchAppend
+          ? {
+              researchAppend: {
+                appended: researchAppend.appended,
+                duplicatesIgnored: researchAppend.duplicatesIgnored,
+              },
+            }
+          : {}),
+      };
     },
   );
+}
+
+export async function updateClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: UpdateClaimedAgentTaskRequest,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  return (await updateClaimedAgentTaskResult(prisma, sourceOrdinal, input, now))
+    .task;
+}
+
+export function updateClaimedAgentTaskWithReceipt(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: UpdateClaimedAgentTaskRequest,
+  now = new Date(),
+) {
+  return updateClaimedAgentTaskResult(prisma, sourceOrdinal, input, now);
 }
 
 export async function transitionClaimedAgentTask(
