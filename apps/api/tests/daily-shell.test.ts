@@ -258,7 +258,7 @@ describe("daily-use shell queries and archive policy", () => {
       "manual-blocked": 1,
       "dependency-blocked": 1,
       "awaiting-validation": 1,
-      "recently-updated": 10,
+      "recently-updated": 9,
       "recently-completed": 1,
       reopened: 1,
     });
@@ -274,6 +274,68 @@ describe("daily-use shell queries and archive policy", () => {
       });
       expect(list.statusCode).toBe(200);
       expect(list.json().result.matched).toBe(queue.count);
+    }
+  });
+
+  it("excludes terminal tasks by default and keeps explicit terminal discovery", async () => {
+    const active = await app.inject({
+      method: "GET",
+      url: "/api/actionables",
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.json().result).toMatchObject({
+      matched: 9,
+      scopeTotal: 10,
+      normalizedQuery: {},
+    });
+    expect(
+      active.json().items.map((item: { status: string }) => item.status),
+    ).not.toContain("Done");
+
+    const done = await app.inject({
+      method: "GET",
+      url: "/api/actionables?status=Done",
+    });
+    expect(done.json().items.map((item: { id: number }) => item.id)).toEqual([
+      8,
+    ]);
+
+    const all = await app.inject({
+      method: "GET",
+      url: "/api/actionables?status=all",
+    });
+    expect(all.json().result).toMatchObject({
+      matched: 10,
+      normalizedQuery: { status: "all" },
+    });
+
+    await prisma.actionable.update({
+      where: { sourceOrdinal: 8 },
+      data: { status: "Dismissed" },
+    });
+    try {
+      const dismissedDefault = await app.inject({
+        method: "GET",
+        url: "/api/actionables",
+      });
+      expect(
+        dismissedDefault
+          .json()
+          .items.map((item: { status: string }) => item.status),
+      ).not.toContain("Dismissed");
+
+      const dismissed = await app.inject({
+        method: "GET",
+        url: "/api/actionables?status=Dismissed",
+      });
+      expect(
+        dismissed.json().items.map((item: { id: number }) => item.id),
+      ).toEqual([8]);
+    } finally {
+      await prisma.actionable.update({
+        where: { sourceOrdinal: 8 },
+        data: { status: "Done" },
+      });
     }
   });
 

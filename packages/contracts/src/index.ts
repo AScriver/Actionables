@@ -383,12 +383,15 @@ export const actionableSortSchema = z.enum([
 export const archivedFilterSchema = z.enum(["active", "archived", "all"]);
 export const parentFilterSchema = z.enum(["all", "top-level", "subtasks"]);
 export const booleanFilterSchema = z.enum(["all", "yes", "no"]);
+export const actionableStatusFilterSchema = statusSchema.or(
+  z.enum(["active", "all"]),
+);
 
 export const actionableQuerySchema = z.object({
   project: z.string().default(""),
   repository: z.string().default(""),
   worktree: z.string().default(""),
-  status: statusSchema.optional(),
+  status: actionableStatusFilterSchema.default("active"),
   manualBlocked: booleanFilterSchema.default("all"),
   dependencyBlocked: booleanFilterSchema.default("all"),
   priority: prioritySchema.optional(),

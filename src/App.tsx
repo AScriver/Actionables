@@ -4839,7 +4839,8 @@ export default function App() {
     Object.entries(patch).forEach(([key, value]) => {
       if (
         !value ||
-        value === "all" ||
+        (value === "all" && key !== "status") ||
+        (key === "status" && value === "active") ||
         (key === "archived" && value === "active") ||
         (key === "sort" && value === "priority")
       ) {
@@ -5873,12 +5874,13 @@ export default function App() {
                   <label>
                     Status
                     <select
-                      value={query.status ?? ""}
+                      value={query.status ?? "active"}
                       onChange={(event) =>
                         patchQuery({ status: event.target.value })
                       }
                     >
-                      <option value="">All</option>
+                      <option value="active">Active</option>
+                      <option value="all">All</option>
                       {[
                         "Inbox",
                         "Researching",

@@ -508,6 +508,10 @@ const statusRank = new Map(
   ].map((value, index) => [value, index]),
 );
 
+function isTerminalStatus(status: string) {
+  return status === "Done" || status === "Dismissed";
+}
+
 function boolMatch(filter: "all" | "yes" | "no", value: boolean) {
   return filter === "all" || (filter === "yes" ? value : !value);
 }
@@ -544,7 +548,11 @@ function matchesQuery(row: ActionableRow, query: ActionableQuery) {
   if (query.project && row.project.id !== query.project) return false;
   if (query.repository && row.repository.id !== query.repository) return false;
   if (query.worktree && row.worktree.id !== query.worktree) return false;
-  if (query.status && summary.status !== query.status) return false;
+  if (query.status === "active") {
+    if (isTerminalStatus(summary.status)) return false;
+  } else if (query.status !== "all" && summary.status !== query.status) {
+    return false;
+  }
   if (!boolMatch(query.manualBlocked, summary.status === "Blocked"))
     return false;
   if (!boolMatch(query.dependencyBlocked, summary.isDependencyBlocked))
@@ -607,7 +615,7 @@ export function actionableQueryRecord(query: ActionableQuery) {
   if (query.project) values.project = query.project;
   if (query.repository) values.repository = query.repository;
   if (query.worktree) values.worktree = query.worktree;
-  if (query.status) values.status = query.status;
+  if (query.status !== "active") values.status = query.status;
   if (query.manualBlocked !== "all") values.manualBlocked = query.manualBlocked;
   if (query.dependencyBlocked !== "all")
     values.dependencyBlocked = query.dependencyBlocked;
@@ -666,6 +674,7 @@ export async function listActionablesWithQuery(
     repository: query.repository,
     worktree: query.worktree,
     archived: query.archived,
+    status: "all",
   });
   const scopeTotal = rows.filter((row) => matchesQuery(row, scopeQuery)).length;
   return actionablesListResponseSchema.parse({
@@ -1045,7 +1054,7 @@ export async function getDashboard(
       "Recently updated",
       "Most recently changed active items.",
       { sort: "updated-desc" },
-      recent(() => true),
+      recent((row) => !isTerminalStatus(row.status)),
     ),
     queue(
       "recently-completed",

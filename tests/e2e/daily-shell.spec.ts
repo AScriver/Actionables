@@ -63,6 +63,12 @@ test("filters, search, sort, selection, refresh, and history are URL-backed", as
   ).toBeVisible();
 
   await page.getByRole("button", { name: /Filters/ }).click();
+  const status = page.getByLabel("Status");
+  await expect(status).toHaveValue("active");
+  await status.selectOption("all");
+  await expect(page).toHaveURL(/status=all/);
+  await status.selectOption("active");
+  await expect(page).not.toHaveURL(/status=/);
   await page.getByLabel("Priority").selectOption("Critical");
   await expect(page).toHaveURL(/priority=Critical/);
 
