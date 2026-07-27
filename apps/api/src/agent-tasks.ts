@@ -685,6 +685,7 @@ function agentTaskCreateFingerprint(request: CreateAgentTaskRequest) {
   return hashToken(
     JSON.stringify({
       parentId: request.parentId ?? null,
+      workItemId: request.workItemId ?? null,
       projectId: request.projectId ?? null,
       repositoryId: request.repositoryId ?? null,
       worktreeId: request.worktreeId ?? null,
@@ -1050,6 +1051,18 @@ export async function createAgentTask(
           "NOT_FOUND",
           "The requested parent Actionable was not found.",
           { parentId: ["Choose an existing Actionable."] },
+        );
+      }
+      const workItem = await requireWorkItem(prisma, request.workItemId!);
+      if (parent.recordId !== workItem.id) {
+        throw new AgentTaskClaimError(
+          "INVALID_REQUEST",
+          "The requested parent is not the authorized feature or bug work item.",
+          {
+            parentId: [
+              `Choose top-level Actionable ${workItem.sourceOrdinal} as the parent.`,
+            ],
+          },
         );
       }
       await createSubtask(

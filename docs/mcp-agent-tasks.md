@@ -38,7 +38,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide `parentId` without placement fields. Reuse the UUID only for an exact retry.
+2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
 5. Start from the compact task detail returned by claim; fetch again only when reconciling newer state.
@@ -62,14 +62,14 @@ applied, so blocked tasks cannot hide safe work.
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
-verify creation. A child inherits its parent's project, repository, and
-worktree, and the one-level hierarchy rule prevents creating a grandchild. For
-a top-level task, existing scope IDs remain supported. When `repositoryPath`
-and `ensureScope: true` are supplied instead, the server verifies the local Git
-path, resolves its repository and worktree roots, reuses matching active scope
-records, and atomically creates any missing project, repository, or worktree
-with the task. The response reports which scope records were created. Creation
-does not claim the new task.
+verify creation. A child can be created only when `workItemId` and `parentId`
+identify the same active, top-level Actionable; it inherits that parent's
+project, repository, and worktree. For a top-level task, existing scope IDs
+remain supported. When `repositoryPath` and `ensureScope: true` are supplied
+instead, the server verifies the local Git path, resolves its repository and
+worktree roots, reuses matching active scope records, and atomically creates
+any missing project, repository, or worktree with the task. The response
+reports which scope records were created. Creation does not claim the new task.
 
 `actionables.dismiss_task` resolves the current version internally and reuses
 the same lifecycle, reason, optimistic-concurrency, status-history, and activity

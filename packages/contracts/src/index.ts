@@ -994,6 +994,14 @@ export const createAgentTaskRequestSchema = z
       .describe(
         "Optional parent Actionable ID. Omit for a top-level task; provide it for a direct subtask.",
       ),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Top-level feature or bug Actionable that authorizes direct-subtask creation. Required with parentId and must identify that parent.",
+      ),
     projectId: z
       .string()
       .trim()
@@ -1054,6 +1062,13 @@ export const createAgentTaskRequestSchema = z
     const hasRepositoryPlacement =
       input.repositoryPath !== undefined || input.ensureScope !== undefined;
     if (input.parentId === undefined) {
+      if (input.workItemId !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["workItemId"],
+          message: "workItemId must be omitted for a top-level task.",
+        });
+      }
       if (hasScopeIds && hasRepositoryPlacement) {
         for (const field of ["repositoryPath", "ensureScope"] as const) {
           context.addIssue({
@@ -1102,6 +1117,13 @@ export const createAgentTaskRequestSchema = z
         });
       }
       return;
+    }
+    if (input.workItemId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["workItemId"],
+        message: "workItemId is required with parentId.",
+      });
     }
     for (const field of [
       ...scopeFields,

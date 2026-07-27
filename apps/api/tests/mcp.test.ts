@@ -359,6 +359,7 @@ describe("Actionables MCP", () => {
       const childKey = randomUUID();
       const childArguments = {
         idempotencyKey: childKey,
+        workItemId: topLevel.id,
         parentId: topLevel.id,
         title: "Agent-created direct child",
         description: "Must inherit the parent scope.",
@@ -696,9 +697,15 @@ describe("Actionables MCP", () => {
         },
         {
           idempotencyKey: randomUUID(),
+          workItemId: root.sourceOrdinal,
           parentId: root.sourceOrdinal,
           ...scope,
           title: "Parent plus forbidden explicit scope",
+        },
+        {
+          idempotencyKey: randomUUID(),
+          parentId: root.sourceOrdinal,
+          title: "Parent without an authorized work item",
         },
         {
           idempotencyKey: randomUUID(),
@@ -719,6 +726,7 @@ describe("Actionables MCP", () => {
         },
         {
           idempotencyKey: randomUUID(),
+          workItemId: root.sourceOrdinal,
           parentId: 0,
           title: "Invalid parent ID",
         },
@@ -743,6 +751,7 @@ describe("Actionables MCP", () => {
           name: "actionables.create_task",
           arguments: {
             idempotencyKey: randomUUID(),
+            workItemId: 999_999,
             parentId: 999_999,
             title: "Unknown parent",
           },
@@ -779,6 +788,7 @@ describe("Actionables MCP", () => {
           name: "actionables.create_task",
           arguments: {
             idempotencyKey: randomUUID(),
+            workItemId: root.sourceOrdinal,
             parentId: root.sourceOrdinal,
             title: "Existing direct child",
           },
@@ -789,14 +799,15 @@ describe("Actionables MCP", () => {
           name: "actionables.create_task",
           arguments: {
             idempotencyKey: randomUUID(),
+            workItemId: root.sourceOrdinal,
             parentId: child.id,
             title: "Forbidden grandchild",
           },
         }),
       );
       expect(nested).toMatchObject({
-        code: "HIERARCHY_DEPTH_EXCEEDED",
-        errors: { parent: expect.any(Array) },
+        code: "INVALID_REQUEST",
+        errors: { parentId: expect.any(Array) },
       });
 
       const reusedKey = randomUUID();
