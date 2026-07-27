@@ -62,8 +62,11 @@ test("@a11y representative dashboard, list, detail, form, lifecycle, validation,
   await expectNoAxeViolations(page, "validation form");
   await inspector.getByRole("button", { name: "Cancel" }).click();
 
-  await inspector.getByRole("tab", { name: "Finding" }).click();
+  await inspector.getByRole("tab", { name: "Relationships" }).click();
   await expectNoAxeViolations(page, "subtasks and dependencies");
+
+  await inspector.getByRole("tab", { name: "Activity" }).click();
+  await expectNoAxeViolations(page, "activity timeline");
 
   const archiveButton = inspector.getByRole("button", {
     name: "Archive actionable",

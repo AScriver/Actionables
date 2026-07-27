@@ -12,9 +12,18 @@ async function createReadyCandidate(
   await page
     .locator("#description")
     .fill("Implement and preserve the bounded result.");
+  await page.locator("#research").fill("Focused browser research is complete.");
   await page.locator("#validation").fill("Run the focused suite");
   await page.getByRole("button", { name: "Create actionable" }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  const inspector = page.getByRole("complementary", {
+    name: "Selected actionable",
+  });
+  await inspector
+    .getByRole("button", { name: "Researching", exact: true })
+    .click();
+  await inspector.getByRole("button", { name: "Confirm Researching" }).click();
+  await expect(inspector.getByLabel(/^Researching\./)).toBeVisible();
 }
 
 test("lifecycle, append-only validation, safe Markdown, and sources persist through reload", async ({
@@ -109,6 +118,11 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
     safeSource.getByRole("link", { name: "Open source" }),
   ).toHaveAttribute("href", "https://example.test/evidence");
 
+  await inspector
+    .getByRole("button", { name: "Researching", exact: true })
+    .click();
+  await inspector.getByRole("button", { name: "Confirm Researching" }).click();
+  await expect(inspector.getByLabel(/^Researching\./)).toBeVisible();
   await inspector.getByRole("button", { name: "Ready", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm Ready" }).click();
   await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
@@ -151,6 +165,7 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   await inspector.getByRole("button", { name: "Done", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm Done" }).click();
   await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
+  await inspector.getByRole("tab", { name: "Activity" }).click();
   await expect(
     inspector.getByText("Completed with qualifying validation"),
   ).toBeVisible();
@@ -168,8 +183,12 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
     .fill("A new requirement needs another pass.");
   await inspector.getByRole("button", { name: "Confirm Ready" }).click();
   await inspector.getByRole("tab", { name: "Validation" }).click();
-  await expect(inspector.getByText("Reopened Done to Ready")).toBeVisible();
+  await expect(
+    inspector.getByRole("heading", { name: "Activity" }),
+  ).toHaveCount(0);
   await expect(inspector.locator(".validation-record")).toHaveCount(2);
+  await inspector.getByRole("tab", { name: "Activity" }).click();
+  await expect(inspector.getByText("Reopened Done to Ready")).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 
@@ -239,6 +258,11 @@ test("lifecycle controls remain usable at laptop and mobile sizes with keyboard 
   await expect(
     inspector.getByRole("heading", { name: "Validation records" }),
   ).toBeVisible();
+  await inspector.getByRole("tab", { name: "Activity" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    inspector.getByRole("heading", { name: "Activity" }),
+  ).toBeVisible();
   await page.screenshot({
     path: "output/playwright/t004-actionables-desktop.png",
     fullPage: true,
@@ -261,6 +285,10 @@ test("lifecycle controls remain usable at laptop and mobile sizes with keyboard 
   await expect(
     inspector.getByRole("tab", { name: "Validation" }),
   ).toBeVisible();
+  await expect(
+    inspector.getByRole("tab", { name: "Relationships" }),
+  ).toBeVisible();
+  await expect(inspector.getByRole("tab", { name: "Activity" })).toBeVisible();
   await page.screenshot({
     path: "output/playwright/t004-actionables-mobile.png",
     fullPage: true,

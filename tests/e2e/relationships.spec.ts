@@ -36,6 +36,13 @@ test("relationships remain compact, navigable, responsive, and derived-blocking 
   const prerequisite = await create("T-003 browser prerequisite");
 
   await page.goto(`/actionables/${dependent.id}`);
+  const inspector = page.getByRole("complementary", {
+    name: "Selected actionable",
+  });
+  await expect(
+    inspector.getByRole("heading", { name: /Blocked by/ }),
+  ).toHaveCount(0);
+  await inspector.getByRole("tab", { name: "Relationships" }).click();
   await page
     .getByLabel("Prerequisite actionable")
     .selectOption(String(prerequisite.id));
@@ -78,6 +85,7 @@ test("relationships remain compact, navigable, responsive, and derived-blocking 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
+  await inspector.getByRole("tab", { name: "Relationships" }).click();
   await expect(
     page.getByRole("heading", { name: /Blocked by 1/ }),
   ).toBeVisible();

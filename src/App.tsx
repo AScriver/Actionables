@@ -101,7 +101,8 @@ import {
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
-type InspectorTab = "finding" | "research" | "validation";
+type InspectorTab =
+  "finding" | "research" | "validation" | "relationships" | "activity";
 type PriorityFilter = "All" | Priority;
 
 const inspectorWidthStorageKey = "actionables-inspector-width";
@@ -1952,24 +1953,26 @@ function Inspector({
         aria-label="Actionable detail"
         role="tablist"
       >
-        {(["finding", "research", "validation"] as InspectorTab[]).map(
-          (tab) => (
-            <button
-              type="button"
-              key={tab}
-              className={activeTab === tab ? "is-active" : ""}
-              aria-selected={activeTab === tab}
-              role="tab"
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab === "finding"
-                ? "Finding"
-                : tab === "research"
-                  ? "Research notes"
-                  : "Validation"}
-            </button>
-          ),
-        )}
+        {(
+          [
+            ["finding", "Finding"],
+            ["research", "Research notes"],
+            ["validation", "Validation"],
+            ["relationships", "Relationships"],
+            ["activity", "Activity"],
+          ] satisfies [InspectorTab, string][]
+        ).map(([tab, label]) => (
+          <button
+            type="button"
+            key={tab}
+            className={activeTab === tab ? "is-active" : ""}
+            aria-selected={activeTab === tab}
+            role="tab"
+            onClick={() => setActiveTab(tab)}
+          >
+            {label}
+          </button>
+        ))}
       </nav>
 
       <div className="inspector-content">
@@ -2043,12 +2046,6 @@ function Inspector({
                 <p>No validation plan yet.</p>
               )}
             </section>
-            <RelationshipSection
-              selected={selected}
-              actionables={actionables}
-              onNavigate={onNavigate}
-              onMutated={onMutated}
-            />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -2073,12 +2070,6 @@ function Inspector({
                 onMutated={onMutated}
               />
             )}
-            <RelationshipSection
-              selected={selected}
-              actionables={actionables}
-              onNavigate={onNavigate}
-              onMutated={onMutated}
-            />
             <SourceHistory selected={selected} onNotice={onNotice} />
           </>
         )}
@@ -2112,9 +2103,19 @@ function Inspector({
               selected={selected}
               onMutated={onMutated}
             />
-            <ActivityTimeline selected={selected} />
           </>
         )}
+
+        {activeTab === "relationships" && (
+          <RelationshipSection
+            selected={selected}
+            actionables={actionables}
+            onNavigate={onNavigate}
+            onMutated={onMutated}
+          />
+        )}
+
+        {activeTab === "activity" && <ActivityTimeline selected={selected} />}
       </div>
     </>
   );
