@@ -852,6 +852,8 @@ export async function getDashboard(
   prisma: AppPrismaClient,
   scope: Pick<ActionableQuery, "project" | "repository" | "worktree">,
 ): Promise<DashboardResponse> {
+  const now = new Date();
+  const expiringClaimCutoff = new Date(now.getTime() + 10 * 60_000);
   const rows = (await allActionableRows(prisma)).filter(
     (row) =>
       (!scope.project || row.projectId === scope.project) &&
@@ -888,6 +890,96 @@ export async function getDashboard(
 
   const byOrdinal = (items: ActionableRow[]) =>
     [...items].sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
+  const byClaimExpiry = (items: ActionableRow[]) =>
+    [...items].sort(
+      (left, right) =>
+        left.agentTaskClaim!.leaseExpiresAt.getTime() -
+          right.agentTaskClaim!.leaseExpiresAt.getTime() ||
+        left.sourceOrdinal - right.sourceOrdinal,
+    );
+  const alert = (
+    key: DashboardResponse["alerts"][number]["key"],
+    label: string,
+    description: string,
+    tone: DashboardResponse["alerts"][number]["tone"],
+    matching: ActionableRow[],
+    detail: (row: ActionableRow) => string,
+  ): DashboardResponse["alerts"][number] => ({
+    key,
+    label,
+    description,
+    tone,
+    count: matching.length,
+    items: matching.slice(0, 6).map((row) => ({
+      actionable: summaries.get(row.id)!,
+      detail: detail(row),
+      dueAt: row.agentTaskClaim?.leaseExpiresAt.toISOString() ?? null,
+    })),
+  });
+  const blockedRows = byOrdinal(
+    rows.filter((row) => summaries.get(row.id)!.isEffectivelyBlocked),
+  );
+  const missingValidationRows = byOrdinal(
+    rows.filter(
+      (row) =>
+        row.status === "In progress" && !latestQualifyingValidationId(row),
+    ),
+  );
+  const alerts: DashboardResponse["alerts"] = [
+    alert(
+      "expiring-claims",
+      "Claims expiring soon",
+      "Active agent leases with 10 minutes or less remaining.",
+      "warning",
+      byClaimExpiry(
+        rows.filter(
+          (row) =>
+            row.agentTaskClaim &&
+            row.agentTaskClaim.leaseExpiresAt > now &&
+            row.agentTaskClaim.leaseExpiresAt <= expiringClaimCutoff,
+        ),
+      ),
+      (row) =>
+        `${row.agentTaskClaim!.agentId} · expires ${row.agentTaskClaim!.leaseExpiresAt.toLocaleTimeString()}`,
+    ),
+    alert(
+      "blocked-work",
+      "Blocked work",
+      "Tasks stopped by a manual blocker or unresolved prerequisite.",
+      "critical",
+      blockedRows,
+      (row) => {
+        const summary = summaries.get(row.id)!;
+        if (row.status === "Blocked" && summary.unresolvedDependencyCount > 0) {
+          return `Manual blocker · ${summary.unresolvedDependencyCount} unresolved prerequisite${summary.unresolvedDependencyCount === 1 ? "" : "s"}`;
+        }
+        if (row.status === "Blocked") return "Manual blocker";
+        return `${summary.unresolvedDependencyCount} unresolved prerequisite${summary.unresolvedDependencyCount === 1 ? "" : "s"}`;
+      },
+    ),
+    alert(
+      "missing-validation",
+      "Missing validation",
+      "In-progress work without a qualifying Passed result.",
+      "warning",
+      missingValidationRows,
+      () => "No qualifying Passed result since work started",
+    ),
+    alert(
+      "abandoned-sessions",
+      "Abandoned sessions",
+      "Expired agent leases that still need reconciliation.",
+      "critical",
+      byClaimExpiry(
+        rows.filter(
+          (row) =>
+            row.agentTaskClaim && row.agentTaskClaim.leaseExpiresAt <= now,
+        ),
+      ),
+      (row) =>
+        `${row.agentTaskClaim!.agentId} · expired ${row.agentTaskClaim!.leaseExpiresAt.toLocaleString()}`,
+    ),
+  ];
   const queues: DashboardResponse["queues"] = [
     queue(
       "inbox",
@@ -980,6 +1072,7 @@ export async function getDashboard(
   ).length;
   return dashboardResponseSchema.parse({
     counts: { total: rows.length, topLevel, nested: rows.length - topLevel },
+    alerts,
     queues,
   });
 }

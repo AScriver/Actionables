@@ -143,6 +143,27 @@ beforeAll(async () => {
   const rows = await prisma.actionable.findMany({
     orderBy: { sourceOrdinal: "asc" },
   });
+  const claimReferenceTime = Date.now();
+  await prisma.agentTaskClaim.createMany({
+    data: [
+      {
+        actionableId: rows[0]!.id,
+        agentId: "agent:expiring",
+        claimTokenHash: "expiring-claim-token-hash",
+        claimedAt: new Date(claimReferenceTime - 25 * 60_000),
+        renewedAt: new Date(claimReferenceTime - 25 * 60_000),
+        leaseExpiresAt: new Date(claimReferenceTime + 5 * 60_000),
+      },
+      {
+        actionableId: rows[1]!.id,
+        agentId: "agent:abandoned",
+        claimTokenHash: "abandoned-claim-token-hash",
+        claimedAt: new Date(claimReferenceTime - 35 * 60_000),
+        renewedAt: new Date(claimReferenceTime - 35 * 60_000),
+        leaseExpiresAt: new Date(claimReferenceTime - 5 * 60_000),
+      },
+    ],
+  });
   await prisma.hierarchyRelationship.create({
     data: { parentId: rows[2]!.id, childId: rows[10]!.id },
   });
@@ -181,6 +202,47 @@ describe("daily-use shell queries and archive policy", () => {
     expect(response.statusCode).toBe(200);
     const dashboard = response.json();
     expect(dashboard.counts).toEqual({ total: 10, topLevel: 9, nested: 1 });
+    expect(
+      Object.fromEntries(
+        dashboard.alerts.map((alert: { key: string; count: number }) => [
+          alert.key,
+          alert.count,
+        ]),
+      ),
+    ).toEqual({
+      "expiring-claims": 1,
+      "blocked-work": 2,
+      "missing-validation": 1,
+      "abandoned-sessions": 1,
+    });
+    expect(
+      dashboard.alerts.find(
+        (alert: { key: string }) => alert.key === "expiring-claims",
+      ),
+    ).toMatchObject({
+      tone: "warning",
+      items: [
+        {
+          actionable: { id: 1 },
+          detail: expect.stringContaining("agent:expiring"),
+          dueAt: expect.any(String),
+        },
+      ],
+    });
+    expect(
+      dashboard.alerts.find(
+        (alert: { key: string }) => alert.key === "abandoned-sessions",
+      ),
+    ).toMatchObject({
+      tone: "critical",
+      items: [
+        {
+          actionable: { id: 2 },
+          detail: expect.stringContaining("agent:abandoned"),
+          dueAt: expect.any(String),
+        },
+      ],
+    });
     expect(
       Object.fromEntries(
         dashboard.queues.map((queue: { key: string; count: number }) => [

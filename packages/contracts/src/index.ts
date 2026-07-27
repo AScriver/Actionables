@@ -424,12 +424,35 @@ export const dashboardQueueSchema = z.object({
   items: z.array(actionableSummarySchema),
 });
 
+export const dashboardAlertKeySchema = z.enum([
+  "expiring-claims",
+  "blocked-work",
+  "missing-validation",
+  "abandoned-sessions",
+]);
+
+export const dashboardAlertItemSchema = z.object({
+  actionable: actionableSummarySchema,
+  detail: z.string().min(1),
+  dueAt: z.string().datetime().nullable(),
+});
+
+export const dashboardAlertSchema = z.object({
+  key: dashboardAlertKeySchema,
+  label: z.string().min(1),
+  description: z.string().min(1),
+  tone: z.enum(["warning", "critical"]),
+  count: z.number().int().nonnegative(),
+  items: z.array(dashboardAlertItemSchema),
+});
+
 export const dashboardResponseSchema = z.object({
   counts: z.object({
     total: z.number().int().nonnegative(),
     topLevel: z.number().int().nonnegative(),
     nested: z.number().int().nonnegative(),
   }),
+  alerts: z.array(dashboardAlertSchema),
   queues: z.array(dashboardQueueSchema),
 });
 

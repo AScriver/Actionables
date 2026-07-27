@@ -3564,6 +3564,10 @@ function DashboardPanel({
       </div>
     );
   }
+  const alertCount = data.alerts.reduce(
+    (total, alert) => total + alert.count,
+    0,
+  );
   return (
     <section className="dashboard-panel" aria-labelledby="dashboard-title">
       <header className="dashboard-heading">
@@ -3586,6 +3590,58 @@ function DashboardPanel({
           </span>
         </div>
       </header>
+      <section
+        className="stale-work-alerts"
+        aria-labelledby="stale-work-alerts-title"
+      >
+        <div className="stale-work-alerts-heading">
+          <div>
+            <h2 id="stale-work-alerts-title">Stale-work alerts</h2>
+            <p>
+              Coordination risks that may need intervention before work can
+              continue.
+            </p>
+          </div>
+          <span>
+            {alertCount} {alertCount === 1 ? "alert" : "alerts"}
+          </span>
+        </div>
+        <div className="stale-work-alert-grid">
+          {data.alerts.map((alert) => (
+            <section
+              className={`stale-work-alert is-${alert.tone}`}
+              key={alert.key}
+              aria-labelledby={`stale-work-alert-${alert.key}`}
+            >
+              <header>
+                <AlertTriangle aria-hidden="true" />
+                <h3 id={`stale-work-alert-${alert.key}`}>{alert.label}</h3>
+                <strong>{alert.count}</strong>
+              </header>
+              <p>{alert.description}</p>
+              {alert.items.length ? (
+                <ol>
+                  {alert.items.map((item) => (
+                    <li key={item.actionable.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenItem(item.actionable)}
+                      >
+                        <span>{item.actionable.title}</span>
+                        <small>{item.detail}</small>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <span className="stale-work-alert-empty">
+                  No current alerts.
+                </span>
+              )}
+            </section>
+          ))}
+        </div>
+      </section>
       <div className="queue-grid">
         {data.queues.map((queue) => (
           <section className="queue-panel" key={queue.key}>
