@@ -3,6 +3,7 @@ import {
   actionableQuerySchema,
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  auditActionableRelationshipsRequestSchema,
   archiveImpactResponseSchema,
   archiveMutationRequestSchema,
   archiveTargetKindSchema,
@@ -16,6 +17,8 @@ import {
   detachParentRequestSchema,
   healthResponseSchema,
   dashboardResponseSchema,
+  groomActionableNotesRequestSchema,
+  groomActionableNotesResponseSchema,
   scopeOptionsResponseSchema,
   setParentRequestSchema,
   statusTransitionRequestSchema,
@@ -26,6 +29,7 @@ import {
   prepareImportCommitRequestSchema,
   prepareImportCommitResponseSchema,
   releaseExpiredAgentClaimRequestSchema,
+  relationshipAuditResponseSchema,
   type ActionableQuery,
 } from "@actionables/contracts";
 import Fastify, {
@@ -68,11 +72,19 @@ import {
   ExpiredAgentClaimReleaseConflictError,
   releaseExpiredAgentTaskClaim,
 } from "./agent-tasks.js";
+import {
+  AssistantContextTooLargeError,
+  AssistantRunnerError,
+  type AssistantRunner,
+} from "./assistant-runner.js";
+import { groomActionableNotes } from "./note-groomer.js";
+import { auditWorkItemRelationships } from "./relationship-auditor.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
   logger?: boolean | FastifyBaseLogger;
   mcpBearerToken?: string;
+  assistantRunner?: AssistantRunner;
 };
 
 function fieldErrors(error: {
@@ -170,6 +182,7 @@ export function buildApp({
   prisma,
   logger = false,
   mcpBearerToken,
+  assistantRunner,
 }: BuildAppOptions) {
   const dataImports = new DataImportService(prisma);
   const app = Fastify({
@@ -240,6 +253,38 @@ export function buildApp({
     }
     if (error instanceof AgentTaskClaimError && error.code === "NOT_FOUND") {
       return problem(request, reply, 404, "NOT_FOUND", "Actionable not found.");
+    }
+    if (error instanceof AssistantContextTooLargeError) {
+      return problem(
+        request,
+        reply,
+        422,
+        "ASSISTANT_CONTEXT_TOO_LARGE",
+        "The assistant context is too large for one request.",
+        { detail: error.guidance },
+      );
+    }
+    if (error instanceof AssistantRunnerError) {
+      const status =
+        error.code === "ASSISTANT_UNAVAILABLE"
+          ? 503
+          : error.code === "ASSISTANT_TIMEOUT"
+            ? 504
+            : 502;
+      const detail =
+        error.code === "ASSISTANT_UNAVAILABLE"
+          ? "Confirm that Codex is installed and signed in, then retry."
+          : error.code === "ASSISTANT_TIMEOUT"
+            ? "The request exceeded the local assistant time limit. Retry with shorter notes."
+            : "The model did not produce a usable proposal. No Actionable data was changed.";
+      return problem(
+        request,
+        reply,
+        status,
+        error.code,
+        "The local assistant could not complete the request.",
+        { detail },
+      );
     }
     const statusCode =
       typeof error === "object" && error !== null && "statusCode" in error
@@ -429,6 +474,90 @@ export function buildApp({
       }
 
       return actionableDetailResponseSchema.parse({ item });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/actionables/:id/assistant/note-grooming",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+      const parsed = groomActionableNotesRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the note-grooming request.",
+          { errors: fieldErrors(parsed.error) },
+        );
+      }
+      const item = await getActionable(prisma, id);
+      if (!item) {
+        return problem(
+          request,
+          reply,
+          404,
+          "NOT_FOUND",
+          "Actionable not found.",
+        );
+      }
+      if (item.version !== parsed.data.version) {
+        throw new VersionConflictError(item);
+      }
+      if (!assistantRunner) {
+        throw new AssistantRunnerError(
+          "ASSISTANT_UNAVAILABLE",
+          "No local assistant runner is configured.",
+        );
+      }
+      return groomActionableNotesResponseSchema.parse(
+        await groomActionableNotes(assistantRunner, item),
+      );
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/actionables/:id/assistant/relationship-audit",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+      const parsed = auditActionableRelationshipsRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the relationship-audit request.",
+          { errors: fieldErrors(parsed.error) },
+        );
+      }
+      const item = await getActionable(prisma, id);
+      if (!item) {
+        return problem(
+          request,
+          reply,
+          404,
+          "NOT_FOUND",
+          "Actionable not found.",
+        );
+      }
+      if (item.version !== parsed.data.version) {
+        throw new VersionConflictError(item);
+      }
+      if (!assistantRunner) {
+        throw new AssistantRunnerError(
+          "ASSISTANT_UNAVAILABLE",
+          "No local assistant runner is configured.",
+        );
+      }
+      return relationshipAuditResponseSchema.parse(
+        await auditWorkItemRelationships(prisma, assistantRunner, item),
+      );
     },
   );
 

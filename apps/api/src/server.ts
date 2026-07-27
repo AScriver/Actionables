@@ -1,11 +1,17 @@
 import { buildApp } from "./app.js";
+import { createCodexAssistantRunner } from "./assistant-runner.js";
 import { createPrismaClient } from "./database.js";
 
 const prisma = createPrismaClient();
+const assistantRunner = createCodexAssistantRunner({
+  executable: process.env.ACTIONABLES_CODEX_PATH?.trim() || "codex",
+  model: process.env.ACTIONABLES_ASSISTANT_MODEL?.trim() || "gpt-5.6-terra",
+});
 const app = buildApp({
   prisma,
   logger: true,
   mcpBearerToken: process.env.ACTIONABLES_MCP_TOKEN,
+  assistantRunner,
 });
 
 async function close() {

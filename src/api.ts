@@ -1,6 +1,7 @@
 import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  auditActionableRelationshipsRequestSchema,
   archiveImpactResponseSchema,
   createRepositoryResponseSchema,
   dashboardResponseSchema,
@@ -20,6 +21,8 @@ import {
   type CreateActionableRequest,
   type CreateRepositoryRequest,
   type CreateRepositoryResponse,
+  type GroomActionableNotesRequest,
+  type GroomActionableNotesResponse,
   type ProblemDetails,
   type DependencyActionRequest,
   type DetachParentRequest,
@@ -34,6 +37,10 @@ import {
   type StatusTransitionRequest,
   type SetParentRequest,
   type UpdateActionableRequest,
+  groomActionableNotesResponseSchema,
+  relationshipAuditResponseSchema,
+  type AuditActionableRelationshipsRequest,
+  type RelationshipAuditResponse,
 } from "@actionables/contracts";
 
 export class ApiProblem extends Error {
@@ -193,6 +200,31 @@ export async function updateActionable(
     }),
   );
   return response.item;
+}
+
+export async function groomActionableNotes(
+  id: number,
+  input: GroomActionableNotesRequest,
+): Promise<GroomActionableNotesResponse> {
+  return groomActionableNotesResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/assistant/note-grooming`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function auditActionableRelationships(
+  id: number,
+  input: AuditActionableRelationshipsRequest,
+): Promise<RelationshipAuditResponse> {
+  auditActionableRelationshipsRequestSchema.parse(input);
+  return relationshipAuditResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/assistant/relationship-audit`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
 }
 
 export async function transitionActionable(

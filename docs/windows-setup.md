@@ -13,6 +13,31 @@ No `.env` file is required. The default database is `file:./data/actionables.db`
 
 The agent MCP endpoint is disabled unless `ACTIONABLES_MCP_TOKEN` is set. See [Agent task MCP endpoint](mcp-agent-tasks.md) for the local token and Codex configuration.
 
+The optional note groomer and relationship auditor require the local Codex CLI
+to be installed and signed in. Verify it from the same Windows user account that
+runs Actionables:
+
+```powershell
+codex --version
+```
+
+Actionables invokes Codex with an explicit model, a read-only sandbox, an
+ephemeral session, an isolated temporary working directory, and a required JSON
+output schema. The default model is `gpt-5.6-terra`. To select another available
+lower-tier model, set `ACTIONABLES_ASSISTANT_MODEL` before starting the app:
+
+```powershell
+$env:ACTIONABLES_ASSISTANT_MODEL = 'gpt-5.6-terra'
+```
+
+If `codex` is not on `PATH`, set `ACTIONABLES_CODEX_PATH` to the absolute
+`codex.exe` path. Restart Actionables after changing either setting. Model
+generation never saves an Actionable directly: review and explicitly apply a
+note proposal in the Research notes tab. Relationship-audit recommendations are
+limited to one top-level work item and its direct subtasks, and the audit UI has
+no relationship mutation controls. No `OPENAI_API_KEY` is required for this
+local-CLI integration.
+
 ## Clean setup
 
 Run from a normal Windows path; spaces are supported.

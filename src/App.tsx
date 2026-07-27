@@ -43,6 +43,8 @@ import {
   type ArchiveTargetKind,
   type Effort,
   type EvidenceState,
+  type GroomActionableNotesProposal,
+  type RelationshipAuditResponse,
   type Priority,
   type ImportCommitResponse,
   type ImportPreviewResponse,
@@ -53,9 +55,17 @@ import {
   type ValidationType,
 } from "@actionables/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 import {
   ApiProblem,
+  auditActionableRelationships,
   createDependency,
   createActionable,
   createRepository,
@@ -67,6 +77,7 @@ import {
   fetchArchiveImpact,
   fetchDashboard,
   fetchScopeOptions,
+  groomActionableNotes,
   downloadPortableExport,
   preparePortableImport,
   previewPortableImport,
@@ -86,6 +97,124 @@ import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
 type InspectorTab = "finding" | "research" | "validation";
 type PriorityFilter = "All" | Priority;
+
+const inspectorWidthStorageKey = "actionables-inspector-width";
+const inspectorMinWidth = 320;
+const inspectorMaxWidth = 800;
+const findingsMinWidth = 320;
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function defaultInspectorWidth() {
+  try {
+    const stored = Number(localStorage.getItem(inspectorWidthStorageKey));
+    if (Number.isFinite(stored) && stored >= inspectorMinWidth) {
+      return clamp(stored, inspectorMinWidth, inspectorMaxWidth);
+    }
+  } catch {
+    // Keep the responsive default when storage is unavailable.
+  }
+
+  if (window.innerWidth <= 900) return 360;
+  if (window.innerWidth <= 1080) return 365;
+  if (window.innerWidth <= 1320) return 390;
+  return clamp(Math.round(window.innerWidth * 0.2985), 410, 500);
+}
+
+function availableInspectorWidth(sidebarCollapsed: boolean) {
+  const sidebarWidth = sidebarCollapsed
+    ? 0
+    : Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--sidebar-width",
+        ),
+      ) || 0;
+
+  return clamp(
+    window.innerWidth - sidebarWidth - findingsMinWidth,
+    inspectorMinWidth,
+    inspectorMaxWidth,
+  );
+}
+
+function InspectorResizeHandle({
+  width,
+  maximumWidth,
+  onResize,
+  onResizingChange,
+}: {
+  width: number;
+  maximumWidth: number;
+  onResize: (width: number) => void;
+  onResizingChange: (resizing: boolean) => void;
+}) {
+  const drag = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const finishResize = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    onResizingChange(false);
+  };
+
+  return (
+    <div
+      className="inspector-resize-handle"
+      role="separator"
+      aria-label="Resize actionable details"
+      aria-controls="actionable-inspector"
+      aria-orientation="vertical"
+      aria-valuemin={inspectorMinWidth}
+      aria-valuemax={Math.round(maximumWidth)}
+      aria-valuenow={Math.round(width)}
+      tabIndex={0}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.focus();
+        drag.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startWidth: width,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        onResizingChange(true);
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current || drag.current.pointerId !== event.pointerId) {
+          return;
+        }
+        onResize(drag.current.startWidth + drag.current.startX - event.clientX);
+      }}
+      onPointerUp={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        finishResize();
+      }}
+      onPointerCancel={finishResize}
+      onLostPointerCapture={finishResize}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 48 : 16;
+        let nextWidth: number | undefined;
+
+        if (event.key === "ArrowLeft") nextWidth = width + step;
+        if (event.key === "ArrowRight") nextWidth = width - step;
+        if (event.key === "Home") nextWidth = inspectorMinWidth;
+        if (event.key === "End") nextWidth = maximumWidth;
+
+        if (nextWidth === undefined) return;
+        event.preventDefault();
+        onResize(nextWidth);
+      }}
+    />
+  );
+}
 
 function blocksGlobalShortcut(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -384,6 +513,124 @@ function SourceHistory({
   );
 }
 
+function RelationshipAuditor({
+  selected,
+  actionables,
+  onNavigate,
+}: {
+  selected: ActionableDetail;
+  actionables: ActionableSummary[];
+  onNavigate: (id: number) => void;
+}) {
+  const [result, setResult] = useState<RelationshipAuditResponse | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const titleFor = (id: number) =>
+    actionables.find((item) => item.id === id)?.title ?? `Actionable ${id}`;
+
+  const audit = async () => {
+    setRunning(true);
+    setError("");
+    try {
+      setResult(
+        await auditActionableRelationships(selected.id, {
+          version: selected.version,
+        }),
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof ApiProblem
+          ? [caught.problem.title, caught.problem.detail]
+              .filter(Boolean)
+              .join(" ")
+          : "The local assistant could not audit this work item.",
+      );
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="assistant-panel relationship-auditor">
+      <div className="assistant-heading">
+        <div>
+          <h3>Relationship auditor</h3>
+          <p className="section-help">
+            Reviews #{selected.id} and its {selected.childIds?.length ?? 0}{" "}
+            direct subtasks. Recommendations never change relationships.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="toolbar-button"
+          disabled={running}
+          onClick={audit}
+        >
+          {running ? "Auditing…" : result ? "Audit again" : "Audit"}
+        </button>
+      </div>
+      {error && (
+        <p className="relationship-error" role="alert">
+          {error}
+        </p>
+      )}
+      {result && (
+        <div className="relationship-audit-result">
+          <p className="assistant-provenance">
+            <code>{result.model}</code> audited task IDs{" "}
+            {result.auditedTaskIds.join(", ")} from saved version{" "}
+            {result.basedOnVersion}.
+          </p>
+          {result.recommendations.length === 0 ? (
+            <p>No relationship changes were recommended.</p>
+          ) : (
+            <ul className="relationship-recommendations">
+              {result.recommendations.map((recommendation, index) => (
+                <li
+                  key={`${recommendation.kind}-${recommendation.action}-${recommendation.fromId}-${recommendation.toId}-${index}`}
+                >
+                  <div className="recommendation-heading">
+                    <span>{recommendation.kind}</span>
+                    <strong>{recommendation.action}</strong>
+                    <span>{recommendation.confidence} confidence</span>
+                  </div>
+                  <p>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate(recommendation.fromId)}
+                    >
+                      #{recommendation.fromId} ·{" "}
+                      {titleFor(recommendation.fromId)}
+                    </button>
+                    <span aria-hidden="true"> → </span>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate(recommendation.toId)}
+                    >
+                      #{recommendation.toId} · {titleFor(recommendation.toId)}
+                    </button>
+                  </p>
+                  <p>{recommendation.reason}</p>
+                  {recommendation.evidence.length > 0 && (
+                    <ul>
+                      {recommendation.evidence.map((evidence) => (
+                        <li key={evidence}>{evidence}</li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <button type="button" onClick={() => setResult(null)}>
+            Dismiss recommendations
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RelationshipSection({
   selected,
   actionables,
@@ -445,6 +692,14 @@ function RelationshipSection({
       className="inspector-section relationships"
       aria-label="Relationships"
     >
+      {!selected.parentId && !selected.archiveState.isArchived && (
+        <RelationshipAuditor
+          key={`relationship-auditor-${selected.id}-${selected.version}`}
+          selected={selected}
+          actionables={actionables}
+          onNavigate={onNavigate}
+        />
+      )}
       {selectedParent && (
         <div className="relationship-parent">
           <span>Parent</span>
@@ -1271,6 +1526,228 @@ function AgentClaimPanel({
   );
 }
 
+function NoteGroomer({
+  selected,
+  onMutated,
+}: {
+  selected: ActionableDetail;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
+}) {
+  const [proposal, setProposal] = useState<GroomActionableNotesProposal | null>(
+    null,
+  );
+  const [basedOnVersion, setBasedOnVersion] = useState<number | null>(null);
+  const [model, setModel] = useState("");
+  const [running, setRunning] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState("");
+
+  const generate = async () => {
+    setRunning(true);
+    setError("");
+    try {
+      const response = await groomActionableNotes(selected.id, {
+        version: selected.version,
+      });
+      setProposal(response.proposal);
+      setBasedOnVersion(response.basedOnVersion);
+      setModel(response.model);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiProblem
+          ? [caught.problem.title, caught.problem.detail]
+              .filter(Boolean)
+              .join(" ")
+          : "The local assistant could not generate a proposal.",
+      );
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const apply = async () => {
+    if (!proposal || basedOnVersion !== selected.version) {
+      setError(
+        "This proposal is based on an older saved version. Generate it again.",
+      );
+      return;
+    }
+    setApplying(true);
+    setError("");
+    try {
+      const saved = await updateActionable(selected.id, {
+        version: selected.version,
+        title: selected.title,
+        priority: selected.priority,
+        status: selected.status,
+        effort: selected.effort,
+        evidenceState: selected.evidenceState,
+        projectId: selected.scope.projectId,
+        repositoryId: selected.scope.repositoryId,
+        worktreeId: selected.scope.worktreeId,
+        finding: selected.finding,
+        description: proposal.description,
+        research: proposal.research,
+        validation: proposal.validation,
+        tags: selected.tags,
+        userSources: selected.userSources.map(({ type, locator, label }) => ({
+          type,
+          locator,
+          label,
+        })),
+      });
+      onMutated(saved, "Reviewed note-grooming proposal applied.");
+    } catch (caught) {
+      setError(
+        caught instanceof ApiProblem
+          ? [caught.problem.title, caught.problem.detail]
+              .filter(Boolean)
+              .join(" ")
+          : "The reviewed proposal could not be applied.",
+      );
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <section className="assistant-panel inspector-section note-groomer">
+      <div className="assistant-heading">
+        <div>
+          <h3>Groom notes with local Codex</h3>
+          <p className="section-help">
+            Reorganizes description, research, and planned validation.
+            Generation does not save changes.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="toolbar-button"
+          disabled={running || applying}
+          onClick={generate}
+        >
+          {running ? "Generating…" : proposal ? "Generate again" : "Generate"}
+        </button>
+      </div>
+
+      {error && (
+        <p className="relationship-error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {proposal && (
+        <div className="assistant-proposal">
+          <details className="assistant-original">
+            <summary>Compare original notes</summary>
+            <h4>Description</h4>
+            {selected.description ? (
+              <Markdown>{selected.description}</Markdown>
+            ) : (
+              <p>No description.</p>
+            )}
+            <h4>Research</h4>
+            {selected.research.length > 0 ? (
+              selected.research.map((note) => (
+                <Markdown key={note}>{note}</Markdown>
+              ))
+            ) : (
+              <p>No research notes.</p>
+            )}
+            <h4>Planned validation</h4>
+            {selected.validation.length > 0 ? (
+              selected.validation.map((step) => (
+                <Markdown key={step}>{step}</Markdown>
+              ))
+            ) : (
+              <p>No planned validation.</p>
+            )}
+          </details>
+          <p className="assistant-provenance">
+            Proposal from <code>{model}</code>, based on saved version{" "}
+            {basedOnVersion}. Review every field before applying.
+          </p>
+          {proposal.changes.length > 0 && (
+            <ul>
+              {proposal.changes.map((change) => (
+                <li key={change}>{change}</li>
+              ))}
+            </ul>
+          )}
+          <label>
+            <span>Description</span>
+            <textarea
+              rows={5}
+              value={proposal.description}
+              onChange={(event) =>
+                setProposal((current) =>
+                  current
+                    ? { ...current, description: event.target.value }
+                    : current,
+                )
+              }
+            />
+          </label>
+          <label>
+            <span>Research notes</span>
+            <small>One note per line.</small>
+            <textarea
+              rows={6}
+              value={proposal.research.join("\n")}
+              onChange={(event) =>
+                setProposal((current) =>
+                  current
+                    ? { ...current, research: lines(event.target.value) }
+                    : current,
+                )
+              }
+            />
+          </label>
+          <label>
+            <span>Planned validation</span>
+            <small>
+              One future check per line; these are not test results.
+            </small>
+            <textarea
+              rows={6}
+              value={proposal.validation.join("\n")}
+              onChange={(event) =>
+                setProposal((current) =>
+                  current
+                    ? { ...current, validation: lines(event.target.value) }
+                    : current,
+                )
+              }
+            />
+          </label>
+          <div className="assistant-actions">
+            <button
+              type="button"
+              className="primary-action"
+              disabled={applying}
+              onClick={apply}
+            >
+              {applying ? "Applying…" : "Apply reviewed proposal"}
+            </button>
+            <button
+              type="button"
+              disabled={applying}
+              onClick={() => {
+                setProposal(null);
+                setBasedOnVersion(null);
+                setModel("");
+                setError("");
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Inspector({
   selected,
   actionables,
@@ -1501,6 +1978,13 @@ function Inspector({
                 ))}
               </div>
             </section>
+            {!selected.archiveState.isArchived && (
+              <NoteGroomer
+                key={`note-groomer-${selected.id}-${selected.version}`}
+                selected={selected}
+                onMutated={onMutated}
+              />
+            )}
             <RelationshipSection
               selected={selected}
               actionables={actionables}
@@ -3895,6 +4379,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<InspectorTab>("finding");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorHidden, setInspectorHidden] = useState(false);
+  const [inspectorWidth, setInspectorWidth] = useState(defaultInspectorWidth);
+  const [maximumInspectorWidth, setMaximumInspectorWidth] = useState(() =>
+    availableInspectorWidth(false),
+  );
+  const [inspectorResizing, setInspectorResizing] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [scopeMenuOpen, setScopeMenuOpen] = useState<
@@ -4037,6 +4526,16 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    const updateMaximumInspectorWidth = () => {
+      setMaximumInspectorWidth(availableInspectorWidth(sidebarCollapsed));
+    };
+    updateMaximumInspectorWidth();
+    window.addEventListener("resize", updateMaximumInspectorWidth);
+    return () =>
+      window.removeEventListener("resize", updateMaximumInspectorWidth);
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -4429,10 +4928,26 @@ export default function App() {
   const activeSort = query.sort ?? "priority";
   const totalFindings =
     listQuery.data?.counts.total ?? dashboardQuery.data?.counts.total ?? 0;
+  const effectiveInspectorWidth = Math.min(
+    inspectorWidth,
+    maximumInspectorWidth,
+  );
+  const resizeInspector = (width: number) => {
+    const nextWidth = Math.round(
+      clamp(width, inspectorMinWidth, maximumInspectorWidth),
+    );
+    setInspectorWidth(nextWidth);
+    try {
+      localStorage.setItem(inspectorWidthStorageKey, String(nextWidth));
+    } catch {
+      // Resizing still works when storage is unavailable.
+    }
+  };
   const shellClasses = [
     "app-shell",
     sidebarCollapsed ? "sidebar-collapsed" : "",
     inspectorHidden ? "inspector-hidden" : "",
+    inspectorResizing ? "inspector-resizing" : "",
     mobileDetailOpen ? "mobile-detail-open" : "",
     view === "dashboard" && selectedId === null ? "dashboard-mode" : "",
     view === "data" && selectedId === null ? "data-mode" : "",
@@ -4441,7 +4956,14 @@ export default function App() {
     .join(" ");
 
   return (
-    <div className={shellClasses}>
+    <div
+      className={shellClasses}
+      style={
+        {
+          "--inspector-width": `${effectiveInspectorWidth}px`,
+        } as CSSProperties
+      }
+    >
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
@@ -5457,7 +5979,19 @@ export default function App() {
       )}
 
       {(view !== "dashboard" && view !== "data") || selectedId !== null ? (
-        <aside className="inspector" aria-label="Selected actionable">
+        <aside
+          className="inspector"
+          id="actionable-inspector"
+          aria-label="Selected actionable"
+        >
+          {!inspectorHidden && (
+            <InspectorResizeHandle
+              width={effectiveInspectorWidth}
+              maximumWidth={maximumInspectorWidth}
+              onResize={resizeInspector}
+              onResizingChange={setInspectorResizing}
+            />
+          )}
           {selected ? (
             <Inspector
               selected={selected}

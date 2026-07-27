@@ -43,8 +43,8 @@ It checks formatting, types, API/domain/integration tests, browser E2E tests, au
 
 ## MVP boundary
 
-The MVP includes local project/repository/worktree scopes, actionable capture and triage, lifecycle and validation, one-level subtasks, cross-scope dependencies, dashboard/search/filtering, archive/restore, reviewed-seed import, portable JSON backup/restore, and an explicitly enabled local MCP endpoint for agents to create tasks and manage claimed tasks.
+The MVP includes local project/repository/worktree scopes, actionable capture and triage, lifecycle and validation, one-level subtasks, cross-scope dependencies, dashboard/search/filtering, archive/restore, reviewed-seed import, portable JSON backup/restore, an explicitly enabled local MCP endpoint for agents to create tasks and manage claimed tasks, a review-before-save note groomer, and a recommendation-only relationship auditor backed by the signed-in local Codex CLI.
 
 MCP available-task discovery is intentionally scoped to one top-level feature or bug Actionable and its direct subtasks; it never falls back to arbitrary pending work.
 
-It does **not** provide user accounts, collaboration, notifications, cloud sync, hosted deployment, Git manipulation, AI-generated priority/dependencies, arbitrary MCP hierarchy/dependency editing, or generic project-management features. There is no installer, updater, published binary, or supported non-Windows deployment.
+It does **not** provide user accounts, collaboration, notifications, cloud sync, hosted deployment, Git manipulation, AI-generated priority/dependencies, automatic relationship changes, arbitrary MCP hierarchy/dependency editing, or generic project-management features. There is no installer, updater, published binary, or supported non-Windows deployment.

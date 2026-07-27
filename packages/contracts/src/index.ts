@@ -646,6 +646,84 @@ export const updateActionableRequestSchema = createActionableRequestSchema
   })
   .strict();
 
+export const groomActionableNotesRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+  })
+  .strict();
+
+export const groomActionableNotesProposalSchema = z
+  .object({
+    description: markdownField.describe(
+      "Reorganized description preserving the original meaning.",
+    ),
+    research: notesSchema.describe(
+      "Reorganized research notes containing no invented evidence.",
+    ),
+    validation: notesSchema.describe(
+      "Reorganized planned checks containing no claimed test results.",
+    ),
+    changes: z
+      .array(z.string().trim().min(1).max(500))
+      .max(20)
+      .describe("Concise summary of formatting and organization changes."),
+  })
+  .strict();
+
+export const groomActionableNotesResponseSchema = z
+  .object({
+    basedOnVersion: z.number().int().positive(),
+    model: z.string().trim().min(1).max(200),
+    proposal: groomActionableNotesProposalSchema,
+  })
+  .strict();
+
+export const auditActionableRelationshipsRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+  })
+  .strict();
+
+export const relationshipAuditRecommendationSchema = z
+  .object({
+    kind: z.enum(["hierarchy", "dependency"]),
+    action: z.enum(["add", "remove", "review"]),
+    fromId: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Parent ID for hierarchy; dependent ID for dependency recommendations.",
+      ),
+    toId: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Child ID for hierarchy; prerequisite ID for dependency recommendations.",
+      ),
+    confidence: z.enum(["low", "medium", "high"]),
+    reason: z.string().trim().min(1).max(2_000),
+    evidence: z.array(z.string().trim().min(1).max(1_000)).max(10),
+  })
+  .strict();
+
+export const relationshipAuditProposalSchema = z
+  .object({
+    recommendations: z.array(relationshipAuditRecommendationSchema).max(50),
+  })
+  .strict();
+
+export const relationshipAuditResponseSchema = z
+  .object({
+    workItemId: z.number().int().positive(),
+    basedOnVersion: z.number().int().positive(),
+    model: z.string().trim().min(1).max(200),
+    auditedTaskIds: z.array(z.number().int().positive()).min(1).max(51),
+    recommendations: z.array(relationshipAuditRecommendationSchema).max(50),
+  })
+  .strict();
+
 export const statusTransitionRequestSchema = z
   .object({
     version: z.number().int().positive(),
@@ -1451,6 +1529,27 @@ export type CreateActionableRequest = z.infer<
 >;
 export type UpdateActionableRequest = z.infer<
   typeof updateActionableRequestSchema
+>;
+export type GroomActionableNotesRequest = z.infer<
+  typeof groomActionableNotesRequestSchema
+>;
+export type GroomActionableNotesProposal = z.infer<
+  typeof groomActionableNotesProposalSchema
+>;
+export type GroomActionableNotesResponse = z.infer<
+  typeof groomActionableNotesResponseSchema
+>;
+export type AuditActionableRelationshipsRequest = z.infer<
+  typeof auditActionableRelationshipsRequestSchema
+>;
+export type RelationshipAuditRecommendation = z.infer<
+  typeof relationshipAuditRecommendationSchema
+>;
+export type RelationshipAuditProposal = z.infer<
+  typeof relationshipAuditProposalSchema
+>;
+export type RelationshipAuditResponse = z.infer<
+  typeof relationshipAuditResponseSchema
 >;
 export type StatusTransitionRequest = z.infer<
   typeof statusTransitionRequestSchema
