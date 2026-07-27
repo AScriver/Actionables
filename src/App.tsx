@@ -1552,12 +1552,33 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
 
 function AgentClaimPanel({
   selected,
+  onNotice,
   onReleaseExpired,
 }: {
   selected: ActionableDetail;
+  onNotice: (notice: string) => void;
   onReleaseExpired: () => void;
 }) {
   const claim = selected.agentClaim;
+  const isTerminal =
+    selected.status === "Done" || selected.status === "Dismissed";
+  const startPrompt =
+    !claim && !selected.archiveState.isArchived && !isTerminal
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase.`
+      : null;
+  const unavailableGuidance = selected.archiveState.isArchived
+    ? "Restore this Actionable before starting agent work."
+    : isTerminal
+      ? `Reopen this ${selected.status} Actionable before starting agent work.`
+      : null;
+
+  const copyStartPrompt = async () => {
+    if (!startPrompt) return;
+    if (await copyText(startPrompt))
+      onNotice("Codex start-task prompt copied.");
+    else window.prompt("Copy this Codex start-task prompt:", startPrompt);
+  };
+
   return (
     <section
       className={`agent-claim-panel ${claim?.state === "expired" ? "is-expired" : ""}`}
@@ -1603,6 +1624,27 @@ function AgentClaimPanel({
             <dd>{selected.status}</dd>
           </div>
         </dl>
+      )}
+      {startPrompt && (
+        <div className="agent-start-prompt">
+          <div>
+            <span>Start with Codex</span>
+            <code id={`agent-start-prompt-${selected.id}`}>{startPrompt}</code>
+          </div>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={copyStartPrompt}
+            aria-label="Copy Codex start-task prompt"
+            aria-describedby={`agent-start-prompt-${selected.id}`}
+          >
+            <Copy aria-hidden="true" />
+            Copy prompt
+          </button>
+        </div>
+      )}
+      {unavailableGuidance && (
+        <p className="agent-start-guidance">{unavailableGuidance}</p>
       )}
       {claim?.isReleasable && (
         <button
@@ -1948,6 +1990,7 @@ function Inspector({
 
       <AgentClaimPanel
         selected={selected}
+        onNotice={onNotice}
         onReleaseExpired={onReleaseExpiredClaim}
       />
 
@@ -5221,11 +5264,13 @@ export default function App() {
     const releasedId = claimReleaseTarget?.id;
     setClaimReleaseTarget(null);
     window.requestAnimationFrame(() => {
-      if (released && releasedId) {
-        document.getElementById(`agent-claim-title-${releasedId}`)?.focus();
-      } else {
-        claimReleaseReturnFocus.current?.focus();
-      }
+      window.requestAnimationFrame(() => {
+        if (released && releasedId) {
+          document.getElementById(`agent-claim-title-${releasedId}`)?.focus();
+        } else {
+          claimReleaseReturnFocus.current?.focus();
+        }
+      });
     });
   };
 

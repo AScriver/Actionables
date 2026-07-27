@@ -1407,6 +1407,48 @@ button {
   line-height: 1.35;
 }
 
+.agent-start-prompt {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-start-prompt > div {
+  min-width: 0;
+}
+
+.agent-start-prompt span {
+  color: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-start-prompt code {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.agent-start-prompt .toolbar-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+}
+
+.agent-start-guidance {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .agent-claim-release {
   justify-self: start;
   min-height: 30px;
@@ -3400,6 +3442,15 @@ button {
 
   .agent-claim-panel {
     margin: 12px 15px;
+  }
+
+  .agent-start-prompt {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .agent-start-prompt .toolbar-button {
+    align-self: flex-start;
   }
 
   .inspector-header {
