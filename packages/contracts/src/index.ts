@@ -779,6 +779,17 @@ export const transitionClaimedAgentTaskRequestSchema = z
   })
   .strict();
 
+export const dismissAgentTaskRequestSchema = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, "Enter a dismissal reason.")
+      .max(10_000)
+      .describe("Required reason for dismissing this unclaimed task."),
+  })
+  .strict();
+
 export const recordClaimedAgentTaskValidationRequestSchema = z
   .object({
     ...claimedAgentMutationFields,
@@ -1452,6 +1463,9 @@ export type UpdateClaimedAgentTaskRequest = z.infer<
 >;
 export type TransitionClaimedAgentTaskRequest = z.infer<
   typeof transitionClaimedAgentTaskRequestSchema
+>;
+export type DismissAgentTaskRequest = z.infer<
+  typeof dismissAgentTaskRequestSchema
 >;
 export type RecordClaimedAgentTaskValidationRequest = z.infer<
   typeof recordClaimedAgentTaskValidationRequestSchema

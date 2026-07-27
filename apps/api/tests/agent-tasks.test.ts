@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   AgentTaskClaimError,
   claimAgentTask,
+  dismissAgentTask,
   listAgentTasks,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
@@ -32,6 +33,7 @@ async function createTask(
     status?: string;
     archivedAt?: Date | null;
     title?: string;
+    creatorThreadId?: string;
   } = {},
 ) {
   const ordinal = nextOrdinal++;
@@ -61,7 +63,12 @@ async function createTask(
       sourceContainerId: "",
       sourceThread: "",
       contentHash: "",
-      rawFragmentJson: json({ fixture: true }),
+      rawFragmentJson: json({
+        fixture: true,
+        ...(overrides.creatorThreadId
+          ? { creatorThreadId: overrides.creatorThreadId }
+          : {}),
+      }),
       ...scope,
     },
   });
@@ -331,6 +338,207 @@ describe("agent task claims", () => {
           where: { actionableId: task.id },
         }),
       ).toBe(1);
+    } finally {
+      await secondPrisma.$disconnect();
+    }
+  });
+
+  it("dismisses a same-thread unclaimed task and reconciles an expired claim", async () => {
+    const creatorThreadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
+    const task = await createTask({
+      status: "Inbox",
+      creatorThreadId,
+    });
+    const dismissed = await dismissAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      { reason: "Disposable task created by this Codex thread." },
+      { threadId: creatorThreadId },
+    );
+    expect(dismissed).toMatchObject({
+      status: "Dismissed",
+      version: task.version + 1,
+    });
+    expect(dismissed.statusHistory.at(-1)).toMatchObject({
+      previousStatus: "Inbox",
+      newStatus: "Dismissed",
+      origin: `agent:codex:${creatorThreadId}`,
+    });
+    expect(dismissed.activity.at(-1)).toMatchObject({
+      type: "dismissed",
+      context: expect.objectContaining({
+        reason: "Disposable task created by this Codex thread.",
+        origin: `agent:codex:${creatorThreadId}`,
+      }),
+    });
+
+    const expiredTask = await createTask({
+      status: "Inbox",
+      creatorThreadId,
+    });
+    await claimAgentTask(
+      prisma,
+      expiredTask.sourceOrdinal,
+      {
+        agentId: `codex:${creatorThreadId}`,
+        workItemId: expiredTask.sourceOrdinal,
+        version: expiredTask.version,
+        leaseMinutes: 5,
+      },
+      new Date("2026-07-25T12:00:00.000Z"),
+    );
+    const dismissedAfterExpiry = await dismissAgentTask(
+      prisma,
+      expiredTask.sourceOrdinal,
+      { reason: "The creator thread no longer needs this expired task." },
+      { threadId: creatorThreadId },
+      new Date("2026-07-25T12:06:00.000Z"),
+    );
+    expect(dismissedAfterExpiry).toMatchObject({
+      status: "Dismissed",
+      version: expiredTask.version + 3,
+    });
+    expect(
+      await prisma.agentTaskClaim.findUnique({
+        where: { actionableId: expiredTask.id },
+      }),
+    ).toBeNull();
+    expect(
+      (
+        await prisma.activityEvent.findMany({
+          where: { actionableId: expiredTask.id },
+          orderBy: { occurredAt: "asc" },
+        })
+      ).map((event) => event.type),
+    ).toEqual(["agent-claimed", "agent-claim-expired", "dismissed"]);
+  });
+
+  it("rejects invalid creator-thread dismissal targets without changing state", async () => {
+    const creatorThreadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
+    const caller = { threadId: creatorThreadId };
+    const wrongThread = await createTask({
+      status: "Inbox",
+      creatorThreadId,
+    });
+    await expect(
+      dismissAgentTask(
+        prisma,
+        wrongThread.sourceOrdinal,
+        { reason: "Must not save." },
+        { threadId: "019fa45f-581d-7bc0-afe3-a2b65171df63" },
+      ),
+    ).rejects.toMatchObject({ code: "CREATOR_THREAD_MISMATCH" });
+
+    const liveClaim = await createTask({
+      status: "Inbox",
+      creatorThreadId,
+    });
+    await claimAgentTask(prisma, liveClaim.sourceOrdinal, {
+      agentId: `codex:${creatorThreadId}`,
+      workItemId: liveClaim.sourceOrdinal,
+      version: liveClaim.version,
+      leaseMinutes: 30,
+    });
+    await expect(
+      dismissAgentTask(
+        prisma,
+        liveClaim.sourceOrdinal,
+        { reason: "Claimed work must use transition_task." },
+        caller,
+      ),
+    ).rejects.toMatchObject({ code: "ALREADY_CLAIMED" });
+
+    const archived = await createTask({
+      status: "Inbox",
+      archivedAt: new Date(),
+      creatorThreadId,
+    });
+    const terminal = await createTask({
+      status: "Done",
+      creatorThreadId,
+    });
+    const missingCreator = await createTask({ status: "Inbox" });
+    await expect(
+      dismissAgentTask(
+        prisma,
+        archived.sourceOrdinal,
+        { reason: "Must not save." },
+        caller,
+      ),
+    ).rejects.toMatchObject({ code: "ARCHIVED" });
+    await expect(
+      dismissAgentTask(
+        prisma,
+        terminal.sourceOrdinal,
+        { reason: "Must not save." },
+        caller,
+      ),
+    ).rejects.toMatchObject({ code: "TERMINAL" });
+    await expect(
+      dismissAgentTask(
+        prisma,
+        missingCreator.sourceOrdinal,
+        { reason: "Must not save." },
+        caller,
+      ),
+    ).rejects.toMatchObject({ code: "CREATOR_THREAD_MISMATCH" });
+    await expect(
+      dismissAgentTask(prisma, wrongThread.sourceOrdinal, {} as never, caller),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(
+      await prisma.actionable.count({
+        where: {
+          id: {
+            in: [
+              wrongThread.id,
+              liveClaim.id,
+              archived.id,
+              terminal.id,
+              missingCreator.id,
+            ],
+          },
+          status: "Dismissed",
+        },
+      }),
+    ).toBe(0);
+  });
+
+  it("permits only one winner when claim and creator dismissal race", async () => {
+    const creatorThreadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
+    const task = await createTask({
+      status: "Inbox",
+      creatorThreadId,
+    });
+    const secondPrisma = createPrismaClient(databaseUrl);
+    try {
+      const results = await Promise.allSettled([
+        claimAgentTask(prisma, task.sourceOrdinal, {
+          agentId: `codex:${creatorThreadId}`,
+          workItemId: task.sourceOrdinal,
+          version: task.version,
+          leaseMinutes: 30,
+        }),
+        dismissAgentTask(
+          secondPrisma,
+          task.sourceOrdinal,
+          { reason: "Dismiss if the claim has not won." },
+          { threadId: creatorThreadId },
+        ),
+      ]);
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      const stored = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, statusHistory: true },
+      });
+      expect(
+        (stored.status === "Dismissed" && stored.agentTaskClaim === null) ||
+          (stored.status === "Inbox" && stored.agentTaskClaim !== null),
+      ).toBe(true);
+      expect(
+        stored.statusHistory.filter((entry) => entry.newStatus === "Dismissed"),
+      ).toHaveLength(stored.status === "Dismissed" ? 1 : 0);
     } finally {
       await secondPrisma.$disconnect();
     }

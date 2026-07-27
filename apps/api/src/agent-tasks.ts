@@ -8,6 +8,7 @@ import {
   claimAgentTaskRequestSchema,
   claimAgentTaskResponseSchema,
   createAgentTaskRequestSchema,
+  dismissAgentTaskRequestSchema,
   listAgentTasksRequestSchema,
   listAgentTasksResponseSchema,
   recordClaimedAgentTaskValidationRequestSchema,
@@ -24,6 +25,7 @@ import {
   type ClaimAgentTaskRequest,
   type ClaimAgentTaskResponse,
   type CreateAgentTaskRequest,
+  type DismissAgentTaskRequest,
   type ListAgentTasksRequest,
   type ListAgentTasksResponse,
   type RecordClaimedAgentTaskValidationRequest,
@@ -113,7 +115,9 @@ export class AgentTaskClaimError extends Error {
       | "ALREADY_CLAIMED"
       | "INVALID_CLAIM_TOKEN"
       | "CLAIM_EXPIRED"
-      | "IDEMPOTENCY_CONFLICT",
+      | "IDEMPOTENCY_CONFLICT"
+      | "THREAD_ID_REQUIRED"
+      | "CREATOR_THREAD_MISMATCH",
     message: string,
     public readonly fieldErrors?: Record<string, string[]>,
     public readonly currentVersion?: number,
@@ -478,6 +482,16 @@ function persistedStringArray(value: Prisma.JsonValue) {
   return Array.isArray(value) ? value.map((item) => String(item)) : [];
 }
 
+function creatorThreadId(value: Prisma.JsonValue) {
+  return value &&
+    !Array.isArray(value) &&
+    typeof value === "object" &&
+    "creatorThreadId" in value &&
+    typeof value.creatorThreadId === "string"
+    ? value.creatorThreadId
+    : null;
+}
+
 function appendUniqueUserSources<
   T extends { type: string; locator: string; label?: string },
 >(current: T[], additions: T[]) {
@@ -644,6 +658,10 @@ export type AgentTaskScopeProvisioning = {
 export type CreateAgentTaskResult = {
   task: ActionableDetail;
   scopeProvisioning?: AgentTaskScopeProvisioning;
+};
+
+export type AgentTaskCaller = {
+  threadId: string;
 };
 
 type ResolvedRepositoryPlacement = {
@@ -859,6 +877,7 @@ async function existingCreatedAgentTask(
   externalKey: string,
   parentId: number | undefined,
   fingerprint: string,
+  caller: AgentTaskCaller,
 ) {
   const existing = await prisma.actionable.findUnique({
     where: { externalKey },
@@ -882,7 +901,11 @@ async function existingCreatedAgentTask(
       : "";
   const savedParentId =
     existing.hierarchyAsChild[0]?.parent.sourceOrdinal ?? undefined;
-  if (savedFingerprint !== fingerprint || savedParentId !== parentId) {
+  if (
+    savedFingerprint !== fingerprint ||
+    savedParentId !== parentId ||
+    creatorThreadId(fragment) !== caller.threadId
+  ) {
     throw new AgentTaskClaimError(
       "IDEMPOTENCY_CONFLICT",
       "The idempotency key was already used for a different create request.",
@@ -901,6 +924,7 @@ async function existingCreatedAgentTask(
 export async function createAgentTask(
   prisma: AppPrismaClient,
   input: CreateAgentTaskRequest,
+  caller: AgentTaskCaller,
 ): Promise<CreateAgentTaskResult> {
   const request = parseInput(createAgentTaskRequestSchema, input);
   const externalKey = `agent-task-${hashToken(request.idempotencyKey)}`;
@@ -912,6 +936,7 @@ export async function createAgentTask(
       externalKey,
       request.parentId,
       fingerprint,
+      caller,
     );
     if (existing) return { task: existing };
 
@@ -935,6 +960,7 @@ export async function createAgentTask(
         rawFragment: {
           kind: "agent-task",
           idempotencyFingerprint: fingerprint,
+          creatorThreadId: caller.threadId,
         },
         statusProvenance: "Created by an agent with neutral Inbox status.",
       };
@@ -992,6 +1018,7 @@ export async function createAgentTask(
           rawFragment: {
             kind: "agent-task",
             idempotencyFingerprint: fingerprint,
+            creatorThreadId: caller.threadId,
           },
         },
       );
@@ -1002,6 +1029,7 @@ export async function createAgentTask(
       externalKey,
       request.parentId,
       fingerprint,
+      caller,
     );
     if (!created) throw new Error("Created agent task could not be read.");
     return { task: created, scopeProvisioning };
@@ -1185,6 +1213,64 @@ export async function transitionClaimedAgentTask(
       }
       return saved;
     },
+  );
+}
+
+export async function dismissAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: DismissAgentTaskRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  const request = parseInput(dismissAgentTaskRequestSchema, input);
+  return withClaimLock(String(sourceOrdinal), () =>
+    prisma.$transaction(async (tx) => {
+      const row = await findTask(tx, sourceOrdinal);
+      requireClaimable(row);
+      if (creatorThreadId(row.rawFragmentJson) !== caller.threadId) {
+        throw new AgentTaskClaimError(
+          "CREATOR_THREAD_MISMATCH",
+          "Only the Codex thread that created this Actionable can dismiss it without a claim.",
+        );
+      }
+      if (row.agentTaskClaim && row.agentTaskClaim.leaseExpiresAt > now) {
+        throw new AgentTaskClaimError(
+          "ALREADY_CLAIMED",
+          "This Actionable has an active claim.",
+          undefined,
+          row.version,
+        );
+      }
+
+      let version = row.version;
+      if (row.agentTaskClaim) {
+        await recordObservedExpiry(tx, row, now);
+        await tx.actionable.update({
+          where: { id: row.id },
+          data: {
+            version: { increment: 1 },
+            updatedLabel: "agent claim expired",
+          },
+        });
+        version += 1;
+      }
+
+      const saved = await transitionActionable(
+        prisma,
+        sourceOrdinal,
+        {
+          version,
+          status: "Dismissed",
+          reason: request.reason,
+          origin: agentOrigin(`codex:${caller.threadId}`),
+        },
+        tx,
+      );
+      if (!saved)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      return saved;
+    }),
   );
 }
 

@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   agentTaskClaimCredentialSchema,
-  claimAgentTaskRequestSchema,
+  agentTaskLeaseMinutesSchema,
+  agentTaskListViewSchema,
   createAgentTaskRequestSchema,
-  listAgentTasksRequestSchema,
+  dismissAgentTaskRequestSchema,
   listAgentTasksResponseSchema,
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
@@ -25,6 +26,7 @@ import {
   type AgentTaskScopeProvisioning,
   claimAgentTask,
   createAgentTask,
+  dismissAgentTask,
   getClaimedAgentTask,
   listAgentTasks,
   recordClaimedAgentTaskValidation,
@@ -40,10 +42,56 @@ const idSchema = z
   .int()
   .positive()
   .describe("Public numeric Actionable ID.");
+const threadIdSchema = z.string().trim().min(1).max(120);
+const listTasksSchema = z
+  .object({
+    view: agentTaskListViewSchema.default("mine"),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Top-level Actionable ID for the current feature or bug; required for available.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(25)
+      .describe("Maximum tasks to return, from 1 through 100."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.view === "available" && input.workItemId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["workItemId"],
+        message:
+          "Available tasks require the top-level feature or bug work-item ID.",
+      });
+    }
+  });
 const claimedTaskSchema = releaseAgentTaskClaimRequestSchema.extend({
   id: idSchema,
 });
-const claimTaskSchema = claimAgentTaskRequestSchema.extend({ id: idSchema });
+const claimTaskSchema = z
+  .object({
+    id: idSchema,
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Top-level Actionable ID for the current feature or bug."),
+    version: z
+      .number()
+      .int()
+      .positive()
+      .describe("Exact task version returned by list_tasks."),
+    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+  })
+  .strict();
 const renewTaskSchema = renewAgentTaskClaimRequestSchema.extend({
   id: idSchema,
 });
@@ -54,6 +102,9 @@ const updateTaskSchema = updateClaimedAgentTaskRequestSchema.safeExtend({
   id: idSchema,
 });
 const transitionTaskSchema = transitionClaimedAgentTaskRequestSchema.extend({
+  id: idSchema,
+});
+const dismissTaskSchema = dismissAgentTaskRequestSchema.extend({
   id: idSchema,
 });
 const recordValidationSchema =
@@ -314,6 +365,41 @@ function success(output: object): CallToolResult {
   };
 }
 
+function requestThreadId(extra: { _meta?: Record<string, unknown> }) {
+  const metadata = extra._meta;
+  const direct = metadata?.threadId;
+  const turnMetadata = metadata?.["x-codex-turn-metadata"];
+  const nested =
+    turnMetadata &&
+    !Array.isArray(turnMetadata) &&
+    typeof turnMetadata === "object" &&
+    "thread_id" in turnMetadata
+      ? turnMetadata.thread_id
+      : undefined;
+  if (
+    typeof direct === "string" &&
+    typeof nested === "string" &&
+    direct !== nested
+  ) {
+    throw new AgentTaskClaimError(
+      "THREAD_ID_REQUIRED",
+      "The Codex thread metadata is inconsistent.",
+    );
+  }
+  const parsed = threadIdSchema.safeParse(direct ?? nested);
+  if (!parsed.success) {
+    throw new AgentTaskClaimError(
+      "THREAD_ID_REQUIRED",
+      "This Actionables operation requires Codex thread metadata.",
+    );
+  }
+  return parsed.data;
+}
+
+function threadAgentId(threadId: string) {
+  return `codex:${threadId}`;
+}
+
 function recovery(code: string) {
   switch (code) {
     case "INVALID_REQUEST":
@@ -358,6 +444,18 @@ function recovery(code: string) {
         retryable: false,
         nextAction:
           "Reuse the key only for an identical retry, or generate a new UUID for a new task.",
+      };
+    case "THREAD_ID_REQUIRED":
+      return {
+        retryable: false,
+        nextAction:
+          "Run this operation from a Codex thread that supplies MCP thread metadata.",
+      };
+    case "CREATOR_THREAD_MISMATCH":
+      return {
+        retryable: false,
+        nextAction:
+          "Use the Codex thread that created this unclaimed task, or use the normal claimed-task workflow.",
       };
     case "INTERNAL_ERROR":
       return {
@@ -424,7 +522,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. After claim, use the latest version and secret claim token without repeating agent identity; record actual validation before Done; release nonterminal claims on handoff. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. After claim, use the latest version and secret claim token; record actual validation before Done; release nonterminal claims on handoff. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -450,9 +548,11 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, idempotentHint: true },
     },
-    (input) =>
+    (input, extra) =>
       runTool(async () => {
-        const created = await createAgentTask(prisma, input);
+        const created = await createAgentTask(prisma, input, {
+          threadId: requestThreadId(extra),
+        });
         return compactTask(created.task, created.scopeProvisioning);
       }),
   );
@@ -461,12 +561,19 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "List Actionables",
       description:
-        "List the current agent's unexpired claims, optionally within one feature or bug. Available discovery requires that work item's top-level Actionable ID and never returns arbitrary pending work.",
-      inputSchema: listAgentTasksRequestSchema,
+        "List the current Codex thread's unexpired claims, optionally within one feature or bug. Thread identity comes from request metadata. Available discovery requires that work item's top-level Actionable ID and never returns arbitrary pending work.",
+      inputSchema: listTasksSchema,
       outputSchema: listAgentTasksResponseSchema,
       annotations: readOnly,
     },
-    (input) => runTool(() => listAgentTasks(prisma, input)),
+    (input, extra) =>
+      runTool(() => {
+        const threadId = requestThreadId(extra);
+        return listAgentTasks(prisma, {
+          ...input,
+          agentId: threadAgentId(threadId),
+        });
+      }),
   );
   server.registerTool(
     "actionables.get_task",
@@ -488,14 +595,18 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Claim Actionable",
       description:
-        "Claim one task at its exact listed version within the same explicitly identified feature or bug work item. Returns compact task detail so work can begin immediately. Treat the claim token as a secret capability.",
+        "Claim one task for the current Codex thread at its exact listed version within the same explicitly identified feature or bug work item. Thread identity comes from request metadata. Returns compact task detail so work can begin immediately. Treat the claim token as a secret capability.",
       inputSchema: claimTaskSchema,
       outputSchema: claimTaskOutputSchema,
       annotations: mutation,
     },
-    ({ id, ...input }) =>
+    ({ id, ...input }, extra) =>
       runTool(async () => {
-        const claimed = await claimAgentTask(prisma, id, input);
+        const threadId = requestThreadId(extra);
+        const claimed = await claimAgentTask(prisma, id, {
+          ...input,
+          agentId: threadAgentId(threadId),
+        });
         return {
           task: compactTask(
             await getClaimedAgentTask(prisma, id, {
@@ -546,6 +657,25 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     ({ id, ...input }) =>
       runTool(async () =>
         compactTask(await transitionClaimedAgentTask(prisma, id, input)),
+      ),
+  );
+  server.registerTool(
+    "actionables.dismiss_task",
+    {
+      title: "Dismiss unclaimed Actionable",
+      description:
+        "Dismiss one active unclaimed task created by the current Codex thread. Accepts only the public task ID and a required reason; thread identity and current version are resolved internally. Claimed work must use transition_task.",
+      inputSchema: dismissTaskSchema,
+      outputSchema: compactTaskSchema,
+      annotations: { ...mutation, destructiveHint: true },
+    },
+    ({ id, ...input }, extra) =>
+      runTool(async () =>
+        compactTask(
+          await dismissAgentTask(prisma, id, input, {
+            threadId: requestThreadId(extra),
+          }),
+        ),
       ),
   );
   server.registerTool(

@@ -31,6 +31,10 @@ Restart Codex so it reads both the global configuration and user environment.
 
 ## Agent workflow
 
+Codex supplies its technical thread ID in MCP request metadata. Actionables
+derives claim ownership and creator provenance from that host metadata; agents
+do not supply or invent an `agentId`.
+
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
@@ -41,10 +45,27 @@ The server instructions direct agents to use this sequence:
 6. Mutate with the latest version and secret claim token.
 7. Record actual validation evidence before transitioning to Done.
 8. Release a nonterminal claim when abandoning or handing off work.
+9. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
-Task creation returns the created task detail, so an agent does not need to claim the task merely to verify creation. A child inherits its parent's project, repository, and worktree, and the one-level hierarchy rule prevents creating a grandchild. For a top-level task, existing scope IDs remain supported. When `repositoryPath` and `ensureScope: true` are supplied instead, the server verifies the local Git path, resolves its repository and worktree roots, reuses matching active scope records, and atomically creates any missing project, repository, or worktree with the task. The response reports which scope records were created. Creation does not claim the new task.
+Task creation returns the created task detail and records the calling Codex
+thread as its creator, so an agent does not need to claim the task merely to
+verify creation. A child inherits its parent's project, repository, and
+worktree, and the one-level hierarchy rule prevents creating a grandchild. For
+a top-level task, existing scope IDs remain supported. When `repositoryPath`
+and `ensureScope: true` are supplied instead, the server verifies the local Git
+path, resolves its repository and worktree roots, reuses matching active scope
+records, and atomically creates any missing project, repository, or worktree
+with the task. The response reports which scope records were created. Creation
+does not claim the new task.
+
+`actionables.dismiss_task` resolves the current version internally and reuses
+the same lifecycle, reason, optimistic-concurrency, status-history, and activity
+rules as other transitions. It fails closed when Codex thread metadata is
+missing, the task lacks creator-thread provenance, another thread created it,
+the item is archived or terminal, or it has an active claim. An expired claim
+is reconciled atomically before dismissal.
 
 Automatic scope provisioning is explicit rather than silent: `repositoryPath` alone is rejected, and `ensureScope` cannot be combined with existing scope IDs or `parentId`. Repository and worktree identity is based on canonical local Git paths, not an agent-invented display name.
 
@@ -63,13 +84,25 @@ The endpoint exposes exactly these tools:
 - `actionables.renew_task_claim`
 - `actionables.update_task`
 - `actionables.transition_task`
+- `actionables.dismiss_task`
 - `actionables.record_task_validation`
 - `actionables.release_task`
 
 List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
-Tool schemas describe every input field. Annotations mark reads as read-only, exact-retry-safe creation as idempotent, content replacement and lifecycle transition as potentially destructive, and claim release as a non-destructive coordination mutation.
+Tool schemas describe every model-supplied input field. Thread identity is
+host-derived request metadata and is intentionally absent from those schemas.
+Annotations mark reads as read-only, exact-retry-safe creation as idempotent,
+content replacement and lifecycle transitions (including dismissal) as
+potentially destructive, and claim release as a non-destructive coordination
+mutation.
 
 ## Security boundary
 
 Every MCP request requires the configured bearer token. Host and Origin validation allow loopback only (`127.0.0.1`, `localhost`, or `::1`) to reduce DNS-rebinding risk. A missing Origin is accepted for non-browser MCP clients. Keep the API bound to `127.0.0.1`; exposing it on a network requires a separate reviewed authentication and transport design.
+
+The Codex thread ID is coordination provenance, not a replacement for the MCP
+bearer token or a claimed task's secret capability. A non-Codex client may omit
+thread metadata, and a client already holding the shared bearer token could
+forge it. Creator-thread dismissal therefore remains limited to active,
+unclaimed items; claimed mutations continue to require the claim token.

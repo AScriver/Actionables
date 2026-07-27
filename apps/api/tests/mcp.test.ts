@@ -14,7 +14,8 @@ import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
 const bearerToken = "test-mcp-token-with-at-least-thirty-two-characters";
-const agentId = "codex:mcp-integration";
+const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
+const agentId = `codex:${threadId}`;
 const json = (value: unknown) => value as never;
 
 let databasePath: string;
@@ -61,7 +62,17 @@ async function createTask(overrides: { status?: string; title?: string } = {}) {
   });
 }
 
-async function connectClient(token = bearerToken) {
+function threadMetadata(value: string) {
+  return {
+    threadId: value,
+    "x-codex-turn-metadata": { thread_id: value },
+  };
+}
+
+async function connectClient(
+  token = bearerToken,
+  requestThreadId: string | null = threadId,
+) {
   const client = new Client({ name: "actionables-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(
     new URL(`${address}/mcp`),
@@ -75,6 +86,14 @@ async function connectClient(token = bearerToken) {
     },
   );
   await client.connect(transport);
+  const callToolWithoutThread = client.callTool.bind(client);
+  client.callTool = ((params, ...rest) =>
+    callToolWithoutThread(
+      requestThreadId
+        ? { ...params, _meta: threadMetadata(requestThreadId) }
+        : params,
+      ...rest,
+    )) as typeof client.callTool;
   return { client, transport };
 }
 
@@ -207,6 +226,7 @@ describe("Actionables MCP", () => {
           "actionables.renew_task_claim",
           "actionables.update_task",
           "actionables.transition_task",
+          "actionables.dismiss_task",
           "actionables.record_task_validation",
           "actionables.release_task",
         ].sort(),
@@ -240,6 +260,11 @@ describe("Actionables MCP", () => {
       expect(byName["actionables.transition_task"]).toMatchObject({
         readOnlyHint: false,
         destructiveHint: true,
+      });
+      expect(byName["actionables.dismiss_task"]).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
       });
       expect(byName["actionables.release_task"]).toMatchObject({
         readOnlyHint: false,
@@ -357,7 +382,154 @@ describe("Actionables MCP", () => {
           },
         }),
       ).toBe(1);
+      expect(
+        (
+          await prisma.actionable.findUniqueOrThrow({
+            where: { id: topLevel.recordId },
+          })
+        ).rawFragmentJson,
+      ).toMatchObject({ creatorThreadId: threadId });
     } finally {
+      await transport.close();
+    }
+  });
+
+  it("dismisses only an unclaimed task created by the calling Codex thread", async () => {
+    const { client, transport } = await connectClient();
+    const other = await connectClient(
+      bearerToken,
+      "019fa45f-581d-7bc0-afe3-a2b65171df63",
+    );
+    const withoutThread = await connectClient(bearerToken, null);
+    try {
+      const createArguments = (title: string) => ({
+        idempotencyKey: randomUUID(),
+        ...scope,
+        title,
+      });
+      const created = output<{ id: number; recordId: string; version: number }>(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: createArguments("Same-thread dismissal"),
+        }),
+      );
+      const dismissed = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.dismiss_task",
+          arguments: {
+            id: created.id,
+            reason: "Disposable task created during this Codex thread.",
+          },
+        }),
+      );
+      expect(dismissed).toMatchObject({
+        status: "Dismissed",
+        version: created.version + 1,
+      });
+      const stored = await prisma.actionable.findUniqueOrThrow({
+        where: { id: created.recordId },
+        include: {
+          statusHistory: { orderBy: { occurredAt: "desc" }, take: 1 },
+          activityEvents: { orderBy: { occurredAt: "desc" }, take: 1 },
+        },
+      });
+      expect(stored).toMatchObject({
+        status: "Dismissed",
+        dismissalReasonMd: "Disposable task created during this Codex thread.",
+      });
+      expect(stored.statusHistory[0]).toMatchObject({
+        previousStatus: "Inbox",
+        newStatus: "Dismissed",
+        origin: `agent:${agentId}`,
+      });
+      expect(stored.activityEvents[0]).toMatchObject({
+        type: "dismissed",
+        metadataJson: expect.objectContaining({
+          reason: "Disposable task created during this Codex thread.",
+          origin: `agent:${agentId}`,
+        }),
+      });
+
+      const protectedTask = output<{
+        id: number;
+        recordId: string;
+        version: number;
+      }>(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: createArguments("Thread-protected dismissal"),
+        }),
+      );
+      const wrongThread = errorOutput(
+        await other.client.callTool({
+          name: "actionables.dismiss_task",
+          arguments: {
+            id: protectedTask.id,
+            reason: "Must not dismiss from another thread.",
+          },
+        }),
+      );
+      expect(wrongThread).toMatchObject({
+        code: "CREATOR_THREAD_MISMATCH",
+        retryable: false,
+      });
+      expect(
+        (
+          await prisma.actionable.findUniqueOrThrow({
+            where: { id: protectedTask.recordId },
+          })
+        ).status,
+      ).toBe("Inbox");
+
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: protectedTask.id,
+            workItemId: protectedTask.id,
+            version: protectedTask.version,
+          },
+        }),
+      );
+      const liveClaim = errorOutput(
+        await client.callTool({
+          name: "actionables.dismiss_task",
+          arguments: {
+            id: protectedTask.id,
+            reason: "Claimed work must use transition_task.",
+          },
+        }),
+      );
+      expect(liveClaim).toMatchObject({
+        code: "ALREADY_CLAIMED",
+        retryable: true,
+      });
+      output(
+        await client.callTool({
+          name: "actionables.release_task",
+          arguments: {
+            id: protectedTask.id,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
+
+      const missingThread = errorOutput(
+        await withoutThread.client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "mine" },
+        }),
+      );
+      expect(missingThread).toMatchObject({
+        code: "THREAD_ID_REQUIRED",
+        retryable: false,
+      });
+    } finally {
+      await withoutThread.transport.close();
+      await other.transport.close();
       await transport.close();
     }
   });
@@ -645,7 +817,6 @@ describe("Actionables MCP", () => {
         await client.callTool({
           name: "actionables.list_tasks",
           arguments: {
-            agentId,
             view: "available",
             workItemId: task.sourceOrdinal,
             limit: 100,
@@ -665,7 +836,6 @@ describe("Actionables MCP", () => {
           name: "actionables.claim_task",
           arguments: {
             id: task.sourceOrdinal,
-            agentId,
             workItemId: task.sourceOrdinal,
             version: available!.version,
             leaseMinutes: 30,
@@ -673,6 +843,13 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(claimed.task.title).toBe("End-to-end MCP workflow");
+      expect(
+        (
+          await prisma.agentTaskClaim.findUniqueOrThrow({
+            where: { actionableId: task.id },
+          })
+        ).agentId,
+      ).toBe(agentId);
       const credentials = {
         id: task.sourceOrdinal,
         claimToken: claimed.claim.claimToken,
@@ -846,7 +1023,6 @@ describe("Actionables MCP", () => {
           name: "actionables.claim_task",
           arguments: {
             id: task.sourceOrdinal,
-            agentId,
             workItemId: task.sourceOrdinal,
             version: task.version,
             leaseMinutes: 30,
@@ -893,7 +1069,6 @@ describe("Actionables MCP", () => {
       const invalid = await client.callTool({
         name: "actionables.list_tasks",
         arguments: {
-          agentId,
           view: "available",
           workItemId: task.sourceOrdinal,
           limit: 101,
@@ -909,7 +1084,6 @@ describe("Actionables MCP", () => {
           name: "actionables.claim_task",
           arguments: {
             id: task.sourceOrdinal,
-            agentId,
             workItemId: task.sourceOrdinal,
             version: task.version,
             leaseMinutes: 30,
