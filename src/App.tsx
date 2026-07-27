@@ -1560,6 +1560,11 @@ function AgentClaimPanel({
   onReleaseExpired: () => void;
 }) {
   const claim = selected.agentClaim;
+  const claimantUrl =
+    claim?.agentId.startsWith("codex:") &&
+    claim.agentId.length > "codex:".length
+      ? `codex://threads/${claim.agentId.slice("codex:".length)}`
+      : null;
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
   const startPrompt =
@@ -1609,7 +1614,13 @@ function AgentClaimPanel({
         <dl className="agent-claim-details">
           <div>
             <dt>Claimant</dt>
-            <dd className="mono">{claim.agentId}</dd>
+            <dd className="mono">
+              {claimantUrl ? (
+                <a href={claimantUrl}>{claimantUrl}</a>
+              ) : (
+                claim.agentId
+              )}
+            </dd>
           </div>
           <div>
             <dt>Lease expiry</dt>

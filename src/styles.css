@@ -1407,6 +1407,20 @@ button {
   line-height: 1.35;
 }
 
+.agent-claim-details dd a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.agent-claim-details dd a:hover {
+  color: var(--accent-strong);
+}
+
+.agent-claim-details dd a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .agent-start-prompt {
   display: flex;
   align-items: flex-end;

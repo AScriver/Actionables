@@ -10,7 +10,11 @@ async function detailFixture(page: Page) {
   return (await response.json()).item;
 }
 
-function withClaim(item: Record<string, unknown>, state: ClaimState) {
+function withClaim(
+  item: Record<string, unknown>,
+  state: ClaimState,
+  agentId = `agent:browser-${state}`,
+) {
   const now = Date.now();
   return {
     ...item,
@@ -18,7 +22,7 @@ function withClaim(item: Record<string, unknown>, state: ClaimState) {
       state === "unclaimed"
         ? null
         : {
-            agentId: `agent:browser-${state}`,
+            agentId,
             claimedAt: new Date(now - 45 * 60_000).toISOString(),
             renewedAt: new Date(now - 35 * 60_000).toISOString(),
             leaseExpiresAt: new Date(
@@ -37,12 +41,13 @@ async function routeDetail(
 ) {
   let state = initialState;
   let currentItem = item;
+  let agentId: string | undefined;
   await page.route(`**/api/actionables/${ACTIONABLE_ID}`, async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ item: withClaim(currentItem, state) }),
+        body: JSON.stringify({ item: withClaim(currentItem, state, agentId) }),
       });
       return;
     }
@@ -55,8 +60,11 @@ async function routeDetail(
     setItem(next: Record<string, unknown>) {
       currentItem = next;
     },
+    setAgentId(next: string | undefined) {
+      agentId = next;
+    },
     item(next: ClaimState = state) {
-      return withClaim(currentItem, next);
+      return withClaim(currentItem, next, agentId);
     },
   };
 }
@@ -102,6 +110,29 @@ test("top-level and direct-subtask prompts copy the exact displayed suggestion",
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(subtaskPrompt);
+});
+
+test("Codex claimants link to their thread while other claimants remain plain text", async ({
+  page,
+}) => {
+  const original = await detailFixture(page);
+  const fixture = await routeDetail(page, original, "active");
+  fixture.setAgentId("codex:019fa5bb-765c-7011-9e41-164278c014c3");
+  await page.goto(`/actionables/${ACTIONABLE_ID}`);
+
+  const claimantLink = page.getByRole("link", {
+    name: "codex://threads/019fa5bb-765c-7011-9e41-164278c014c3",
+  });
+  await expect(claimantLink).toHaveAttribute(
+    "href",
+    "codex://threads/019fa5bb-765c-7011-9e41-164278c014c3",
+  );
+
+  fixture.setAgentId("agent:legacy");
+  await page.reload();
+  const panel = page.locator(".agent-claim-panel");
+  await expect(panel.getByText("agent:legacy", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("link")).toHaveCount(0);
 });
 
 test("claim panel covers unclaimed, active, expired, release, conflict, error, desktop, and mobile states", async ({
