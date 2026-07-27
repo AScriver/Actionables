@@ -50,6 +50,7 @@ import {
   type ImportPreviewResponse,
   type ScopeOptionsResponse,
   type Status,
+  type TaskBreakdownTemplate,
   type UserSourceReferenceInput,
   type ValidationOutcome,
   type ValidationType,
@@ -70,6 +71,7 @@ import {
   createActionable,
   createRepository,
   createSubtask,
+  createTaskBreakdown,
   commitPortableImport,
   detachParent,
   fetchActionable,
@@ -647,6 +649,8 @@ function RelationshipSection({
   onMutated: (saved: ActionableDetail, notice: string) => void;
 }) {
   const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [taskBreakdown, setTaskBreakdown] =
+    useState<TaskBreakdownTemplate>("feature");
   const [childId, setChildId] = useState("");
   const [prerequisiteId, setPrerequisiteId] = useState("");
   const [dependentId, setDependentId] = useState("");
@@ -768,6 +772,38 @@ function RelationshipSection({
             Create
           </button>
         </form>
+        {!selected.parentId && !selected.archiveState.isArchived && (
+          <div className="relationship-add">
+            <select
+              value={taskBreakdown}
+              onChange={(event) =>
+                setTaskBreakdown(event.target.value as TaskBreakdownTemplate)
+              }
+              aria-label="Task breakdown template"
+            >
+              <option value="bug">Bug breakdown</option>
+              <option value="feature">Feature breakdown</option>
+              <option value="research">Research breakdown</option>
+              <option value="migration">Migration breakdown</option>
+            </select>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() =>
+                void run(
+                  () =>
+                    createTaskBreakdown(selected.id, {
+                      version: selected.version,
+                      template: taskBreakdown,
+                    }),
+                  `${taskBreakdown[0]!.toUpperCase()}${taskBreakdown.slice(1)} task breakdown created.`,
+                )
+              }
+            >
+              Apply template
+            </button>
+          </div>
+        )}
         {!selected.parentId && (
           <div className="relationship-add">
             <select

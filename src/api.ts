@@ -17,6 +17,7 @@ import {
   type ArchiveTargetKind,
   type CreateDependencyRequest,
   type CreateSubtaskRequest,
+  type CreateTaskBreakdownRequest,
   type CreateValidationRecordRequest,
   type CreateActionableRequest,
   type CreateRepositoryRequest,
@@ -266,6 +267,12 @@ async function relationshipRequest(
 
 export const createSubtask = (id: number, input: CreateSubtaskRequest) =>
   relationshipRequest(`/api/actionables/${id}/subtasks`, "POST", input);
+
+export const createTaskBreakdown = (
+  id: number,
+  input: CreateTaskBreakdownRequest,
+) =>
+  relationshipRequest(`/api/actionables/${id}/task-breakdowns`, "POST", input);
 
 export const setParent = (id: number, input: SetParentRequest) =>
   relationshipRequest(`/api/actionables/${id}/parent`, "PUT", input);

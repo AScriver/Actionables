@@ -114,6 +114,7 @@ export const activityTypeSchema = z.enum([
   "hierarchy-attached",
   "hierarchy-detached",
   "hierarchy-reassigned",
+  "task-breakdown-created",
   "dependency-added",
   "dependency-removed",
   "dependency-waived",
@@ -978,6 +979,20 @@ export const createSubtaskRequestSchema = z
   })
   .strict();
 
+export const taskBreakdownTemplateSchema = z.enum([
+  "bug",
+  "feature",
+  "research",
+  "migration",
+]);
+
+export const createTaskBreakdownRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    template: taskBreakdownTemplateSchema,
+  })
+  .strict();
+
 export const createAgentTaskRequestSchema = z
   .object({
     idempotencyKey: z
@@ -1672,6 +1687,10 @@ export type HandoffClaimedAgentTaskRequest = z.infer<
   typeof handoffClaimedAgentTaskRequestSchema
 >;
 export type CreateSubtaskRequest = z.infer<typeof createSubtaskRequestSchema>;
+export type TaskBreakdownTemplate = z.infer<typeof taskBreakdownTemplateSchema>;
+export type CreateTaskBreakdownRequest = z.infer<
+  typeof createTaskBreakdownRequestSchema
+>;
 export type CreateAgentTaskRequest = z.infer<
   typeof createAgentTaskRequestSchema
 >;

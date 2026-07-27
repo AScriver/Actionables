@@ -62,6 +62,15 @@ test("relationships remain compact, navigable, responsive, and derived-blocking 
   await expect(
     page.getByRole("button", { name: /T-003 browser subtask/ }),
   ).toBeVisible();
+  await page.getByLabel("Task breakdown template").selectOption("feature");
+  await page.getByRole("button", { name: "Apply template" }).click();
+  await expect(page.getByRole("heading", { name: /Subtasks 5/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Define acceptance criteria/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Validate the end-to-end flow/ }),
+  ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("T003-relationships-desktop.png"),
     fullPage: true,

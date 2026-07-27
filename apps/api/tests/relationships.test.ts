@@ -134,6 +134,98 @@ async function move(
 }
 
 describe("hierarchy relationships", () => {
+  it.each([
+    [
+      "bug",
+      [
+        "Reproduce and isolate the bug",
+        "Implement the fix",
+        "Add regression coverage",
+        "Validate affected behavior",
+      ],
+    ],
+    [
+      "feature",
+      [
+        "Define acceptance criteria",
+        "Implement the feature",
+        "Add automated coverage",
+        "Validate the end-to-end flow",
+      ],
+    ],
+    [
+      "research",
+      [
+        "Define the research question",
+        "Gather and assess evidence",
+        "Document findings and recommendation",
+      ],
+    ],
+    [
+      "migration",
+      [
+        "Inventory affected data and compatibility",
+        "Implement the migration and rollback path",
+        "Test the migration on representative data",
+        "Verify production readiness",
+      ],
+    ],
+  ])("creates an atomic %s task breakdown", async (template, titles) => {
+    const parent = await create(`${template} breakdown parent`);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${parent.id}/task-breakdowns`,
+      payload: { version: parent.version, template },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const saved = response.json().item;
+    expect(saved.version).toBe(parent.version + 1);
+    expect(
+      saved.relationships.subtasks.map(
+        (relationship: { child: { title: string } }) =>
+          relationship.child.title,
+      ),
+    ).toEqual(titles);
+    expect(
+      saved.activity.some(
+        (event: { type: string; context: Record<string, string> }) =>
+          event.type === "task-breakdown-created" &&
+          event.context.template === template &&
+          event.context.subtasksCreated === String(titles.length),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects stale and nested task breakdown requests without partial creation", async () => {
+    const parent = await create("Task breakdown concurrency parent");
+    const first = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${parent.id}/task-breakdowns`,
+      payload: { version: parent.version, template: "research" },
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    const actionableCount = await prisma.actionable.count();
+
+    const stale = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${parent.id}/task-breakdowns`,
+      payload: { version: parent.version, template: "bug" },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().current.relationships.subtasks).toHaveLength(3);
+
+    const child = first.json().item.relationships.subtasks[0].child;
+    const nested = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${child.id}/task-breakdowns`,
+      payload: { version: child.version, template: "migration" },
+    });
+    expect(nested.statusCode).toBe(422);
+    expect(nested.json().code).toBe("HIERARCHY_DEPTH_EXCEEDED");
+    expect(await prisma.actionable.count()).toBe(actionableCount);
+    expect((await get(parent.id)).relationships.subtasks).toHaveLength(3);
+  });
+
   it("creates, rejects invalid depth/scope/self, reassigns with versions, and detaches audibly", async () => {
     let parent = await create("Parent");
     let replacement = await create("Replacement");

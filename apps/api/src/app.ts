@@ -11,6 +11,7 @@ import {
   createRepositoryRequestSchema,
   createRepositoryResponseSchema,
   createSubtaskRequestSchema,
+  createTaskBreakdownRequestSchema,
   createValidationRecordRequestSchema,
   createActionableRequestSchema,
   dependencyActionRequestSchema,
@@ -58,6 +59,7 @@ import {
 import {
   createDependency,
   createSubtask,
+  createTaskBreakdown,
   detachParent,
   removeDependency,
   restoreDependency,
@@ -827,6 +829,30 @@ export function buildApp({
       }
       return actionableDetailResponseSchema.parse({
         item: await createSubtask(prisma, id, parsed.data),
+      });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/actionables/:id/task-breakdowns",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+      const parsed = createTaskBreakdownRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the task breakdown fields.",
+          {
+            errors: fieldErrors(parsed.error),
+          },
+        );
+      }
+      return actionableDetailResponseSchema.parse({
+        item: await createTaskBreakdown(prisma, id, parsed.data),
       });
     },
   );

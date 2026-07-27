@@ -3,11 +3,13 @@ import type {
   ActionableDetail,
   CreateDependencyRequest,
   CreateSubtaskRequest,
+  CreateTaskBreakdownRequest,
   DependencyActionRequest,
   DetachParentRequest,
   Effort,
   Priority,
   SetParentRequest,
+  TaskBreakdownTemplate,
 } from "@actionables/contracts";
 import type { Prisma } from "./generated/prisma/client.js";
 import type { AppPrismaClient } from "./database.js";
@@ -28,6 +30,33 @@ type CreateSubtaskOptions = {
   rawFragment?: Prisma.InputJsonValue;
   statusProvenance?: string;
 };
+
+const taskBreakdownTemplates: Record<TaskBreakdownTemplate, readonly string[]> =
+  {
+    bug: [
+      "Reproduce and isolate the bug",
+      "Implement the fix",
+      "Add regression coverage",
+      "Validate affected behavior",
+    ],
+    feature: [
+      "Define acceptance criteria",
+      "Implement the feature",
+      "Add automated coverage",
+      "Validate the end-to-end flow",
+    ],
+    research: [
+      "Define the research question",
+      "Gather and assess evidence",
+      "Document findings and recommendation",
+    ],
+    migration: [
+      "Inventory affected data and compatibility",
+      "Implement the migration and rollback path",
+      "Test the migration on representative data",
+      "Verify production readiness",
+    ],
+  };
 
 class StaleRelationshipError extends Error {
   constructor(public readonly ordinal: number) {
@@ -200,6 +229,92 @@ async function assertNoDependencyCycle(
   }
 }
 
+async function createSubtaskRecord(
+  tx: Transaction,
+  parent: Awaited<ReturnType<typeof requireActionable>>,
+  ordinal: number,
+  title: string,
+  options: CreateSubtaskOptions,
+) {
+  const child = await tx.actionable.create({
+    data: {
+      externalKey: options.externalKey ?? `manual-${randomUUID()}`,
+      sourceOrdinal: ordinal,
+      title,
+      priority: options.priority ?? "Unset",
+      status: "Inbox",
+      statusProvenance:
+        options.statusProvenance ??
+        "Created manually as a subtask with neutral Inbox status.",
+      effort: options.effort ?? "Unknown",
+      evidenceState: "Unclassified",
+      updatedLabel: "just now",
+      finding: "",
+      description: options.description ?? "",
+      researchJson: json([]),
+      validationJson: json(options.validation ?? []),
+      filesJson: json([]),
+      tagsJson: json([]),
+      userSourcesJson: json([]),
+      blockedByOrdinalsJson: json([]),
+      blocksOrdinalsJson: json([]),
+      childOrdinalsJson: json([]),
+      importProvider: "MANUAL",
+      sourceContainerId: "",
+      sourceThread: "",
+      contentHash: "",
+      rawFragmentJson: options.rawFragment ?? json({ kind: "manual-subtask" }),
+      projectId: parent.projectId,
+      repositoryId: parent.repositoryId,
+      worktreeId: parent.worktreeId,
+      statusHistory: {
+        create: {
+          previousStatus: null,
+          newStatus: "Inbox",
+          origin: options.origin ?? "subtask-create",
+        },
+      },
+      activityEvents: {
+        create: {
+          type: "status-transition",
+          summary: "Created as Inbox subtask",
+          metadataJson: json({
+            previousStatus: "",
+            newStatus: "Inbox",
+            origin: options.origin ?? "subtask-create",
+          }),
+        },
+      },
+    },
+  });
+  const relationship = await tx.hierarchyRelationship.create({
+    data: {
+      parentId: parent.id,
+      childId: child.id,
+      provenance: options.origin ?? "user",
+    },
+  });
+  const context = {
+    hierarchyRelationshipId: relationship.id,
+    parentOrdinal: String(parent.sourceOrdinal),
+    childOrdinal: String(child.sourceOrdinal),
+  };
+  await activity(
+    tx,
+    parent.id,
+    "hierarchy-attached",
+    `Created subtask ${child.sourceOrdinal}`,
+    context,
+  );
+  await activity(
+    tx,
+    child.id,
+    "hierarchy-attached",
+    `Attached to parent ${parent.sourceOrdinal}`,
+    context,
+  );
+}
+
 export async function createSubtask(
   prisma: AppPrismaClient,
   parentOrdinal: number,
@@ -220,84 +335,51 @@ export async function createSubtask(
       _max: { sourceOrdinal: true },
     });
     const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
-    const child = await tx.actionable.create({
-      data: {
-        externalKey: options.externalKey ?? `manual-${randomUUID()}`,
-        sourceOrdinal: ordinal,
-        title: input.title,
-        priority: options.priority ?? "Unset",
-        status: "Inbox",
-        statusProvenance:
-          options.statusProvenance ??
-          "Created manually as a subtask with neutral Inbox status.",
-        effort: options.effort ?? "Unknown",
-        evidenceState: "Unclassified",
-        updatedLabel: "just now",
-        finding: "",
-        description: options.description ?? "",
-        researchJson: json([]),
-        validationJson: json(options.validation ?? []),
-        filesJson: json([]),
-        tagsJson: json([]),
-        userSourcesJson: json([]),
-        blockedByOrdinalsJson: json([]),
-        blocksOrdinalsJson: json([]),
-        childOrdinalsJson: json([]),
-        importProvider: "MANUAL",
-        sourceContainerId: "",
-        sourceThread: "",
-        contentHash: "",
-        rawFragmentJson:
-          options.rawFragment ?? json({ kind: "manual-subtask" }),
-        projectId: parent.projectId,
-        repositoryId: parent.repositoryId,
-        worktreeId: parent.worktreeId,
-        statusHistory: {
-          create: {
-            previousStatus: null,
-            newStatus: "Inbox",
-            origin: options.origin ?? "subtask-create",
-          },
-        },
-        activityEvents: {
-          create: {
-            type: "status-transition",
-            summary: "Created as Inbox subtask",
-            metadataJson: json({
-              previousStatus: "",
-              newStatus: "Inbox",
-              origin: options.origin ?? "subtask-create",
-            }),
-          },
-        },
-      },
-    });
-    const relationship = await tx.hierarchyRelationship.create({
-      data: {
-        parentId: parent.id,
-        childId: child.id,
-        provenance: options.origin ?? "user",
-      },
-    });
+    await createSubtaskRecord(tx, parent, ordinal, input.title, options);
     await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
-    const context = {
-      hierarchyRelationshipId: relationship.id,
-      parentOrdinal: String(parent.sourceOrdinal),
-      childOrdinal: String(child.sourceOrdinal),
-    };
+  });
+}
+
+export async function createTaskBreakdown(
+  prisma: AppPrismaClient,
+  parentOrdinal: number,
+  input: CreateTaskBreakdownRequest,
+) {
+  return runMutation(prisma, parentOrdinal, async (tx) => {
+    const parent = await requireActionable(tx, parentOrdinal, "parent");
+    requireVersion(parent, input.version);
+    if (parent.hierarchyAsChild.length) {
+      throw new DomainValidationError(
+        "HIERARCHY_DEPTH_EXCEEDED",
+        { parent: ["A subtask cannot also be a parent."] },
+        "Only one hierarchy level is supported.",
+      );
+    }
+    const highest = await tx.actionable.aggregate({
+      _max: { sourceOrdinal: true },
+    });
+    const firstOrdinal = (highest._max.sourceOrdinal ?? 0) + 1;
+    const titles = taskBreakdownTemplates[input.template];
+    for (const [index, title] of titles.entries()) {
+      await createSubtaskRecord(tx, parent, firstOrdinal + index, title, {
+        origin: `task-breakdown:${input.template}`,
+        rawFragment: json({
+          kind: "task-breakdown",
+          template: input.template,
+        }),
+        statusProvenance: `Created from the built-in ${input.template} task breakdown with neutral Inbox status.`,
+      });
+    }
+    await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
     await activity(
       tx,
       parent.id,
-      "hierarchy-attached",
-      `Created subtask ${child.sourceOrdinal}`,
-      context,
-    );
-    await activity(
-      tx,
-      child.id,
-      "hierarchy-attached",
-      `Attached to parent ${parent.sourceOrdinal}`,
-      context,
+      "task-breakdown-created",
+      `Created ${input.template} task breakdown`,
+      {
+        template: input.template,
+        subtasksCreated: String(titles.length),
+      },
     );
   });
 }
