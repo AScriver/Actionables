@@ -639,6 +639,14 @@ export async function listAgentTasks(
         }
       : {
           ...baseWhere,
+          status: { notIn: [...terminalStatuses, "Blocked"] },
+          dependenciesAsDependent: {
+            none: {
+              removedAt: null,
+              waivedAt: null,
+              prerequisite: { status: { not: "Done" } },
+            },
+          },
           OR: [
             { agentTaskClaim: { is: null } },
             {

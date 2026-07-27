@@ -55,6 +55,11 @@ The server instructions direct agents to use this sequence:
 
 A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
+Available discovery returns only active, unarchived, nonterminal tasks that are
+not manually blocked, have no unresolved dependency, and have no unexpired
+claim. Blocking and claim eligibility are filtered before the result limit is
+applied, so blocked tasks cannot hide safe work.
+
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
 verify creation. A child inherits its parent's project, repository, and

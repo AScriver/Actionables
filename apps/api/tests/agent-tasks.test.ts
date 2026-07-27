@@ -178,6 +178,10 @@ describe("agent task claims", () => {
   it("requires a feature or bug root and keeps discovery and claims inside it", async () => {
     const root = await createTask({ title: "Feature root" });
     const child = await createTask({ title: "Feature task" });
+    const manuallyBlocked = await createTask({
+      status: "Blocked",
+      title: "Manually blocked feature task",
+    });
     const unrelated = await createTask({ title: "Other feature task" });
     await prisma.actionable.update({
       where: { id: child.id },
@@ -193,12 +197,27 @@ describe("agent task claims", () => {
         provenance: "test",
       },
     });
+    await prisma.hierarchyRelationship.create({
+      data: {
+        parentId: root.id,
+        childId: manuallyBlocked.id,
+        provenance: "test",
+      },
+    });
     await prisma.dependencyRelationship.create({
       data: {
         dependentId: child.id,
         prerequisiteId: unrelated.id,
         provenance: "test",
       },
+    });
+    await prisma.actionable.update({
+      where: { id: child.id },
+      data: { updatedAt: new Date("2030-01-01T00:00:00.000Z") },
+    });
+    await prisma.actionable.update({
+      where: { id: manuallyBlocked.id },
+      data: { updatedAt: new Date("2031-01-01T00:00:00.000Z") },
     });
 
     await expect(
@@ -213,21 +232,11 @@ describe("agent task claims", () => {
       agentId: "agent:session",
       view: "available",
       workItemId: root.sourceOrdinal,
-      limit: 100,
+      limit: 1,
     });
-    expect(
-      available.items.map((item) => item.id).sort((a, b) => a - b),
-    ).toEqual([root.sourceOrdinal, child.sourceOrdinal].sort((a, b) => a - b));
-    expect(
-      available.items.find((item) => item.id === child.sourceOrdinal),
-    ).toMatchObject({
-      workItemId: root.sourceOrdinal,
-      parentId: root.sourceOrdinal,
-      findingExcerpt: "A focused finding for the feature task.",
-      tags: ["feature", "agent"],
-      isEffectivelyBlocked: true,
-      unresolvedDependencyCount: 1,
-    });
+    expect(available.items.map((item) => item.id)).toEqual([
+      root.sourceOrdinal,
+    ]);
 
     await expect(
       claimAgentTask(prisma, unrelated.sourceOrdinal, {
@@ -238,10 +247,36 @@ describe("agent task claims", () => {
       }),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
 
+    await prisma.actionable.update({
+      where: { id: unrelated.id },
+      data: { status: "Done" },
+    });
+    const unblockedAvailable = await listAgentTasks(prisma, {
+      agentId: "agent:session",
+      view: "available",
+      workItemId: root.sourceOrdinal,
+      limit: 100,
+    });
+    expect(
+      unblockedAvailable.items.map((item) => item.id).sort((a, b) => a - b),
+    ).toEqual([root.sourceOrdinal, child.sourceOrdinal].sort((a, b) => a - b));
+    expect(
+      unblockedAvailable.items.find((item) => item.id === child.sourceOrdinal),
+    ).toMatchObject({
+      workItemId: root.sourceOrdinal,
+      parentId: root.sourceOrdinal,
+      findingExcerpt: "A focused finding for the feature task.",
+      tags: ["feature", "agent"],
+      isEffectivelyBlocked: false,
+      unresolvedDependencyCount: 0,
+    });
+
     await claimAgentTask(prisma, child.sourceOrdinal, {
       agentId: "agent:session",
       workItemId: root.sourceOrdinal,
-      version: child.version,
+      version: unblockedAvailable.items.find(
+        (item) => item.id === child.sourceOrdinal,
+      )!.version,
       leaseMinutes: 30,
     });
     const mine = await listAgentTasks(prisma, {
