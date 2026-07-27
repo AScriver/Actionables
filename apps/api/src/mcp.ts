@@ -5,6 +5,7 @@ import {
   agentTaskListViewSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
+  handoffClaimedAgentTaskRequestSchema,
   listAgentTasksResponseSchema,
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
@@ -28,6 +29,7 @@ import {
   createAgentTask,
   dismissAgentTask,
   getClaimedAgentTask,
+  handoffClaimedAgentTask,
   listAgentTasks,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
@@ -109,6 +111,9 @@ const dismissTaskSchema = dismissAgentTaskRequestSchema.extend({
 });
 const recordValidationSchema =
   recordClaimedAgentTaskValidationRequestSchema.extend({ id: idSchema });
+const handoffTaskSchema = handoffClaimedAgentTaskRequestSchema.extend({
+  id: idSchema,
+});
 
 const compactReferenceSchema = z
   .object({
@@ -175,6 +180,7 @@ const compactTaskSchema = z
           .object({
             path: z.string().max(400),
             lines: z.string().max(80).optional(),
+            symbol: z.string().max(160).optional(),
           })
           .strict(),
       )
@@ -261,6 +267,13 @@ const claimTaskOutputSchema = z
   })
   .strict();
 
+const handoffTaskOutputSchema = z
+  .object({
+    task: compactTaskSchema,
+    claimReleased: z.literal(true),
+  })
+  .strict();
+
 function truncate(value: string, max: number) {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
@@ -316,6 +329,9 @@ function compactTask(
     files: task.files.slice(0, 6).map((file) => ({
       path: compactText(file.path, 400, "files"),
       ...(file.lines ? { lines: compactText(file.lines, 80, "files") } : {}),
+      ...(file.symbol
+        ? { symbol: compactText(file.symbol, 160, "files") }
+        : {}),
     })),
     userSources: task.userSources.slice(0, 5).map((source) => ({
       type: source.type,
@@ -556,7 +572,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. After claim, use the latest version and secret claim token. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Release nonterminal claims on handoff. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; claim returns task detail. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. After claim, use the latest version and secret claim token. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -747,6 +763,22 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       runTool(async () =>
         compactTask(await recordClaimedAgentTaskValidation(prisma, id, input)),
       ),
+  );
+  server.registerTool(
+    "actionables.handoff_task",
+    {
+      title: "Handoff claimed Actionable",
+      description:
+        "Atomically save handoff findings, additive file references, research, planned checks, and optional actual validation, then release the claim. If any requested write fails, no handoff content is saved and the claim remains active.",
+      inputSchema: handoffTaskSchema,
+      outputSchema: handoffTaskOutputSchema,
+      annotations: { ...mutation, destructiveHint: true },
+    },
+    ({ id, ...input }) =>
+      runTool(async () => ({
+        task: compactTask(await handoffClaimedAgentTask(prisma, id, input)),
+        claimReleased: true as const,
+      })),
   );
   server.registerTool(
     "actionables.release_task",

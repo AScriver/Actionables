@@ -81,6 +81,14 @@ After claim, the token identifies the stored agent claim. Get, update, transitio
 
 Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate appended research notes and added source references are ignored.
 
+Use `actionables.handoff_task` when another agent or session must continue
+claimed work. It atomically replaces the finding, adds exact-deduplicated file
+references and research notes, appends planned checks, optionally records one
+actual validation result through the normal validation rules, and releases the
+claim. Every supplied handoff write and the release share one transaction: if
+any write fails, none of the handoff content persists and the claim remains
+active. The existing `release_task` remains the release-only operation.
+
 An `actionables.update_task` call with `appendResearch` returns only the
 authoritative research mutation receipt: `id`, latest `version`, current
 `status`, `appended`, and `duplicatesIgnored`. When at least one note was
@@ -112,6 +120,7 @@ The endpoint exposes exactly these tools:
 - `actionables.transition_task`
 - `actionables.dismiss_task`
 - `actionables.record_task_validation`
+- `actionables.handoff_task`
 - `actionables.release_task`
 
 List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.

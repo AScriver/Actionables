@@ -8,6 +8,7 @@ import {
   AgentTaskClaimError,
   claimAgentTask,
   dismissAgentTask,
+  handoffClaimedAgentTask,
   listAgentTasks,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
@@ -647,6 +648,122 @@ describe("agent task claims", () => {
         })
       ).map((event) => event.type),
     ).toEqual(["agent-claimed", "agent-released"]);
+  });
+
+  it("atomically saves handoff state and releases only after every write succeeds", async () => {
+    const task = await createTask({
+      finding: "Original finding",
+      validation: ["Run the existing check."],
+    });
+    const claimed = await claimAgentTask(prisma, task.sourceOrdinal, {
+      agentId: "agent:handoff",
+      workItemId: task.sourceOrdinal,
+      version: task.version,
+      leaseMinutes: 30,
+    });
+    const inProgress = await transitionClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+        status: "In progress",
+      },
+    );
+
+    await expect(
+      handoffClaimedAgentTask(prisma, task.sourceOrdinal, {
+        claimToken: claimed.claim.claimToken,
+        version: inProgress.version,
+        finding: "Must roll back",
+        addFiles: [{ path: "src/rolled-back.ts" }],
+        validation: {
+          type: "Command",
+          outcome: "Passed",
+          notes: "",
+          evidence: "",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_EVIDENCE_REQUIRED" });
+    const afterFailure = await prisma.actionable.findUniqueOrThrow({
+      where: { id: task.id },
+      include: { agentTaskClaim: true },
+    });
+    expect(afterFailure).toMatchObject({
+      version: inProgress.version,
+      finding: "Original finding",
+      filesJson: [],
+      agentTaskClaim: expect.objectContaining({
+        agentId: "agent:handoff",
+      }),
+    });
+
+    const handedOff = await handoffClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: inProgress.version,
+        finding: "The implementation is ready for review.",
+        addFiles: [
+          {
+            path: "apps/api/src/agent-tasks.ts",
+            symbol: "handoffClaimedAgentTask",
+          },
+          {
+            path: "apps/api/src/agent-tasks.ts",
+            symbol: "handoffClaimedAgentTask",
+          },
+        ],
+        appendResearch: ["The claimed mutation is the atomic boundary."],
+        appendPlannedValidation: ["Run the focused handoff test."],
+        validation: {
+          type: "Command",
+          outcome: "Passed",
+          notes: "Focused handoff coverage passed.",
+          evidence: "vitest exited 0.",
+        },
+      },
+      new Date("2026-07-25T12:15:00.000Z"),
+    );
+
+    expect(handedOff).toMatchObject({
+      version: inProgress.version + 2,
+      finding: "The implementation is ready for review.",
+      research: ["The claimed mutation is the atomic boundary."],
+      validation: ["Run the existing check.", "Run the focused handoff test."],
+      files: [
+        {
+          path: "apps/api/src/agent-tasks.ts",
+          symbol: "handoffClaimedAgentTask",
+        },
+      ],
+      agentClaim: null,
+    });
+    expect(handedOff.validationRecords.at(-1)).toMatchObject({
+      outcome: "Passed",
+      origin: "agent:agent:handoff",
+      qualifiesForCompletion: true,
+    });
+    expect(
+      await prisma.agentTaskClaim.findUnique({
+        where: { actionableId: task.id },
+      }),
+    ).toBeNull();
+    expect(
+      (
+        await prisma.activityEvent.findMany({
+          where: { actionableId: task.id },
+          orderBy: { occurredAt: "asc" },
+        })
+      ).map((event) => event.type),
+    ).toEqual(
+      expect.arrayContaining([
+        "agent-updated",
+        "validation-recorded",
+        "agent-released",
+      ]),
+    );
   });
 
   it("reclaims expired leases and records the observed expiry", async () => {

@@ -9,6 +9,7 @@ import {
   claimAgentTaskResponseSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
+  handoffClaimedAgentTaskRequestSchema,
   listAgentTasksRequestSchema,
   listAgentTasksResponseSchema,
   recordClaimedAgentTaskValidationRequestSchema,
@@ -17,6 +18,7 @@ import {
   releaseExpiredAgentClaimRequestSchema,
   renewAgentTaskClaimRequestSchema,
   renewAgentTaskClaimResponseSchema,
+  sourceFileSchema,
   transitionClaimedAgentTaskRequestSchema,
   updateActionableRequestSchema,
   updateClaimedAgentTaskRequestSchema,
@@ -26,6 +28,7 @@ import {
   type ClaimAgentTaskResponse,
   type CreateAgentTaskRequest,
   type DismissAgentTaskRequest,
+  type HandoffClaimedAgentTaskRequest,
   type ListAgentTasksRequest,
   type ListAgentTasksResponse,
   type RecordClaimedAgentTaskValidationRequest,
@@ -34,6 +37,7 @@ import {
   type ReleaseExpiredAgentClaimRequest,
   type RenewAgentTaskClaimRequest,
   type RenewAgentTaskClaimResponse,
+  type SourceFile,
   type TransitionClaimedAgentTaskRequest,
   type UpdateClaimedAgentTaskRequest,
 } from "@actionables/contracts";
@@ -528,6 +532,26 @@ function appendUniqueStrings(current: string[], additions: string[]) {
     appended: appended.length,
     duplicatesIgnored: additions.length - appended.length,
   };
+}
+
+function persistedSourceFiles(value: Prisma.JsonValue): SourceFile[] {
+  const parsed = sourceFileSchema.array().safeParse(value);
+  return parsed.success ? parsed.data : [];
+}
+
+function appendUniqueFiles(current: SourceFile[], additions: SourceFile[]) {
+  const key = (file: SourceFile) =>
+    JSON.stringify([file.path, file.lines ?? "", file.symbol ?? ""]);
+  const seen = new Set(current.map(key));
+  return [
+    ...current,
+    ...additions.filter((file) => {
+      const fileKey = key(file);
+      if (seen.has(fileKey)) return false;
+      seen.add(fileKey);
+      return true;
+    }),
+  ];
 }
 
 async function renewClaimAfterMutation(
@@ -1357,6 +1381,131 @@ export async function recordClaimedAgentTaskValidation(
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
       await renewClaimAfterMutation(tx, row, now);
       return saved;
+    },
+  );
+}
+
+export async function handoffClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: HandoffClaimedAgentTaskRequest,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  const request = parseInput(handoffClaimedAgentTaskRequestSchema, input);
+  return runClaimedMutation(
+    prisma,
+    sourceOrdinal,
+    request,
+    now,
+    async (tx, row, claim) => {
+      const currentResearch = persistedStringArray(row.researchJson);
+      const currentPlannedValidation = persistedStringArray(row.validationJson);
+      const research = request.appendResearch
+        ? appendUniqueStrings(currentResearch, request.appendResearch).values
+        : currentResearch;
+      const plannedValidation = request.appendPlannedValidation
+        ? appendUniqueStrings(
+            currentPlannedValidation,
+            request.appendPlannedValidation,
+          ).values
+        : currentPlannedValidation;
+      const files = request.addFiles
+        ? appendUniqueFiles(
+            persistedSourceFiles(row.filesJson),
+            request.addFiles,
+          )
+        : persistedSourceFiles(row.filesJson);
+      const contentFields = [
+        "finding",
+        "addFiles",
+        "appendResearch",
+        "appendPlannedValidation",
+      ].filter((field) => request[field as keyof typeof request] !== undefined);
+      let version = request.version;
+
+      if (contentFields.length > 0) {
+        const update = parseInput(updateActionableRequestSchema, {
+          version,
+          title: row.title,
+          priority: row.priority,
+          effort: row.effort,
+          evidenceState: row.evidenceState,
+          projectId: row.projectId,
+          repositoryId: row.repositoryId,
+          worktreeId: row.worktreeId,
+          status: row.status,
+          finding: request.finding ?? row.finding,
+          description: row.description,
+          research,
+          validation: plannedValidation,
+          tags: persistedStringArray(row.tagsJson),
+          userSources: row.userSources.map((source) => ({
+            type: source.type,
+            locator: source.locator,
+            ...(source.label ? { label: source.label } : {}),
+          })),
+        });
+        const saved = await updateActionable(prisma, sourceOrdinal, update, tx);
+        if (!saved)
+          throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+        version = saved.version;
+
+        if (request.addFiles) {
+          await tx.actionable.update({
+            where: { id: row.id },
+            data: { filesJson: files as Prisma.InputJsonValue },
+          });
+        }
+        await tx.activityEvent.create({
+          data: {
+            actionableId: row.id,
+            type: "agent-updated",
+            summary: `Updated by agent ${claim.agentId} during handoff`,
+            metadataJson: {
+              origin: agentOrigin(claim.agentId),
+              fields: contentFields.join(","),
+              operation: "handoff",
+            },
+            occurredAt: now,
+          },
+        });
+      }
+
+      if (request.validation) {
+        const saved = await recordValidation(
+          prisma,
+          sourceOrdinal,
+          {
+            version,
+            ...request.validation,
+            origin: agentOrigin(claim.agentId),
+          },
+          tx,
+        );
+        if (!saved)
+          throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+        version = saved.version;
+      }
+
+      await tx.agentTaskClaim.delete({ where: { actionableId: row.id } });
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-released",
+          summary: `Released by agent ${claim.agentId} after atomic handoff`,
+          metadataJson: {
+            agentId: claim.agentId,
+            origin: agentOrigin(claim.agentId),
+            operation: "handoff",
+            version: String(version),
+          },
+          occurredAt: now,
+        },
+      });
+      const handedOff = await getActionable(tx, sourceOrdinal);
+      if (!handedOff)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      return handedOff;
     },
   );
 }

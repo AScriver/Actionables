@@ -42,9 +42,17 @@ export const evidenceStateSchema = z.enum([
 ]);
 
 export const sourceFileSchema = z.object({
-  path: z.string().min(1),
-  lines: z.string().min(1).optional(),
-  symbol: z.string().min(1).optional(),
+  path: z.string().min(1).describe("Repository-relative file path."),
+  lines: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional relevant line or line range."),
+  symbol: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Optional relevant symbol name."),
 });
 
 export const userSourceReferenceInputSchema = z.object({
@@ -896,6 +904,50 @@ export const recordClaimedAgentTaskValidationRequestSchema = z
   })
   .strict();
 
+const handoffValidationSchema = recordClaimedAgentTaskValidationRequestSchema
+  .omit({ claimToken: true, version: true })
+  .describe("Optional actual validation result to record before release.");
+
+export const handoffClaimedAgentTaskRequestSchema = z
+  .object({
+    ...claimedAgentMutationFields,
+    finding: markdownField
+      .optional()
+      .describe("Replace the current finding before release."),
+    addFiles: z
+      .array(sourceFileSchema)
+      .min(1)
+      .max(50)
+      .optional()
+      .describe(
+        "Add exact-deduplicated file references while preserving existing files.",
+      ),
+    appendResearch: notesSchema
+      .min(1)
+      .optional()
+      .describe("Append exact-deduplicated research notes before release."),
+    appendPlannedValidation: notesSchema
+      .min(1)
+      .optional()
+      .describe("Append planned checks before release."),
+    validation: handoffValidationSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      [
+        "finding",
+        "addFiles",
+        "appendResearch",
+        "appendPlannedValidation",
+        "validation",
+      ].some((field) => input[field as keyof typeof input] !== undefined),
+    {
+      message: "Provide at least one handoff field to save.",
+      path: ["handoff"],
+    },
+  );
+
 export const createSubtaskRequestSchema = z
   .object({
     version: z.number().int().positive(),
@@ -1570,6 +1622,9 @@ export type DismissAgentTaskRequest = z.infer<
 >;
 export type RecordClaimedAgentTaskValidationRequest = z.infer<
   typeof recordClaimedAgentTaskValidationRequestSchema
+>;
+export type HandoffClaimedAgentTaskRequest = z.infer<
+  typeof handoffClaimedAgentTaskRequestSchema
 >;
 export type CreateSubtaskRequest = z.infer<typeof createSubtaskRequestSchema>;
 export type CreateAgentTaskRequest = z.infer<

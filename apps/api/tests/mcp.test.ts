@@ -238,6 +238,7 @@ describe("Actionables MCP", () => {
           "actionables.transition_task",
           "actionables.dismiss_task",
           "actionables.record_task_validation",
+          "actionables.handoff_task",
           "actionables.release_task",
         ].sort(),
       );
@@ -276,6 +277,11 @@ describe("Actionables MCP", () => {
         destructiveHint: true,
         idempotentHint: false,
       });
+      expect(byName["actionables.handoff_task"]).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+      });
       expect(byName["actionables.release_task"]).toMatchObject({
         readOnlyHint: false,
         destructiveHint: false,
@@ -286,6 +292,9 @@ describe("Actionables MCP", () => {
       );
       expect(descriptions["actionables.transition_task"]).toContain(
         "use Ready when research is sufficient but implementation remains",
+      );
+      expect(descriptions["actionables.handoff_task"]).toContain(
+        "If any requested write fails",
       );
       expect(descriptions["actionables.release_task"]).toContain(
         "record findings so far, remaining questions, and the next research step",
@@ -1034,6 +1043,108 @@ describe("Actionables MCP", () => {
         claim: null,
         version: validated.version + 1,
       });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("atomically saves a handoff and releases the claim through the official client", async () => {
+    const task = await createTask({
+      status: "Ready",
+      title: "Atomic MCP handoff",
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      const inProgress = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            status: "In progress",
+          },
+        }),
+      );
+
+      const handedOff = output<{
+        claimReleased: true;
+        task: {
+          finding: string;
+          research: string[];
+          plannedValidation: string[];
+          files: Array<{ path: string; symbol?: string }>;
+          validationRecords: Array<{
+            outcome: string;
+            qualifiesForCompletion: boolean;
+          }>;
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.handoff_task",
+          arguments: {
+            ...credentials,
+            version: inProgress.version,
+            finding: "The atomic MCP handoff completed.",
+            addFiles: [
+              {
+                path: "apps/api/src/agent-tasks.ts",
+                symbol: "handoffClaimedAgentTask",
+              },
+            ],
+            appendResearch: ["The transaction boundary is verified."],
+            appendPlannedValidation: ["Run the atomic handoff test."],
+            validation: {
+              type: "Automated test",
+              outcome: "Passed",
+              notes: "Atomic handoff integration passed.",
+              evidence: "The official MCP client received a valid result.",
+            },
+          },
+        }),
+      );
+      expect(handedOff).toMatchObject({
+        claimReleased: true,
+        task: {
+          finding: "The atomic MCP handoff completed.",
+          research: ["The transaction boundary is verified."],
+          plannedValidation: [
+            "Run the MCP integration test.",
+            "Run the atomic handoff test.",
+          ],
+          files: expect.arrayContaining([
+            {
+              path: "apps/api/src/agent-tasks.ts",
+              symbol: "handoffClaimedAgentTask",
+            },
+          ]),
+        },
+      });
+      expect(handedOff.task.validationRecords.at(-1)).toMatchObject({
+        outcome: "Passed",
+        qualifiesForCompletion: true,
+      });
+      expect(
+        await prisma.agentTaskClaim.findUnique({
+          where: { actionableId: task.id },
+        }),
+      ).toBeNull();
     } finally {
       await transport.close();
     }
