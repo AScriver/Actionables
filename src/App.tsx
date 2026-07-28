@@ -1567,10 +1567,18 @@ function AgentClaimPanel({
       : null;
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
-  const startPrompt =
-    !claim && !selected.archiveState.isArchived && !isTerminal
-      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase.`
+  const canRecommendPrompt = !selected.archiveState.isArchived && !isTerminal;
+  const readyPrompt =
+    canRecommendPrompt &&
+    selected.status === "Ready" &&
+    claim?.state !== "expired"
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. ${claim ? `Continue task #${selected.id} — ${selected.title} — from Ready.` : `Claim task #${selected.id} — ${selected.title} — and continue from Ready.`} Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${selected.id} to Done only if it passes; otherwise hand off with the blocker.`
       : null;
+  const researchPrompt =
+    canRecommendPrompt && !claim && selected.status !== "Ready"
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
+      : null;
+  const startPrompt = readyPrompt ?? researchPrompt;
   const unavailableGuidance = selected.archiveState.isArchived
     ? "Restore this Actionable before starting agent work."
     : isTerminal
