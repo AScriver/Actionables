@@ -42,16 +42,17 @@ The server instructions direct agents to use this sequence:
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
 5. Start from the compact task detail returned by claim; fetch again only when reconciling newer state.
-6. For a newly claimed Inbox task, transition to `Researching` before investigation.
-7. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
-8. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
-9. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient.
-10. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
-11. Mutate with the latest version and secret claim token.
-12. If research is the entire requested outcome, advance the task through the permitted lifecycle, record actual validation, and move it to `Done`.
-13. Never claim completion while an owned task remains `Researching`.
-14. Release a nonterminal claim when abandoning or handing off work.
-15. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
+6. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
+7. For a newly claimed Inbox task, transition to `Researching` before investigation.
+8. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
+9. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
+10. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient.
+11. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
+12. Mutate with the latest version and secret claim token.
+13. If research is the entire requested outcome, advance the task through the permitted lifecycle, record actual validation, and move it to `Done`.
+14. Never claim completion while an owned task remains `Researching`.
+15. Release a nonterminal claim when abandoning or handing off work.
+16. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
@@ -85,6 +86,25 @@ Claim tokens are secret capabilities. Do not put them in chat, code, files, logs
 A successful `actionables.claim_task` call returns `{ task, claim }`. Read the
 latest version from `task.version` and the secret token from
 `claim.claimToken` for later claimed-task calls.
+
+If that response credential is lost, `actionables.list_tasks` with
+`view: "mine"` still returns the owning thread's task and current version.
+`actionables.recover_task_claim` accepts that public task ID and version plus
+an optional 5–120 minute lease, derives the caller from Codex thread metadata,
+and succeeds only when that thread owns the unexpired claim. It atomically
+replaces the stored token hash, renews the lease, increments the task version,
+and returns `{ task, claim }` with a fresh token. The previous token becomes
+invalid immediately; `claimedAt` is preserved while `renewedAt` and
+`leaseExpiresAt` reflect recovery.
+
+Concurrent recovery calls using the same listed version have one winner. The
+winner returns the only usable credential; later calls receive
+`VERSION_CONFLICT`. If the winning response is also lost, list `mine` again
+and recover using the newer version. An expired claim cannot be recovered and
+must follow the normal available-list and claim flow. Repeating `claim_task`
+from the owning thread returns `OWN_CLAIM_ACTIVE` with `currentVersion` and
+machine-readable guidance to `recover_task_claim`; other threads cannot use
+the recovery operation.
 
 After claim, the token identifies the stored agent claim. Get, update,
 transition, validation, and release calls do not repeat `agentId`; only
@@ -127,6 +147,7 @@ The endpoint exposes exactly these tools:
 - `actionables.list_tasks`
 - `actionables.get_task`
 - `actionables.claim_task`
+- `actionables.recover_task_claim`
 - `actionables.renew_task_claim`
 - `actionables.update_task`
 - `actionables.transition_task`
@@ -152,4 +173,9 @@ The Codex thread ID is coordination provenance, not a replacement for the MCP
 bearer token or a claimed task's secret capability. A non-Codex client may omit
 thread metadata, and a client already holding the shared bearer token could
 forge it. Creator-thread dismissal therefore remains limited to active,
-unclaimed items; claimed mutations continue to require the claim token.
+unclaimed items. Claimed mutations require the claim token except for the
+narrow recovery operation, which combines the shared bearer token with matching
+thread provenance to rotate a credential. This protects normal Codex threads
+from one another under the documented local single-user coordination model; it
+does not provide cryptographic same-thread authentication against a client that
+already holds the bearer token and forges the owner's thread metadata.

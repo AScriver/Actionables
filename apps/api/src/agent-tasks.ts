@@ -12,6 +12,8 @@ import {
   handoffClaimedAgentTaskRequestSchema,
   listAgentTasksRequestSchema,
   listAgentTasksResponseSchema,
+  recoverAgentTaskClaimRequestSchema,
+  recoverAgentTaskClaimResponseSchema,
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
   releaseAgentTaskClaimResponseSchema,
@@ -31,6 +33,8 @@ import {
   type HandoffClaimedAgentTaskRequest,
   type ListAgentTasksRequest,
   type ListAgentTasksResponse,
+  type RecoverAgentTaskClaimRequest,
+  type RecoverAgentTaskClaimResponse,
   type RecordClaimedAgentTaskValidationRequest,
   type ReleaseAgentTaskClaimRequest,
   type ReleaseAgentTaskClaimResponse,
@@ -124,6 +128,9 @@ export class AgentTaskClaimError extends Error {
       | "TERMINAL"
       | "VERSION_CONFLICT"
       | "ALREADY_CLAIMED"
+      | "OWN_CLAIM_ACTIVE"
+      | "CLAIM_OWNER_MISMATCH"
+      | "CLAIM_NOT_FOUND"
       | "INVALID_CLAIM_TOKEN"
       | "CLAIM_EXPIRED"
       | "IDEMPOTENCY_CONFLICT"
@@ -1564,8 +1571,12 @@ async function claimAgentTaskUnlocked(
         row.agentTaskClaim.leaseExpiresAt > now
       ) {
         throw new AgentTaskClaimError(
-          "ALREADY_CLAIMED",
-          "This Actionable already has an active claim.",
+          row.agentTaskClaim.agentId === request.agentId
+            ? "OWN_CLAIM_ACTIVE"
+            : "ALREADY_CLAIMED",
+          row.agentTaskClaim.agentId === request.agentId
+            ? "This Actionable already has an active claim owned by the current Codex thread."
+            : "This Actionable already has an active claim.",
           undefined,
           row.version,
         );
@@ -1627,14 +1638,128 @@ async function claimAgentTaskUnlocked(
       current.agentTaskClaim.leaseExpiresAt > now
     ) {
       throw new AgentTaskClaimError(
-        "ALREADY_CLAIMED",
-        "This Actionable already has an active claim.",
+        current.agentTaskClaim.agentId === request.agentId
+          ? "OWN_CLAIM_ACTIVE"
+          : "ALREADY_CLAIMED",
+        current.agentTaskClaim.agentId === request.agentId
+          ? "This Actionable already has an active claim owned by the current Codex thread."
+          : "This Actionable already has an active claim.",
         undefined,
         current.version,
       );
     }
     throw error;
   }
+}
+
+export async function recoverAgentTaskClaim(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RecoverAgentTaskClaimRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+): Promise<RecoverAgentTaskClaimResponse> {
+  const request = parseInput(recoverAgentTaskClaimRequestSchema, input);
+  const agentId = `codex:${caller.threadId}`;
+  const claimToken = randomBytes(32).toString("base64url");
+  const claimTokenHash = hashToken(claimToken);
+  const leaseExpiresAt = leaseExpiry(now, request.leaseMinutes);
+
+  const result = await withClaimLock(String(sourceOrdinal), () =>
+    prisma.$transaction(async (tx) => {
+      const row = await findTask(tx, sourceOrdinal);
+      requireClaimable(row);
+      const claim = row.agentTaskClaim;
+      if (!claim) {
+        throw new AgentTaskClaimError(
+          "CLAIM_NOT_FOUND",
+          "This Actionable does not have an active claim to recover.",
+          undefined,
+          row.version,
+        );
+      }
+      if (claim.leaseExpiresAt <= now) {
+        await recordObservedExpiry(tx, row, now);
+        await tx.actionable.update({
+          where: { id: row.id },
+          data: {
+            version: { increment: 1 },
+            updatedLabel: "agent claim expired",
+          },
+        });
+        return { expired: true as const };
+      }
+      if (claim.agentId !== agentId) {
+        throw new AgentTaskClaimError(
+          "CLAIM_OWNER_MISMATCH",
+          "Only the Codex thread that owns this active claim can recover it.",
+          undefined,
+          row.version,
+        );
+      }
+      if (row.version !== request.version) {
+        throw new AgentTaskClaimError(
+          "VERSION_CONFLICT",
+          "This Actionable changed after it was listed.",
+          undefined,
+          row.version,
+        );
+      }
+
+      await tx.agentTaskClaim.update({
+        where: { actionableId: row.id },
+        data: {
+          claimTokenHash,
+          leaseExpiresAt,
+          renewedAt: now,
+        },
+      });
+      await tx.actionable.update({
+        where: { id: row.id },
+        data: {
+          version: { increment: 1 },
+          updatedLabel: "agent claim recovered",
+        },
+      });
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-updated",
+          summary: `Recovered claim credential for agent ${agentId}`,
+          metadataJson: {
+            agentId,
+            origin: agentOrigin(agentId),
+            operation: "claim-recovery",
+          },
+          occurredAt: now,
+        },
+      });
+      return {
+        expired: false as const,
+        task: await findTask(tx, sourceOrdinal),
+      };
+    }),
+  );
+
+  if (result.expired) {
+    throw new AgentTaskClaimError(
+      "CLAIM_EXPIRED",
+      "The claim lease expired and must be reacquired.",
+    );
+  }
+  if (!result.task?.agentTaskClaim) {
+    throw new Error("Claim recovery did not return the active claim.");
+  }
+  return recoverAgentTaskClaimResponseSchema.parse({
+    task: toAgentTaskSummary(result.task),
+    claim: {
+      agentId,
+      claimToken,
+      claimedAt: result.task.agentTaskClaim.claimedAt.toISOString(),
+      renewedAt: result.task.agentTaskClaim.renewedAt.toISOString(),
+      leaseExpiresAt: result.task.agentTaskClaim.leaseExpiresAt.toISOString(),
+    },
+  });
 }
 
 export async function renewAgentTaskClaim(

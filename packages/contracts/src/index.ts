@@ -582,6 +582,19 @@ export const claimAgentTaskResponseSchema = z
   })
   .strict();
 
+export const recoverAgentTaskClaimRequestSchema = z
+  .object({
+    version: z
+      .number()
+      .int()
+      .positive()
+      .describe("Current task version returned by list_tasks(view: mine)."),
+    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+  })
+  .strict();
+
+export const recoverAgentTaskClaimResponseSchema = claimAgentTaskResponseSchema;
+
 export const renewAgentTaskClaimRequestSchema = z
   .object({
     claimToken: z
@@ -1635,6 +1648,12 @@ export type ListAgentTasksResponse = z.infer<
 export type ClaimAgentTaskRequest = z.infer<typeof claimAgentTaskRequestSchema>;
 export type ClaimAgentTaskResponse = z.infer<
   typeof claimAgentTaskResponseSchema
+>;
+export type RecoverAgentTaskClaimRequest = z.infer<
+  typeof recoverAgentTaskClaimRequestSchema
+>;
+export type RecoverAgentTaskClaimResponse = z.infer<
+  typeof recoverAgentTaskClaimResponseSchema
 >;
 export type RenewAgentTaskClaimRequest = z.infer<
   typeof renewAgentTaskClaimRequestSchema

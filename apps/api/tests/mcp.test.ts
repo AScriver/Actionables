@@ -233,6 +233,7 @@ describe("Actionables MCP", () => {
           "actionables.list_tasks",
           "actionables.get_task",
           "actionables.claim_task",
+          "actionables.recover_task_claim",
           "actionables.renew_task_claim",
           "actionables.update_task",
           "actionables.transition_task",
@@ -253,6 +254,18 @@ describe("Actionables MCP", () => {
           expect.stringContaining(responsePath),
         );
       }
+      const recoverTaskTool = tools.find(
+        (tool) => tool.name === "actionables.recover_task_claim",
+      );
+      expect(
+        Object.keys(
+          (recoverTaskTool?.inputSchema as { properties?: object })
+            .properties ?? {},
+        ).sort(),
+      ).toEqual(["id", "leaseMinutes", "version"]);
+      expect(recoverTaskTool?.description).toContain(
+        "superseded token becomes invalid immediately",
+      );
       for (const tool of tools) {
         const properties = describedProperties(tool.inputSchema);
         expect(properties.length, tool.name).toBeGreaterThan(0);
@@ -1070,6 +1083,122 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("recovers discarded credentials only for the owning Codex thread", async () => {
+    const task = await createTask({
+      status: "Ready",
+      title: "Recover lost claim credentials",
+    });
+    const owner = await connectClient();
+    const other = await connectClient(
+      bearerToken,
+      "019fa45f-581d-7bc0-afe3-a2b65171df68",
+    );
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await owner.client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+
+      const repeatedClaim = errorOutput(
+        await owner.client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: claimed.task.version,
+          },
+        }),
+      );
+      expect(repeatedClaim).toMatchObject({
+        code: "OWN_CLAIM_ACTIVE",
+        currentVersion: claimed.task.version,
+        retryable: true,
+        nextAction: expect.stringContaining("actionables.recover_task_claim"),
+      });
+
+      const mine = output<{
+        items: Array<{ id: number; version: number }>;
+      }>(
+        await owner.client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "mine", workItemId: task.sourceOrdinal },
+        }),
+      );
+      const current = mine.items.find((item) => item.id === task.sourceOrdinal);
+      expect(current?.version).toBe(claimed.task.version);
+
+      const wrongThread = errorOutput(
+        await other.client.callTool({
+          name: "actionables.recover_task_claim",
+          arguments: {
+            id: task.sourceOrdinal,
+            version: current!.version,
+          },
+        }),
+      );
+      expect(wrongThread).toMatchObject({
+        code: "CLAIM_OWNER_MISMATCH",
+        retryable: false,
+      });
+
+      const recovered = output<{
+        task: { version: number };
+        claim: { claimToken: string; claimedAt: string };
+      }>(
+        await owner.client.callTool({
+          name: "actionables.recover_task_claim",
+          arguments: {
+            id: task.sourceOrdinal,
+            version: current!.version,
+            leaseMinutes: 60,
+          },
+        }),
+      );
+      expect(recovered.task.version).toBe(claimed.task.version + 1);
+      expect(recovered.claim.claimToken).not.toBe(claimed.claim.claimToken);
+
+      const superseded = errorOutput(
+        await owner.client.callTool({
+          name: "actionables.get_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
+      expect(superseded).toMatchObject({
+        code: "INVALID_CLAIM_TOKEN",
+        retryable: true,
+        nextAction: expect.stringContaining("actionables.recover_task_claim"),
+      });
+
+      const updated = output<{ title: string }>(
+        await owner.client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: recovered.claim.claimToken,
+            version: recovered.task.version,
+            title: "Recovered credential completed a mutation",
+          },
+        }),
+      );
+      expect(updated.title).toBe("Recovered credential completed a mutation");
+    } finally {
+      await other.transport.close();
+      await owner.transport.close();
+    }
+  });
+
   it("atomically saves a handoff and releases the claim through the official client", async () => {
     const task = await createTask({
       status: "Ready",
@@ -1475,7 +1604,7 @@ describe("Actionables MCP", () => {
       );
       expect(wrongToken.code).toBe("INVALID_CLAIM_TOKEN");
       expect(wrongToken).toMatchObject({
-        retryable: false,
+        retryable: true,
         nextAction: expect.stringContaining("Discard the token"),
       });
 

@@ -7,6 +7,7 @@ import {
   dismissAgentTaskRequestSchema,
   handoffClaimedAgentTaskRequestSchema,
   listAgentTasksResponseSchema,
+  recoverAgentTaskClaimRequestSchema,
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
   releaseAgentTaskClaimResponseSchema,
@@ -31,6 +32,7 @@ import {
   getClaimedAgentTask,
   handoffClaimedAgentTask,
   listAgentTasks,
+  recoverAgentTaskClaim,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
   renewAgentTaskClaim,
@@ -94,6 +96,9 @@ const claimTaskSchema = z
     leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
   })
   .strict();
+const recoverTaskClaimSchema = recoverAgentTaskClaimRequestSchema.extend({
+  id: idSchema,
+});
 const renewTaskSchema = renewAgentTaskClaimRequestSchema.extend({
   id: idSchema,
 });
@@ -477,11 +482,29 @@ function recovery(code: string) {
         nextAction:
           "List mine; otherwise wait and re-list available tasks in the same work item.",
       };
-    case "INVALID_CLAIM_TOKEN":
+    case "OWN_CLAIM_ACTIVE":
+      return {
+        retryable: true,
+        nextAction:
+          "Call actionables.recover_task_claim with this task ID and currentVersion to rotate and return fresh credentials for the current Codex thread.",
+      };
+    case "CLAIM_OWNER_MISMATCH":
       return {
         retryable: false,
         nextAction:
-          "Discard the token, then list mine or reclaim within the same work item.",
+          "Use the Codex thread that owns the active claim, or wait for the claim to expire.",
+      };
+    case "CLAIM_NOT_FOUND":
+      return {
+        retryable: true,
+        nextAction:
+          "List mine; if the task is no longer owned, list available in the same work item and claim its current version.",
+      };
+    case "INVALID_CLAIM_TOKEN":
+      return {
+        retryable: true,
+        nextAction:
+          "Discard the token and list mine. If this thread still owns the task, call actionables.recover_task_claim with its current version; otherwise reclaim within the same work item.",
       };
     case "CLAIM_EXPIRED":
       return {
@@ -572,7 +595,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide the same top-level Actionable as workItemId and parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide the same top-level Actionable as workItemId and parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -678,6 +701,31 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: mutation,
     },
     ({ id, ...input }) => runTool(() => renewAgentTaskClaim(prisma, id, input)),
+  );
+  server.registerTool(
+    "actionables.recover_task_claim",
+    {
+      title: "Recover Actionable claim credentials",
+      description:
+        "Rotate and return fresh credentials for an unexpired claim already owned by the current Codex thread. Supply the current version from list_tasks(view: mine). The superseded token becomes invalid immediately, and concurrent calls using the same version have one winner.",
+      inputSchema: recoverTaskClaimSchema,
+      outputSchema: claimTaskOutputSchema,
+      annotations: mutation,
+    },
+    ({ id, ...input }, extra) =>
+      runTool(async () => {
+        const recovered = await recoverAgentTaskClaim(prisma, id, input, {
+          threadId: requestThreadId(extra),
+        });
+        return {
+          task: compactTask(
+            await getClaimedAgentTask(prisma, id, {
+              claimToken: recovered.claim.claimToken,
+            }),
+          ),
+          claim: recovered.claim,
+        };
+      }),
   );
   server.registerTool(
     "actionables.update_task",

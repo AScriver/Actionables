@@ -10,6 +10,7 @@ import {
   dismissAgentTask,
   handoffClaimedAgentTask,
   listAgentTasks,
+  recoverAgentTaskClaim,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
   renewAgentTaskClaim,
@@ -381,6 +382,185 @@ describe("agent task claims", () => {
     } finally {
       await secondPrisma.$disconnect();
     }
+  });
+
+  it("recovers a same-thread claim by rotating the token and renewing the lease", async () => {
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
+    const task = await createTask();
+    const claimed = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: `codex:${threadId}`,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+        leaseMinutes: 30,
+      },
+      new Date("2026-07-25T12:00:00.000Z"),
+    );
+
+    const recovered = await recoverAgentTaskClaim(
+      prisma,
+      task.sourceOrdinal,
+      { version: claimed.task.version, leaseMinutes: 60 },
+      { threadId },
+      new Date("2026-07-25T12:10:00.000Z"),
+    );
+
+    expect(recovered.task.version).toBe(claimed.task.version + 1);
+    expect(recovered.claim).toMatchObject({
+      agentId: `codex:${threadId}`,
+      claimedAt: claimed.claim.claimedAt,
+      renewedAt: "2026-07-25T12:10:00.000Z",
+      leaseExpiresAt: "2026-07-25T13:10:00.000Z",
+    });
+    expect(recovered.claim.claimToken).not.toBe(claimed.claim.claimToken);
+    const stored = await prisma.agentTaskClaim.findUniqueOrThrow({
+      where: { actionableId: task.id },
+    });
+    expect(stored.claimTokenHash).toBe(
+      createHash("sha256")
+        .update(recovered.claim.claimToken, "utf8")
+        .digest("hex"),
+    );
+    expect(stored.claimTokenHash).not.toBe(
+      createHash("sha256")
+        .update(claimed.claim.claimToken, "utf8")
+        .digest("hex"),
+    );
+    await expect(
+      updateClaimedAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        {
+          claimToken: claimed.claim.claimToken,
+          version: recovered.task.version,
+          title: "Must not persist with superseded credentials",
+        },
+        new Date("2026-07-25T12:11:00.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_CLAIM_TOKEN" });
+    const updated = await updateClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: recovered.claim.claimToken,
+        version: recovered.task.version,
+        title: "Recovered credentials work",
+      },
+      new Date("2026-07-25T12:11:00.000Z"),
+    );
+    expect(updated.title).toBe("Recovered credentials work");
+    expect(
+      await prisma.activityEvent.findFirst({
+        where: {
+          actionableId: task.id,
+          type: "agent-updated",
+          summary: `Recovered claim credential for agent codex:${threadId}`,
+        },
+      }),
+    ).toMatchObject({
+      metadataJson: {
+        agentId: `codex:${threadId}`,
+        origin: `agent:codex:${threadId}`,
+        operation: "claim-recovery",
+      },
+    });
+  });
+
+  it("rejects other-thread recovery and permits one concurrent rotation winner", async () => {
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df64";
+    const task = await createTask();
+    const claimed = await claimAgentTask(prisma, task.sourceOrdinal, {
+      agentId: `codex:${threadId}`,
+      workItemId: task.sourceOrdinal,
+      version: task.version,
+      leaseMinutes: 30,
+    });
+    await expect(
+      recoverAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        { version: claimed.task.version, leaseMinutes: 30 },
+        { threadId: "019fa45f-581d-7bc0-afe3-a2b65171df65" },
+      ),
+    ).rejects.toMatchObject({ code: "CLAIM_OWNER_MISMATCH" });
+
+    const secondPrisma = createPrismaClient(databaseUrl);
+    try {
+      const results = await Promise.allSettled([
+        recoverAgentTaskClaim(
+          prisma,
+          task.sourceOrdinal,
+          { version: claimed.task.version, leaseMinutes: 30 },
+          { threadId },
+        ),
+        recoverAgentTaskClaim(
+          secondPrisma,
+          task.sourceOrdinal,
+          { version: claimed.task.version, leaseMinutes: 30 },
+          { threadId },
+        ),
+      ]);
+      const fulfilled = results.filter(
+        (
+          result,
+        ): result is PromiseFulfilledResult<
+          Awaited<ReturnType<typeof recoverAgentTaskClaim>>
+        > => result.status === "fulfilled",
+      );
+      expect(fulfilled).toHaveLength(1);
+      const rejected = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expectClaimError(rejected?.reason, "VERSION_CONFLICT");
+      expect(
+        await prisma.agentTaskClaim.count({
+          where: { actionableId: task.id },
+        }),
+      ).toBe(1);
+      const stored = await prisma.agentTaskClaim.findUniqueOrThrow({
+        where: { actionableId: task.id },
+      });
+      expect(stored.claimTokenHash).toBe(
+        createHash("sha256")
+          .update(fulfilled[0]!.value.claim.claimToken, "utf8")
+          .digest("hex"),
+      );
+    } finally {
+      await secondPrisma.$disconnect();
+    }
+  });
+
+  it("requires normal reclaim after a recovery observes expiry", async () => {
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df66";
+    const task = await createTask();
+    const claimed = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: `codex:${threadId}`,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+        leaseMinutes: 5,
+      },
+      new Date("2026-07-25T12:00:00.000Z"),
+    );
+    await expect(
+      recoverAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        { version: claimed.task.version, leaseMinutes: 30 },
+        { threadId },
+        new Date("2026-07-25T12:06:00.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "CLAIM_EXPIRED" });
+    expect(
+      await prisma.agentTaskClaim.findUnique({
+        where: { actionableId: task.id },
+      }),
+    ).toBeNull();
   });
 
   it("dismisses a same-thread unclaimed task and reconciles an expired claim", async () => {
