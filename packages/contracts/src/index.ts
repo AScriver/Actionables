@@ -715,6 +715,55 @@ export const updateHelperAgentSettingsRequestSchema = helperAgentSettingsSchema
   .omit({ updatedAt: true })
   .strict();
 
+export const agentIntegrationComponentIdSchema = z.enum([
+  "agentInstructions",
+  "skill",
+]);
+
+export const agentIntegrationComponentSchema = z
+  .object({
+    id: agentIntegrationComponentIdSchema,
+    label: z.string().min(1),
+    description: z.string().min(1),
+    targetPath: z.string().min(1),
+    state: z.enum(["missing", "installed", "modified"]),
+    installed: z.boolean(),
+  })
+  .strict();
+
+export const agentIntegrationSettingsSchema = z
+  .object({
+    agentInstructions: agentIntegrationComponentSchema,
+    skill: agentIntegrationComponentSchema,
+  })
+  .strict();
+
+export const installAgentIntegrationRequestSchema = z
+  .object({
+    agentInstructions: z.boolean(),
+    skill: z.boolean(),
+  })
+  .strict()
+  .refine((input) => input.agentInstructions || input.skill, {
+    message: "Select at least one component to install.",
+    path: ["components"],
+  });
+
+export const agentIntegrationInstallResultSchema = z
+  .object({
+    component: agentIntegrationComponentIdSchema,
+    outcome: z.enum(["installed", "already-installed"]),
+    message: z.string().min(1),
+  })
+  .strict();
+
+export const agentIntegrationInstallResponseSchema = z
+  .object({
+    settings: agentIntegrationSettingsSchema,
+    results: z.array(agentIntegrationInstallResultSchema).min(1).max(2),
+  })
+  .strict();
+
 export const groomActionableNotesProposalSchema = z
   .object({
     description: markdownField.describe(
@@ -1687,6 +1736,18 @@ export type GroomActionableNotesRequest = z.infer<
 export type HelperAgentSettings = z.infer<typeof helperAgentSettingsSchema>;
 export type UpdateHelperAgentSettingsRequest = z.infer<
   typeof updateHelperAgentSettingsRequestSchema
+>;
+export type AgentIntegrationComponent = z.infer<
+  typeof agentIntegrationComponentSchema
+>;
+export type AgentIntegrationSettings = z.infer<
+  typeof agentIntegrationSettingsSchema
+>;
+export type InstallAgentIntegrationRequest = z.infer<
+  typeof installAgentIntegrationRequestSchema
+>;
+export type AgentIntegrationInstallResponse = z.infer<
+  typeof agentIntegrationInstallResponseSchema
 >;
 export type GroomActionableNotesProposal = z.infer<
   typeof groomActionableNotesProposalSchema

@@ -39,6 +39,8 @@ import {
   type ActionableDetail,
   type ActionableQuery,
   type ActionableSummary,
+  type AgentIntegrationComponent,
+  type AgentIntegrationSettings,
   type ArchiveImpactResponse,
   type ArchiveTargetKind,
   type Effort,
@@ -77,6 +79,7 @@ import {
   detachParent,
   fetchActionable,
   fetchActionables,
+  fetchAgentIntegrationSettings,
   fetchArchiveImpact,
   fetchDashboard,
   fetchHelperAgentSettings,
@@ -93,6 +96,7 @@ import {
   setActionableArchived,
   setScopeArchived,
   transitionActionable,
+  installAgentIntegration,
   updateActionable,
   updateHelperAgentSettings,
   waiveDependency,
@@ -109,6 +113,8 @@ type InspectorTab =
 type PriorityFilter = "All" | Priority;
 
 const inspectorWidthStorageKey = "actionables-inspector-width";
+const agentIntegrationSetupStorageKey =
+  "actionables-agent-integration-setup-dismissed-v1";
 const inspectorMinWidth = 320;
 const inspectorMaxWidth = 800;
 const findingsMinWidth = 320;
@@ -3674,6 +3680,317 @@ function errorMessage(error: unknown) {
     : "The request could not be completed.";
 }
 
+function agentIntegrationError(error: unknown) {
+  if (error instanceof ApiProblem) {
+    return error.problem.detail ?? errorMessage(error);
+  }
+  return errorMessage(error);
+}
+
+function agentIntegrationState(component: AgentIntegrationComponent) {
+  if (component.state === "installed") return "Installed";
+  if (component.state === "modified") return "Manual review required";
+  return "Not installed";
+}
+
+function AgentIntegrationSettingsSection() {
+  const queryClient = useQueryClient();
+  const integrationQuery = useQuery({
+    queryKey: ["agent-integration-settings"],
+    queryFn: fetchAgentIntegrationSettings,
+  });
+  const [installing, setInstalling] = useState<
+    AgentIntegrationComponent["id"] | "both" | null
+  >(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  const install = async (
+    agentInstructions: boolean,
+    skill: boolean,
+    pending: AgentIntegrationComponent["id"] | "both",
+  ) => {
+    setInstalling(pending);
+    setNotice("");
+    setError("");
+    try {
+      const response = await installAgentIntegration({
+        agentInstructions,
+        skill,
+      });
+      queryClient.setQueryData(
+        ["agent-integration-settings"],
+        response.settings,
+      );
+      setNotice(response.results.map((result) => result.message).join(" "));
+    } catch (caught) {
+      setError(agentIntegrationError(caught));
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  if (integrationQuery.isPending) {
+    return (
+      <section className="settings-integration" aria-busy="true">
+        <div className="settings-state" role="status">
+          <RefreshCw className="spin" aria-hidden="true" />
+          Checking Actionables agent integration…
+        </div>
+      </section>
+    );
+  }
+
+  if (integrationQuery.isError || !integrationQuery.data) {
+    return (
+      <section className="settings-integration">
+        <div className="settings-state" role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <strong>Could not check the Actionables agent integration</strong>
+          <span>{agentIntegrationError(integrationQuery.error)}</span>
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={() => void integrationQuery.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const components = [
+    integrationQuery.data.agentInstructions,
+    integrationQuery.data.skill,
+  ];
+  const missing = components.filter(
+    (component) => component.state === "missing",
+  );
+
+  return (
+    <section
+      className="settings-integration"
+      aria-labelledby="agent-integration-title"
+    >
+      <div className="settings-section-heading">
+        <div>
+          <h2 id="agent-integration-title">Actionables agent integration</h2>
+          <p>
+            These optional files are never installed automatically. Install
+            either component now or return here later.
+          </p>
+        </div>
+        {missing.length === 2 && (
+          <button
+            type="button"
+            className="primary-action"
+            disabled={installing !== null}
+            onClick={() => void install(true, true, "both")}
+          >
+            {installing === "both" ? "Installing…" : "Install both"}
+          </button>
+        )}
+      </div>
+      <div className="agent-integration-grid">
+        {components.map((component) => (
+          <article key={component.id}>
+            <header>
+              <div>
+                <h3>{component.label}</h3>
+                <span data-state={component.state}>
+                  {agentIntegrationState(component)}
+                </span>
+              </div>
+              {component.state === "installed" ? (
+                <CheckCircle2 aria-hidden="true" />
+              ) : (
+                <FileCode2 aria-hidden="true" />
+              )}
+            </header>
+            <p>{component.description}</p>
+            <code>{component.targetPath}</code>
+            {component.state === "missing" && (
+              <button
+                type="button"
+                className="toolbar-button"
+                disabled={installing !== null}
+                onClick={() =>
+                  void install(
+                    component.id === "agentInstructions",
+                    component.id === "skill",
+                    component.id,
+                  )
+                }
+              >
+                {installing === component.id
+                  ? "Installing…"
+                  : `Install ${component.id === "skill" ? "skill" : "instructions"}`}
+              </button>
+            )}
+            {component.state === "modified" && (
+              <small>
+                Actionables will not overwrite this file. Reconcile it manually
+                with the bundled copy, then retry.
+              </small>
+            )}
+          </article>
+        ))}
+      </div>
+      {error && (
+        <div className="inline-error" role="alert">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="integration-notice" role="status" aria-live="polite">
+          {notice}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AgentIntegrationSetupDialog({
+  settings,
+  onDismiss,
+  onNotice,
+}: {
+  settings: AgentIntegrationSettings;
+  onDismiss: () => void;
+  onNotice: (notice: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const dialogRef = useRef<HTMLElement>(null);
+  const [agentInstructions, setAgentInstructions] = useState(false);
+  const [skill, setSkill] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  useModalIsolation(dialogRef);
+
+  const install = async () => {
+    setInstalling(true);
+    setNotice("");
+    setError("");
+    try {
+      const response = await installAgentIntegration({
+        agentInstructions,
+        skill,
+      });
+      queryClient.setQueryData(
+        ["agent-integration-settings"],
+        response.settings,
+      );
+      setNotice(response.results.map((result) => result.message).join(" "));
+    } catch (caught) {
+      setError(agentIntegrationError(caught));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const components = [settings.agentInstructions, settings.skill];
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        ref={dialogRef}
+        className="archive-dialog agent-setup-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agent-setup-title"
+        aria-describedby="agent-setup-description"
+      >
+        <header className="archive-dialog-header">
+          <FileCode2 aria-hidden="true" />
+          <div>
+            <h2 id="agent-setup-title">Set up Actionables for Codex</h2>
+            <p id="agent-setup-description">
+              Both components are optional and unchecked by default. You can
+              install either or both later from Settings.
+            </p>
+          </div>
+        </header>
+        <div className="agent-setup-options">
+          {components.map((component) => {
+            const checked =
+              component.id === "agentInstructions" ? agentInstructions : skill;
+            const unavailable = component.state !== "missing";
+            return (
+              <label key={component.id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={unavailable || installing || Boolean(notice)}
+                  onChange={(event) => {
+                    if (component.id === "agentInstructions") {
+                      setAgentInstructions(event.target.checked);
+                    } else {
+                      setSkill(event.target.checked);
+                    }
+                    setError("");
+                  }}
+                />
+                <span>
+                  <strong>{component.label}</strong>
+                  <small>
+                    {component.description} Target: {component.targetPath}
+                  </small>
+                  {unavailable && <em>{agentIntegrationState(component)}</em>}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {error && (
+          <div className="inline-error" role="alert">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div className="agent-setup-notice" role="status">
+            {notice}
+          </div>
+        )}
+        <footer>
+          {notice ? (
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => {
+                onNotice(notice);
+                onDismiss();
+              }}
+            >
+              Continue
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="toolbar-button"
+                disabled={installing}
+                onClick={onDismiss}
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                className="primary-action"
+                disabled={installing || (!agentInstructions && !skill)}
+                onClick={() => void install()}
+              >
+                {installing ? "Installing…" : "Install selected"}
+              </button>
+            </>
+          )}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function DashboardPanel({
   data,
   pending,
@@ -4311,11 +4628,12 @@ function SettingsPanel() {
         <div>
           <h1>Settings</h1>
           <p>
-            Customize the instructions sent to local Codex for built-in helper
-            actions.
+            Configure optional Codex integration and customize the instructions
+            sent to local helper actions.
           </p>
         </div>
       </header>
+      <AgentIntegrationSettingsSection />
       <form className="settings-form" onSubmit={(event) => void save(event)}>
         <section aria-labelledby="note-groomer-prompt-title">
           <div>
@@ -4768,6 +5086,15 @@ function ExpiredClaimDialog({
 
 export default function App() {
   const queryClient = useQueryClient();
+  const [agentSetupDismissed, setAgentSetupDismissed] = useState(() => {
+    try {
+      return (
+        localStorage.getItem(agentIntegrationSetupStorageKey) === "dismissed"
+      );
+    } catch {
+      return false;
+    }
+  });
   const [view, setView] = useState<ViewMode>(viewFromLocation);
   const [query, setQuery] = useState<QueryState>(() => {
     const initial = queryFromLocation();
@@ -4846,6 +5173,10 @@ export default function App() {
   const scopesQuery = useQuery({
     queryKey: ["scopes"],
     queryFn: fetchScopeOptions,
+  });
+  const agentIntegrationQuery = useQuery({
+    queryKey: ["agent-integration-settings"],
+    queryFn: fetchAgentIntegrationSettings,
   });
   const dashboardScope = {
     project: query.project,
@@ -5369,6 +5700,15 @@ export default function App() {
   ]
     .filter(Boolean)
     .join(" ");
+
+  const dismissAgentSetup = () => {
+    try {
+      localStorage.setItem(agentIntegrationSetupStorageKey, "dismissed");
+    } catch {
+      // The current session can still dismiss setup when storage is blocked.
+    }
+    setAgentSetupDismissed(true);
+  };
 
   return (
     <div
@@ -6583,6 +6923,16 @@ export default function App() {
           onConfirm={() => void confirmClaimRelease()}
         />
       )}
+      {!agentSetupDismissed &&
+        agentIntegrationQuery.data &&
+        (!agentIntegrationQuery.data.agentInstructions.installed ||
+          !agentIntegrationQuery.data.skill.installed) && (
+          <AgentIntegrationSetupDialog
+            settings={agentIntegrationQuery.data}
+            onDismiss={dismissAgentSetup}
+            onNotice={setNotice}
+          />
+        )}
     </div>
   );
 }

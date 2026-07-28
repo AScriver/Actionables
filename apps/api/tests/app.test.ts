@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { open, rm } from "node:fs/promises";
+import { mkdir, open, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
 
 let databasePath: string;
+let agentHomeDirectory: string;
 let prisma: AppPrismaClient | undefined;
 let app: ReturnType<typeof buildApp> | undefined;
 let scope: { projectId: string; repositoryId: string; worktreeId: string };
@@ -37,6 +38,8 @@ const assistantRunner: AssistantRunner = {
 beforeAll(async () => {
   const databaseName = `test-${randomUUID()}.db`;
   databasePath = resolve(repoRoot, "data", databaseName);
+  agentHomeDirectory = resolve(repoRoot, "data", `agent-home-${randomUUID()}`);
+  await mkdir(agentHomeDirectory, { recursive: true });
   const databaseUrl = `file:./data/${databaseName}`;
   const databaseFile = await open(databasePath, "a");
   await databaseFile.close();
@@ -65,7 +68,7 @@ beforeAll(async () => {
     total: 32,
   });
 
-  app = buildApp({ prisma, assistantRunner });
+  app = buildApp({ prisma, assistantRunner, agentHomeDirectory });
   const project = await prisma.project.findFirstOrThrow({
     include: {
       repositories: {
@@ -89,6 +92,9 @@ afterAll(async () => {
         rm(`${databasePath}${suffix}`, { force: true }),
       ),
     );
+  }
+  if (agentHomeDirectory) {
+    await rm(agentHomeDirectory, { force: true, recursive: true });
   }
 });
 
@@ -259,6 +265,45 @@ describe("Actionables API", () => {
         },
       });
     }
+  });
+
+  it("reports and explicitly installs optional agent components", async () => {
+    const initial = await app!.inject({
+      method: "GET",
+      url: "/api/settings/agent-integration",
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      agentInstructions: { state: "missing", installed: false },
+      skill: { state: "missing", installed: false },
+    });
+
+    const noSelection = await app!.inject({
+      method: "POST",
+      url: "/api/settings/agent-integration/install",
+      payload: { agentInstructions: false, skill: false },
+    });
+    expect(noSelection.statusCode).toBe(422);
+    expect(noSelection.json()).toMatchObject({
+      code: "VALIDATION_FAILED",
+    });
+
+    const installed = await app!.inject({
+      method: "POST",
+      url: "/api/settings/agent-integration/install",
+      payload: { agentInstructions: true, skill: true },
+    });
+    expect(installed.statusCode).toBe(200);
+    expect(installed.json()).toMatchObject({
+      settings: {
+        agentInstructions: { state: "installed", installed: true },
+        skill: { state: "installed", installed: true },
+      },
+      results: [
+        { component: "agentInstructions", outcome: "installed" },
+        { component: "skill", outcome: "installed" },
+      ],
+    });
   });
 
   it("generates a schema-validated note proposal without mutating the actionable", async () => {

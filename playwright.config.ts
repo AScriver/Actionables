@@ -15,6 +15,20 @@ export default defineConfig({
   },
   use: {
     baseURL,
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: baseURL,
+          localStorage: [
+            {
+              name: "actionables-agent-integration-setup-dismissed-v1",
+              value: "dismissed",
+            },
+          ],
+        },
+      ],
+    },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

@@ -29,6 +29,12 @@ required = false
 
 Restart Codex so it reads both the global configuration and user environment.
 
+The Codex instructions and Actionables workflow skill are separate, optional
+files. First-run setup and **Settings → Actionables agent integration** can
+install either or both with explicit consent. See
+[Windows setup](windows-setup.md#optional-codex-instructions-and-workflow-skill)
+for their target paths and conflict-safe behavior.
+
 ## Agent workflow
 
 Codex supplies its technical thread ID in MCP request metadata. Actionables

@@ -12,6 +12,7 @@ const app = buildApp({
   logger: true,
   mcpBearerToken: process.env.ACTIONABLES_MCP_TOKEN,
   assistantRunner,
+  agentHomeDirectory: process.env.ACTIONABLES_AGENT_HOME,
 });
 
 async function close() {

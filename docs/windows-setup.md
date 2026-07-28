@@ -13,6 +13,19 @@ No `.env` file is required. The default database is `file:./data/actionables.db`
 
 The agent MCP endpoint is disabled unless `ACTIONABLES_MCP_TOKEN` is set. See [Agent task MCP endpoint](mcp-agent-tasks.md) for the local token and Codex configuration.
 
+## Optional Codex instructions and workflow skill
+
+On first use, Actionables offers two independent, unchecked choices:
+
+- **Actionables agent instructions** append a managed Actionables coordination section to `%USERPROFILE%\.codex\AGENTS.md`.
+- **Actionables workflow skill** creates `%USERPROFILE%\.agents\skills\actionables-workflow\SKILL.md`.
+
+Neither file is installed automatically. Choose either component, both, or **Not now**. The same installation controls and current file paths remain available under **Settings → Actionables agent integration**.
+
+Installation is idempotent. Existing unrelated content in `AGENTS.md` is preserved, and an already matching component is left unchanged. If a managed instructions section or skill file differs from the bundled copy, Actionables reports that manual review is required and does not overwrite it. Reconcile the target with the bundled files under `resources\agent-integration`, then retry from Settings.
+
+Set `ACTIONABLES_AGENT_HOME` before starting the API only when Actionables should use a profile root other than the current Windows user's home directory. This override is primarily intended for isolated validation.
+
 The optional note groomer and relationship auditor require the local Codex CLI
 to be installed and signed in. Verify it from the same Windows user account that
 runs Actionables:

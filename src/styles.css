@@ -1914,6 +1914,7 @@ button {
 
 .settings-heading,
 .settings-form,
+.settings-integration,
 .settings-state {
   max-width: 1100px;
   margin-right: auto;
@@ -1931,7 +1932,8 @@ button {
 }
 
 .settings-heading p,
-.settings-form section > div > p {
+.settings-form section > div > p,
+.settings-section-heading p {
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
@@ -1941,6 +1943,109 @@ button {
 .settings-form {
   display: grid;
   gap: 12px;
+}
+
+.settings-integration {
+  margin-bottom: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.settings-integration > .settings-state {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-section-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.settings-section-heading h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.agent-integration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-integration-grid article {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.agent-integration-grid article > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-integration-grid article > header svg {
+  width: 18px;
+  color: var(--accent);
+}
+
+.agent-integration-grid h3 {
+  margin: 0 0 3px;
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.agent-integration-grid header span,
+.agent-integration-grid p,
+.agent-integration-grid small,
+.integration-notice {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-integration-grid header span[data-state="installed"] {
+  color: var(--accent);
+}
+
+.agent-integration-grid header span[data-state="modified"] {
+  color: var(--warning);
+}
+
+.agent-integration-grid p {
+  margin: 0;
+}
+
+.agent-integration-grid code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.agent-integration-grid .toolbar-button {
+  justify-self: start;
+}
+
+.settings-integration > .inline-error {
+  margin-top: 12px;
+}
+
+.integration-notice {
+  min-height: 16px;
+  margin-top: 10px;
+  color: var(--accent);
 }
 
 .settings-form > section {
@@ -2241,6 +2346,20 @@ button {
   .settings-form footer .primary-action {
     justify-content: center;
     width: 100%;
+  }
+
+  .settings-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-section-heading .primary-action {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .agent-integration-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .data-heading {
@@ -4238,6 +4357,70 @@ button {
 .archive-dialog footer > button {
   min-height: 32px;
   padding: 0 12px;
+}
+
+.agent-setup-dialog {
+  width: min(620px, 100%);
+}
+
+.agent-setup-options {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.agent-setup-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.agent-setup-options label:has(input:disabled) {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.agent-setup-options input {
+  margin-top: 2px;
+}
+
+.agent-setup-options span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-setup-options strong {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.agent-setup-options small,
+.agent-setup-options em {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.agent-setup-options em {
+  color: var(--accent);
+}
+
+.agent-setup-dialog > .inline-error,
+.agent-setup-notice {
+  margin: 0 16px 12px;
+}
+
+.agent-setup-notice {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .inspector-loading {

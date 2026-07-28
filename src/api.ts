@@ -1,6 +1,8 @@
 import {
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
+  agentIntegrationInstallResponseSchema,
+  agentIntegrationSettingsSchema,
   auditActionableRelationshipsRequestSchema,
   archiveImpactResponseSchema,
   createRepositoryResponseSchema,
@@ -13,6 +15,8 @@ import {
   type ActionableDetail,
   type ActionableQuery,
   type ActionablesListResponse,
+  type AgentIntegrationInstallResponse,
+  type AgentIntegrationSettings,
   type ArchiveImpactResponse,
   type ArchiveTargetKind,
   type CreateDependencyRequest,
@@ -32,6 +36,7 @@ import {
   type DashboardResponse,
   type ImportCommitResponse,
   type ImportPreviewResponse,
+  type InstallAgentIntegrationRequest,
   type PortableDocument,
   type PrepareImportCommitRequest,
   type PrepareImportCommitResponse,
@@ -126,6 +131,23 @@ export async function updateHelperAgentSettings(
   return helperAgentSettingsSchema.parse(
     await requestJson("/api/settings/helper-agents", {
       method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function fetchAgentIntegrationSettings(): Promise<AgentIntegrationSettings> {
+  return agentIntegrationSettingsSchema.parse(
+    await requestJson("/api/settings/agent-integration"),
+  );
+}
+
+export async function installAgentIntegration(
+  input: InstallAgentIntegrationRequest,
+): Promise<AgentIntegrationInstallResponse> {
+  return agentIntegrationInstallResponseSchema.parse(
+    await requestJson("/api/settings/agent-integration/install", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   );

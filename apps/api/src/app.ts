@@ -21,6 +21,9 @@ import {
   groomActionableNotesRequestSchema,
   groomActionableNotesResponseSchema,
   helperAgentSettingsSchema,
+  agentIntegrationSettingsSchema,
+  agentIntegrationInstallResponseSchema,
+  installAgentIntegrationRequestSchema,
   scopeOptionsResponseSchema,
   setParentRequestSchema,
   statusTransitionRequestSchema,
@@ -88,12 +91,18 @@ import {
   HelperAgentSettingsVersionConflictError,
   updateHelperAgentSettings,
 } from "./helper-agent-settings.js";
+import {
+  AgentIntegrationConflictError,
+  AgentIntegrationInstallError,
+  AgentIntegrationInstaller,
+} from "./agent-integration.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
   logger?: boolean | FastifyBaseLogger;
   mcpBearerToken?: string;
   assistantRunner?: AssistantRunner;
+  agentHomeDirectory?: string;
 };
 
 function fieldErrors(error: {
@@ -192,8 +201,12 @@ export function buildApp({
   logger = false,
   mcpBearerToken,
   assistantRunner,
+  agentHomeDirectory,
 }: BuildAppOptions) {
   const dataImports = new DataImportService(prisma);
+  const agentIntegration = new AgentIntegrationInstaller({
+    homeDirectory: agentHomeDirectory,
+  });
   const app = Fastify({
     logger,
     bodyLimit: 6 * 1024 * 1024,
@@ -249,6 +262,39 @@ export function buildApp({
         {
           detail: "Review the saved prompts before reapplying your changes.",
           current: error.current,
+        },
+      );
+    }
+    if (error instanceof AgentIntegrationConflictError) {
+      return problem(
+        request,
+        reply,
+        409,
+        error.code,
+        "Existing agent files need manual review.",
+        {
+          detail: error.message,
+          errors: Object.fromEntries(
+            error.conflicts.map((component) => [
+              component.id,
+              [
+                `${component.targetPath} differs from the bundled Actionables content. Keep the existing file or reconcile it manually before retrying.`,
+              ],
+            ]),
+          ),
+        },
+      );
+    }
+    if (error instanceof AgentIntegrationInstallError) {
+      return problem(
+        request,
+        reply,
+        500,
+        error.code,
+        "Could not install the Actionables agent integration.",
+        {
+          detail: error.message,
+          errors: { targetPath: [error.targetPath] },
         },
       );
     }
@@ -378,6 +424,38 @@ export function buildApp({
       await updateHelperAgentSettings(prisma, parsed.data),
     );
   });
+
+  app.get("/api/settings/agent-integration", async () => {
+    return agentIntegrationSettingsSchema.parse(
+      await agentIntegration.status(),
+    );
+  });
+
+  app.post(
+    "/api/settings/agent-integration/install",
+    async (request, reply) => {
+      const parsed = installAgentIntegrationRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_FAILED",
+          "Select an Actionables agent component to install.",
+          {
+            detail:
+              "Choose the agent instructions, the workflow skill, or both. Nothing is installed by default.",
+            errors: fieldErrors(parsed.error),
+          },
+        );
+      }
+      return agentIntegrationInstallResponseSchema.parse(
+        await agentIntegration.install(parsed.data),
+      );
+    },
+  );
 
   app.post("/api/repositories", async (request, reply) => {
     const parsed = createRepositoryRequestSchema.safeParse(request.body);
