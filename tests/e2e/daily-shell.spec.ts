@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 test("dashboard queues open the equivalent URL-backed actionable list", async ({
@@ -50,6 +51,123 @@ test("dashboard queues open the equivalent URL-backed actionable list", async ({
     fullPage: true,
   });
   expect(consoleErrors).toEqual([]);
+});
+
+test("Done navigation separates completed work and preserves other filters", async ({
+  page,
+}) => {
+  const scopes = await (await page.request.get("/api/scopes")).json();
+  const project = scopes.projects[0];
+  const repository = project.repositories[0];
+  const worktree = repository.worktrees[0];
+  let response = await page.request.post("/api/actionables", {
+    data: {
+      title: `T-005 Done navigation ${Date.now()}`,
+      priority: "Low",
+      effort: "S",
+      evidenceState: "Confirmed",
+      projectId: project.id,
+      repositoryId: repository.id,
+      worktreeId: worktree.id,
+      finding: "Done work needs a direct, separate view.",
+      description: "Verify the completed-work navigation.",
+      research: ["The existing exact Done query is sufficient."],
+      validation: ["Exercise the Done and Actionables navigation."],
+      tags: ["done-navigation-e2e"],
+      userSources: [],
+    },
+  });
+  expect(response.ok()).toBe(true);
+  let completed = (await response.json()).item;
+  for (const status of ["Researching", "Ready", "In progress"]) {
+    response = await page.request.post(
+      `/api/actionables/${completed.id}/status-transitions`,
+      {
+        data: { version: completed.version, status },
+      },
+    );
+    expect(response.ok()).toBe(true);
+    completed = (await response.json()).item;
+  }
+  response = await page.request.post(
+    `/api/actionables/${completed.id}/validation-records`,
+    {
+      data: {
+        version: completed.version,
+        type: "Automated test",
+        outcome: "Passed",
+        notes: "Done navigation fixture is ready.",
+        evidence: "Created through the public lifecycle API.",
+      },
+    },
+  );
+  expect(response.ok()).toBe(true);
+  completed = (await response.json()).item;
+  response = await page.request.post(
+    `/api/actionables/${completed.id}/status-transitions`,
+    {
+      data: { version: completed.version, status: "Done" },
+    },
+  );
+  expect(response.ok()).toBe(true);
+
+  const doneResponse = await page.request.get(
+    "/api/actionables?status=Done&sort=updated-desc",
+  );
+  expect(doneResponse.ok()).toBe(true);
+  const done = await doneResponse.json();
+  expect(done.items.length).toBeGreaterThan(0);
+
+  await page.goto("/?sort=updated-desc");
+  const actionablesButton = page.getByRole("button", {
+    name: "Actionables",
+    exact: true,
+  });
+  const doneButton = page.getByRole("button", {
+    name: "Done",
+    exact: true,
+  });
+  await expect(actionablesButton).toHaveClass(/is-selected/);
+  await expect(
+    page.locator(".finding-row").getByText("Done", { exact: true }),
+  ).toHaveCount(0);
+
+  await doneButton.click();
+  await expect(page).toHaveURL(/status=Done/);
+  await expect(page).toHaveURL(/sort=updated-desc/);
+  await expect(page.getByRole("heading", { name: /^Done \d+$/ })).toBeVisible();
+  await expect(doneButton).toHaveClass(/is-selected/);
+  await expect(actionablesButton).not.toHaveClass(/is-selected/);
+  await expect(page.locator(".finding-row")).toHaveCount(done.items.length);
+  for (const item of done.items as Array<{ id: number }>) {
+    const row = page.locator(`[data-actionable-id="${item.id}"]`);
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Done", { exact: true })).toBeVisible();
+  }
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /^Done \d+$/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open project navigation" }).click();
+  await expect(doneButton).toBeVisible();
+  await expect(doneButton).toHaveClass(/is-selected/);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+
+  await actionablesButton.click();
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page).toHaveURL(/sort=updated-desc/);
+  await expect(
+    page.getByRole("heading", { name: /^Actionables \d+$/ }),
+  ).toBeVisible();
+  await expect(actionablesButton).toHaveClass(/is-selected/);
+  await expect(
+    page.locator(".finding-row").getByText("Done", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("filters, search, sort, selection, refresh, and history are URL-backed", async ({

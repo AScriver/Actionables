@@ -5408,10 +5408,29 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={view === "actionables" ? "is-selected" : ""}
-            onClick={() => replaceLocation("actionables", null, query)}
+            className={
+              view === "actionables" && query.status !== "Done"
+                ? "is-selected"
+                : ""
+            }
+            onClick={() =>
+              query.status === "Done"
+                ? patchQuery({ status: "active" }, "actionables")
+                : replaceLocation("actionables", null, query)
+            }
           >
             <List /> Actionables
+          </button>
+          <button
+            type="button"
+            className={
+              view === "actionables" && query.status === "Done"
+                ? "is-selected"
+                : ""
+            }
+            onClick={() => patchQuery({ status: "Done" }, "actionables")}
+          >
+            <CheckCircle2 /> Done
           </button>
           <button
             type="button"
@@ -6113,7 +6132,11 @@ export default function App() {
         <main className="findings-panel" id="main-content" tabIndex={-1}>
           <div className="findings-heading">
             <h1>
-              {view === "archive" ? "Archive" : "Actionables"}{" "}
+              {view === "archive"
+                ? "Archive"
+                : query.status === "Done"
+                  ? "Done"
+                  : "Actionables"}{" "}
               <span>{listQuery.data?.result.matched ?? 0}</span>
             </h1>
             <div className="filter-chips">

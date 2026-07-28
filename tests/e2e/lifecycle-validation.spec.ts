@@ -29,7 +29,7 @@ async function createReadyCandidate(
 test("lifecycle, append-only validation, safe Markdown, and sources persist through reload", async ({
   page,
   context,
-}) => {
+}, testInfo) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") {
@@ -37,8 +37,10 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
     }
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
+  const baseURL = testInfo.project.use.baseURL;
+  if (!baseURL) throw new Error("Playwright baseURL is required.");
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://127.0.0.1:4173",
+    origin: new URL(baseURL).origin,
   });
 
   await page.goto("/");
@@ -165,6 +167,15 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   await inspector.getByRole("button", { name: "Done", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm Done" }).click();
   await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
+  const doneDeepLink = page.url();
+  const lifecycleRow = page.getByRole("row", {
+    name: /T-004 browser lifecycle/,
+  });
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(lifecycleRow).toBeVisible();
+  await page.getByRole("button", { name: "Actionables", exact: true }).click();
+  await expect(lifecycleRow).toHaveCount(0);
+  await page.goto(doneDeepLink);
   await inspector.getByRole("tab", { name: "Activity" }).click();
   await expect(
     inspector.getByText("Completed with qualifying validation"),
@@ -189,6 +200,10 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   await expect(inspector.locator(".validation-record")).toHaveCount(2);
   await inspector.getByRole("tab", { name: "Activity" }).click();
   await expect(inspector.getByText("Reopened Done to Ready")).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(lifecycleRow).toHaveCount(0);
+  await page.getByRole("button", { name: "Actionables", exact: true }).click();
+  await expect(lifecycleRow).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
 
