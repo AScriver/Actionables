@@ -1,9 +1,14 @@
 node_modules/
+.env
+.env.*
+!.env.example
 dist/
 generated/
 .playwright-cli/
 test-results/
 playwright-report/
+/output/playwright/
+/.agents/plans/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
