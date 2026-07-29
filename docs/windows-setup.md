@@ -51,6 +51,13 @@ limited to one top-level work item and its direct subtasks, and the audit UI has
 no relationship mutation controls. No `OPENAI_API_KEY` is required for this
 local-CLI integration.
 
+Settings can override the model and reasoning level for **Groom notes with local
+Codex** only. Choosing the environment/default model keeps using
+`ACTIONABLES_ASSISTANT_MODEL` (or the built-in fallback), and choosing the
+selected-model reasoning default leaves Codex's model-specific reasoning level
+unchanged. The relationship auditor always keeps the environment/default runner
+configuration.
+
 ## Clean setup
 
 Run from a normal Windows path; spaces are supported.

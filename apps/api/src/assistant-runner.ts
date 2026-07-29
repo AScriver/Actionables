@@ -2,10 +2,13 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AssistantReasoningEffort } from "@actionables/contracts";
 
 export type AssistantRequest = {
   prompt: string;
   outputSchema: unknown;
+  model?: string;
+  reasoningEffort?: AssistantReasoningEffort;
 };
 
 export type AssistantResult = {
@@ -14,6 +17,7 @@ export type AssistantResult = {
 };
 
 export interface AssistantRunner {
+  readonly defaultModel: string;
   run(request: AssistantRequest): Promise<AssistantResult>;
 }
 
@@ -43,40 +47,68 @@ type CodexAssistantRunnerOptions = {
 };
 
 const outputLimit = 20_000;
+export const defaultCodexAssistantModel = "gpt-5.6-terra";
+
+export function buildCodexAssistantArguments({
+  model,
+  reasoningEffort,
+  schemaPath,
+  outputPath,
+}: {
+  model: string;
+  reasoningEffort?: AssistantReasoningEffort;
+  schemaPath: string;
+  outputPath: string;
+}) {
+  return [
+    "exec",
+    "--model",
+    model,
+    ...(reasoningEffort
+      ? [
+          "--config",
+          `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,
+        ]
+      : []),
+    "--sandbox",
+    "read-only",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--skip-git-repo-check",
+    "--output-schema",
+    schemaPath,
+    "--output-last-message",
+    outputPath,
+    "--color",
+    "never",
+    "-",
+  ];
+}
 
 export function createCodexAssistantRunner({
   executable = "codex",
-  model = "gpt-5.6-terra",
+  model = defaultCodexAssistantModel,
   timeoutMs = 120_000,
 }: CodexAssistantRunnerOptions = {}): AssistantRunner {
   return {
-    async run({ prompt, outputSchema }) {
+    defaultModel: model,
+    async run({ prompt, outputSchema, model: requestModel, reasoningEffort }) {
       const directory = await mkdtemp(join(tmpdir(), "actionables-assistant-"));
       const schemaPath = join(directory, "output.schema.json");
       const outputPath = join(directory, "output.json");
+      const effectiveModel = requestModel ?? model;
 
       try {
         await writeFile(schemaPath, JSON.stringify(outputSchema), "utf8");
         const stderr: Buffer[] = [];
         const child = spawn(
           executable,
-          [
-            "exec",
-            "--model",
-            model,
-            "--sandbox",
-            "read-only",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--output-schema",
+          buildCodexAssistantArguments({
+            model: effectiveModel,
+            reasoningEffort,
             schemaPath,
-            "--output-last-message",
             outputPath,
-            "--color",
-            "never",
-            "-",
-          ],
+          }),
           {
             cwd: directory,
             env: process.env,
@@ -147,7 +179,7 @@ export function createCodexAssistantRunner({
           );
         }
         try {
-          return { model, output: JSON.parse(raw) };
+          return { model: effectiveModel, output: JSON.parse(raw) };
         } catch {
           throw new AssistantRunnerError(
             "ASSISTANT_INVALID_OUTPUT",

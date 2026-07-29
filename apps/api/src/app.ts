@@ -82,6 +82,7 @@ import {
 import {
   AssistantContextTooLargeError,
   AssistantRunnerError,
+  defaultCodexAssistantModel,
   type AssistantRunner,
 } from "./assistant-runner.js";
 import { groomActionableNotes } from "./note-groomer.js";
@@ -207,6 +208,8 @@ export function buildApp({
   const agentIntegration = new AgentIntegrationInstaller({
     homeDirectory: agentHomeDirectory,
   });
+  const assistantDefaultModel =
+    assistantRunner?.defaultModel ?? defaultCodexAssistantModel;
   const app = Fastify({
     logger,
     bodyLimit: 6 * 1024 * 1024,
@@ -260,7 +263,7 @@ export function buildApp({
         "VERSION_CONFLICT",
         "The helper agent settings have a newer saved version.",
         {
-          detail: "Review the saved prompts before reapplying your changes.",
+          detail: "Review the saved settings before reapplying your changes.",
           current: error.current,
         },
       );
@@ -402,7 +405,7 @@ export function buildApp({
 
   app.get("/api/settings/helper-agents", async () => {
     return helperAgentSettingsSchema.parse(
-      await getHelperAgentSettings(prisma),
+      await getHelperAgentSettings(prisma, assistantDefaultModel),
     );
   });
 
@@ -416,12 +419,16 @@ export function buildApp({
         reply,
         422,
         "VALIDATION_ERROR",
-        "Check the helper agent prompts.",
+        "Check the helper agent settings.",
         { errors: fieldErrors(parsed.error) },
       );
     }
     return helperAgentSettingsSchema.parse(
-      await updateHelperAgentSettings(prisma, parsed.data),
+      await updateHelperAgentSettings(
+        prisma,
+        parsed.data,
+        assistantDefaultModel,
+      ),
     );
   });
 
@@ -631,18 +638,38 @@ export function buildApp({
       if (item.version !== parsed.data.version) {
         throw new VersionConflictError(item);
       }
+      const settings = await getHelperAgentSettings(
+        prisma,
+        assistantDefaultModel,
+      );
+      if (!settings.noteGroomerEnabled) {
+        return problem(
+          request,
+          reply,
+          409,
+          "ASSISTANT_ACTION_DISABLED",
+          "Note grooming is disabled.",
+          {
+            detail:
+              "Enable Groom notes with local Codex in Settings before retrying.",
+          },
+        );
+      }
       if (!assistantRunner) {
         throw new AssistantRunnerError(
           "ASSISTANT_UNAVAILABLE",
           "No local assistant runner is configured.",
         );
       }
-      const settings = await getHelperAgentSettings(prisma);
       return groomActionableNotesResponseSchema.parse(
         await groomActionableNotes(
           assistantRunner,
           item,
           settings.noteGroomerPrompt,
+          {
+            model: settings.noteGroomerModel ?? undefined,
+            reasoningEffort: settings.noteGroomerReasoningEffort ?? undefined,
+          },
         ),
       );
     },
@@ -679,13 +706,28 @@ export function buildApp({
       if (item.version !== parsed.data.version) {
         throw new VersionConflictError(item);
       }
+      const settings = await getHelperAgentSettings(
+        prisma,
+        assistantDefaultModel,
+      );
+      if (!settings.relationshipAuditorEnabled) {
+        return problem(
+          request,
+          reply,
+          409,
+          "ASSISTANT_ACTION_DISABLED",
+          "Relationship auditing is disabled.",
+          {
+            detail: "Enable Relationship auditor in Settings before retrying.",
+          },
+        );
+      }
       if (!assistantRunner) {
         throw new AssistantRunnerError(
           "ASSISTANT_UNAVAILABLE",
           "No local assistant runner is configured.",
         );
       }
-      const settings = await getHelperAgentSettings(prisma);
       return relationshipAuditResponseSchema.parse(
         await auditWorkItemRelationships(
           prisma,

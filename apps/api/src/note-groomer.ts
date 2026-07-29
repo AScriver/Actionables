@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 import {
   AssistantContextTooLargeError,
   AssistantRunnerError,
+  type AssistantRequest,
   type AssistantRunner,
 } from "./assistant-runner.js";
 import { defaultNoteGroomerPrompt } from "./assistant-prompts.js";
@@ -17,6 +18,7 @@ export async function groomActionableNotes(
   runner: AssistantRunner,
   actionable: ActionableDetail,
   instructions = defaultNoteGroomerPrompt,
+  runtime: Pick<AssistantRequest, "model" | "reasoningEffort"> = {},
 ): Promise<GroomActionableNotesResponse> {
   const context = JSON.stringify({
     title: actionable.title,
@@ -32,6 +34,7 @@ export async function groomActionableNotes(
   }
 
   const result = await runner.run({
+    ...runtime,
     outputSchema: z.toJSONSchema(groomActionableNotesProposalSchema, {
       io: "output",
     }),

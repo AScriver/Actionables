@@ -42,7 +42,31 @@ test("@a11y agent integration onboarding and settings pass axe", async ({
   await expect(
     page.getByRole("region", { name: "Actionables agent integration" }),
   ).toBeVisible();
+  const noteToggle = page.getByRole("checkbox", {
+    name: "Enable Groom notes with local Codex",
+  });
+  await expect(noteToggle).toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: "Enable Relationship auditor" }),
+  ).toBeChecked();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  try {
+    await noteToggle.uncheck();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(noteToggle).not.toBeChecked();
+    await expect(
+      page.locator(".settings-form footer").getByRole("status"),
+    ).toContainText("Helper agent settings saved.");
+  } finally {
+    if (!(await noteToggle.isChecked())) {
+      await noteToggle.check();
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(
+        page.locator(".settings-form footer").getByRole("status"),
+      ).toContainText("Helper agent settings saved.");
+    }
+  }
 });
 
 test("first-run setup is unchecked and can be skipped without installing", async ({
@@ -192,31 +216,51 @@ test("settings can install both missing components later", async ({ page }) => {
   );
 });
 
-test("edits and persists helper agent prompts on the settings page", async ({
+test("edits and persists helper agent settings on the settings page", async ({
   page,
 }) => {
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Settings" })).toHaveClass(
-    /is-selected/,
-  );
+  await expect(
+    page.getByRole("button", { name: "Settings", exact: true }),
+  ).toHaveClass(/is-selected/);
 
   const notePrompt = page.getByLabel("Prompt instructions").first();
   const relationshipPrompt = page.getByLabel("Prompt instructions").last();
+  const noteModel = page.getByLabel("Model", { exact: true });
+  const noteReasoning = page.getByLabel("Reasoning level", { exact: true });
+  await expect(notePrompt).not.toHaveValue("");
+  await expect(relationshipPrompt).not.toHaveValue("");
+  await expect(noteModel).toHaveValue("");
+  await expect(noteReasoning).toHaveValue("");
+  await expect(page.getByText(/Effective model:/)).toContainText(
+    "gpt-5.6-terra",
+  );
+  await expect(page.getByText(/Effective reasoning:/)).toContainText(
+    "selected model default",
+  );
   const originalNotePrompt = await notePrompt.inputValue();
   const originalRelationshipPrompt = await relationshipPrompt.inputValue();
   const savedNotePrompt = `${originalNotePrompt}\n\nKeep section headings concise.`;
   const savedRelationshipPrompt = `${originalRelationshipPrompt}\n\nPrefer recommendations with direct ID evidence.`;
 
   try {
+    await noteModel.selectOption("gpt-5.6-sol");
+    await noteReasoning.selectOption("high");
     await notePrompt.fill(savedNotePrompt);
     await relationshipPrompt.fill(savedRelationshipPrompt);
-    await page.getByRole("button", { name: "Save prompts" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
     await expect(
       page.locator(".settings-form footer").getByRole("status"),
-    ).toContainText("Helper agent prompts saved.");
+    ).toContainText("Helper agent settings saved.");
 
     await page.reload();
+    await expect(noteModel).toHaveValue("gpt-5.6-sol");
+    await expect(noteReasoning).toHaveValue("high");
+    await expect(page.getByText(/Effective model:/)).toContainText(
+      "gpt-5.6-sol",
+    );
+    await expect(page.getByText(/Effective reasoning:/)).toContainText("high");
     await expect(notePrompt).toHaveValue(savedNotePrompt);
     await expect(relationshipPrompt).toHaveValue(savedRelationshipPrompt);
 
@@ -231,6 +275,8 @@ test("edits and persists helper agent prompts on the settings page", async ({
   } finally {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/settings");
+    await noteModel.selectOption("");
+    await noteReasoning.selectOption("");
     await page
       .getByLabel("Prompt instructions")
       .first()
@@ -239,9 +285,101 @@ test("edits and persists helper agent prompts on the settings page", async ({
       .getByLabel("Prompt instructions")
       .last()
       .fill(originalRelationshipPrompt);
-    await page.getByRole("button", { name: "Save prompts" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
     await expect(
       page.locator(".settings-form footer").getByRole("status"),
-    ).toContainText("Helper agent prompts saved.");
+    ).toContainText("Helper agent settings saved.");
+    await page.reload();
+    await expect(noteModel).toHaveValue("");
+    await expect(noteReasoning).toHaveValue("");
+    await expect(page.getByText(/Effective model:/)).toContainText(
+      "gpt-5.6-terra",
+    );
+  }
+});
+
+test("disables helper actions independently and allows re-enabling", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const noteToggle = page.getByRole("checkbox", {
+    name: "Enable Groom notes with local Codex",
+  });
+  const relationshipToggle = page.getByRole("checkbox", {
+    name: "Enable Relationship auditor",
+  });
+  const notePrompt = page.getByLabel("Prompt instructions").first();
+  const relationshipPrompt = page.getByLabel("Prompt instructions").last();
+  await expect(notePrompt).not.toHaveValue("");
+  await expect(relationshipPrompt).not.toHaveValue("");
+  const originalNotePrompt = await notePrompt.inputValue();
+  const originalRelationshipPrompt = await relationshipPrompt.inputValue();
+
+  try {
+    await noteToggle.uncheck();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.locator(".settings-form footer").getByRole("status"),
+    ).toContainText("Helper agent settings saved.");
+
+    await page.reload();
+    await expect(noteToggle).not.toBeChecked();
+    await expect(relationshipToggle).toBeChecked();
+    await expect(notePrompt).toHaveValue(originalNotePrompt);
+    await expect(relationshipPrompt).toHaveValue(originalRelationshipPrompt);
+
+    await page.goto("/actionables/1");
+    const inspector = page.getByRole("complementary", {
+      name: "Selected actionable",
+    });
+    await inspector.getByRole("tab", { name: "Research notes" }).click();
+    await expect(
+      inspector.getByRole("heading", {
+        name: "Groom notes with local Codex",
+      }),
+    ).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "Relationships" }).click();
+    await expect(
+      inspector.getByRole("heading", { name: "Relationship auditor" }),
+    ).toBeVisible();
+
+    await page.goto("/settings");
+    await noteToggle.check();
+    await relationshipToggle.uncheck();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.locator(".settings-form footer").getByRole("status"),
+    ).toContainText("Helper agent settings saved.");
+
+    await page.reload();
+    await expect(noteToggle).toBeChecked();
+    await expect(relationshipToggle).not.toBeChecked();
+    await expect(notePrompt).toHaveValue(originalNotePrompt);
+    await expect(relationshipPrompt).toHaveValue(originalRelationshipPrompt);
+
+    await page.goto("/actionables/1");
+    await inspector.getByRole("tab", { name: "Research notes" }).click();
+    await expect(
+      inspector.getByRole("heading", {
+        name: "Groom notes with local Codex",
+      }),
+    ).toBeVisible();
+    await inspector.getByRole("tab", { name: "Relationships" }).click();
+    await expect(
+      inspector.getByRole("heading", { name: "Relationship auditor" }),
+    ).toHaveCount(0);
+  } finally {
+    await page.goto("/settings");
+    const needsRestore =
+      !(await noteToggle.isChecked()) ||
+      !(await relationshipToggle.isChecked());
+    if (needsRestore) {
+      await noteToggle.check();
+      await relationshipToggle.check();
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await expect(
+        page.locator(".settings-form footer").getByRole("status"),
+      ).toContainText("Helper agent settings saved.");
+    }
   }
 });

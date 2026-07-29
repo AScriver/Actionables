@@ -702,9 +702,30 @@ export const groomActionableNotesRequestSchema = z
 
 const helperAgentPromptSchema = z.string().trim().min(1).max(20_000);
 
+export const noteGroomerModels = [
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
+export const noteGroomerModelSchema = z.enum(noteGroomerModels);
+
+export const assistantReasoningEfforts = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+export const assistantReasoningEffortSchema = z.enum(assistantReasoningEfforts);
+
 export const helperAgentSettingsSchema = z
   .object({
+    noteGroomerEnabled: z.boolean(),
+    noteGroomerModel: noteGroomerModelSchema.nullable(),
+    noteGroomerReasoningEffort: assistantReasoningEffortSchema.nullable(),
+    noteGroomerEffectiveModel: z.string().trim().min(1).max(200),
     noteGroomerPrompt: helperAgentPromptSchema,
+    relationshipAuditorEnabled: z.boolean(),
     relationshipAuditorPrompt: helperAgentPromptSchema,
     version: z.number().int().positive(),
     updatedAt: z.iso.datetime(),
@@ -712,7 +733,7 @@ export const helperAgentSettingsSchema = z
   .strict();
 
 export const updateHelperAgentSettingsRequestSchema = helperAgentSettingsSchema
-  .omit({ updatedAt: true })
+  .omit({ noteGroomerEffectiveModel: true, updatedAt: true })
   .strict();
 
 export const agentIntegrationComponentIdSchema = z.enum([
@@ -1734,6 +1755,10 @@ export type GroomActionableNotesRequest = z.infer<
   typeof groomActionableNotesRequestSchema
 >;
 export type HelperAgentSettings = z.infer<typeof helperAgentSettingsSchema>;
+export type NoteGroomerModel = z.infer<typeof noteGroomerModelSchema>;
+export type AssistantReasoningEffort = z.infer<
+  typeof assistantReasoningEffortSchema
+>;
 export type UpdateHelperAgentSettingsRequest = z.infer<
   typeof updateHelperAgentSettingsRequestSchema
 >;

@@ -8,11 +8,15 @@ datasource db {
 }
 
 model HelperAgentSettings {
-  id                        String   @id
-  noteGroomerPrompt         String
-  relationshipAuditorPrompt String
-  version                   Int      @default(1)
-  updatedAt                 DateTime @updatedAt
+  id                         String   @id
+  noteGroomerEnabled         Boolean  @default(true)
+  noteGroomerModel           String?
+  noteGroomerReasoningEffort String?
+  noteGroomerPrompt          String
+  relationshipAuditorEnabled Boolean  @default(true)
+  relationshipAuditorPrompt  String
+  version                    Int      @default(1)
+  updatedAt                  DateTime @updatedAt
 }
 
 model Project {

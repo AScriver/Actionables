@@ -34,6 +34,8 @@ import {
   X,
 } from "lucide-react";
 import {
+  assistantReasoningEfforts,
+  noteGroomerModels,
   type CreateActionableRequest,
   type CreateRepositoryResponse,
   type ActionableDetail,
@@ -47,6 +49,8 @@ import {
   type EvidenceState,
   type GroomActionableNotesProposal,
   type HelperAgentSettings,
+  type AssistantReasoningEffort,
+  type NoteGroomerModel,
   type RelationshipAuditResponse,
   type Priority,
   type ImportCommitResponse,
@@ -650,11 +654,13 @@ function RelationshipAuditor({
 function RelationshipSection({
   selected,
   actionables,
+  relationshipAuditorEnabled,
   onNavigate,
   onMutated,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
+  relationshipAuditorEnabled: boolean;
   onNavigate: (id: number) => void;
   onMutated: (saved: ActionableDetail, notice: string) => void;
 }) {
@@ -710,14 +716,16 @@ function RelationshipSection({
       className="inspector-section relationships"
       aria-label="Relationships"
     >
-      {!selected.parentId && !selected.archiveState.isArchived && (
-        <RelationshipAuditor
-          key={`relationship-auditor-${selected.id}-${selected.version}`}
-          selected={selected}
-          actionables={actionables}
-          onNavigate={onNavigate}
-        />
-      )}
+      {relationshipAuditorEnabled &&
+        !selected.parentId &&
+        !selected.archiveState.isArchived && (
+          <RelationshipAuditor
+            key={`relationship-auditor-${selected.id}-${selected.version}`}
+            selected={selected}
+            actionables={actionables}
+            onNavigate={onNavigate}
+          />
+        )}
       {selectedParent && (
         <div className="relationship-parent">
           <span>Parent</span>
@@ -1936,6 +1944,15 @@ function Inspector({
   onArchive: () => void;
   onReleaseExpiredClaim: () => void;
 }) {
+  const helperSettingsQuery = useQuery({
+    queryKey: ["helper-agent-settings"],
+    queryFn: fetchHelperAgentSettings,
+  });
+  const noteGroomerEnabled =
+    helperSettingsQuery.data?.noteGroomerEnabled === true;
+  const relationshipAuditorEnabled =
+    helperSettingsQuery.data?.relationshipAuditorEnabled === true;
+
   return (
     <>
       <header className="inspector-header">
@@ -2134,7 +2151,7 @@ function Inspector({
                 ))}
               </div>
             </section>
-            {!selected.archiveState.isArchived && (
+            {noteGroomerEnabled && !selected.archiveState.isArchived && (
               <NoteGroomer
                 key={`note-groomer-${selected.id}-${selected.version}`}
                 selected={selected}
@@ -2181,6 +2198,7 @@ function Inspector({
           <RelationshipSection
             selected={selected}
             actionables={actionables}
+            relationshipAuditorEnabled={relationshipAuditorEnabled}
             onNavigate={onNavigate}
             onMutated={onMutated}
           />
@@ -4531,7 +4549,14 @@ function SettingsPanel() {
     queryKey: ["helper-agent-settings"],
     queryFn: fetchHelperAgentSettings,
   });
+  const [noteGroomerEnabled, setNoteGroomerEnabled] = useState(true);
+  const [noteGroomerModel, setNoteGroomerModel] =
+    useState<NoteGroomerModel | null>(null);
+  const [noteGroomerReasoningEffort, setNoteGroomerReasoningEffort] =
+    useState<AssistantReasoningEffort | null>(null);
   const [noteGroomerPrompt, setNoteGroomerPrompt] = useState("");
+  const [relationshipAuditorEnabled, setRelationshipAuditorEnabled] =
+    useState(true);
   const [relationshipAuditorPrompt, setRelationshipAuditorPrompt] =
     useState("");
   const [saving, setSaving] = useState(false);
@@ -4539,7 +4564,11 @@ function SettingsPanel() {
   const [error, setError] = useState("");
 
   const loadDraft = (settings: HelperAgentSettings) => {
+    setNoteGroomerEnabled(settings.noteGroomerEnabled);
+    setNoteGroomerModel(settings.noteGroomerModel);
+    setNoteGroomerReasoningEffort(settings.noteGroomerReasoningEffort);
     setNoteGroomerPrompt(settings.noteGroomerPrompt);
+    setRelationshipAuditorEnabled(settings.relationshipAuditorEnabled);
     setRelationshipAuditorPrompt(settings.relationshipAuditorPrompt);
   };
 
@@ -4549,7 +4578,13 @@ function SettingsPanel() {
 
   const dirty = Boolean(
     settingsQuery.data &&
-    (noteGroomerPrompt !== settingsQuery.data.noteGroomerPrompt ||
+    (noteGroomerEnabled !== settingsQuery.data.noteGroomerEnabled ||
+      noteGroomerModel !== settingsQuery.data.noteGroomerModel ||
+      noteGroomerReasoningEffort !==
+        settingsQuery.data.noteGroomerReasoningEffort ||
+      noteGroomerPrompt !== settingsQuery.data.noteGroomerPrompt ||
+      relationshipAuditorEnabled !==
+        settingsQuery.data.relationshipAuditorEnabled ||
       relationshipAuditorPrompt !==
         settingsQuery.data.relationshipAuditorPrompt),
   );
@@ -4563,12 +4598,16 @@ function SettingsPanel() {
     try {
       const saved = await updateHelperAgentSettings({
         version: settingsQuery.data.version,
+        noteGroomerEnabled,
+        noteGroomerModel,
+        noteGroomerReasoningEffort,
         noteGroomerPrompt,
+        relationshipAuditorEnabled,
         relationshipAuditorPrompt,
       });
       queryClient.setQueryData(["helper-agent-settings"], saved);
       loadDraft(saved);
-      setNotice("Helper agent prompts saved.");
+      setNotice("Helper agent settings saved.");
     } catch (caught) {
       if (
         caught instanceof ApiProblem &&
@@ -4597,7 +4636,7 @@ function SettingsPanel() {
       <section className="settings-panel" aria-busy="true">
         <div className="settings-state" role="status">
           <RefreshCw className="spin" aria-hidden="true" />
-          Loading helper agent prompts…
+          Loading helper agent settings…
         </div>
       </section>
     );
@@ -4608,7 +4647,7 @@ function SettingsPanel() {
       <section className="settings-panel">
         <div className="settings-state" role="alert">
           <AlertTriangle aria-hidden="true" />
-          <strong>Could not load helper agent prompts</strong>
+          <strong>Could not load helper agent settings</strong>
           <span>{errorMessage(settingsQuery.error)}</span>
           <button
             type="button"
@@ -4643,6 +4682,90 @@ function SettingsPanel() {
               reorganized.
             </p>
           </div>
+          <div className="helper-action-toggle">
+            <label htmlFor="note-groomer-enabled">
+              <input
+                id="note-groomer-enabled"
+                type="checkbox"
+                checked={noteGroomerEnabled}
+                disabled={saving}
+                onChange={(event) => {
+                  setNoteGroomerEnabled(event.target.checked);
+                  setNotice("");
+                }}
+              />
+              <span>Enable Groom notes with local Codex</span>
+            </label>
+            <small>
+              Show the helper in Actionable research notes and allow direct API
+              requests.
+            </small>
+          </div>
+          <div className="helper-runtime-grid">
+            <div className="form-field">
+              <label htmlFor="note-groomer-model">Model</label>
+              <select
+                id="note-groomer-model"
+                value={noteGroomerModel ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setNoteGroomerModel(
+                    noteGroomerModels.find(
+                      (model) => model === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use environment/default model</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+              </select>
+              <small>
+                Effective model:{" "}
+                <code>
+                  {noteGroomerModel ??
+                    settingsQuery.data.noteGroomerEffectiveModel}
+                </code>
+                {noteGroomerModel
+                  ? " (saved override)"
+                  : " (environment/default)"}
+              </small>
+            </div>
+            <div className="form-field">
+              <label htmlFor="note-groomer-reasoning-effort">
+                Reasoning level
+              </label>
+              <select
+                id="note-groomer-reasoning-effort"
+                value={noteGroomerReasoningEffort ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setNoteGroomerReasoningEffort(
+                    assistantReasoningEfforts.find(
+                      (effort) => effort === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use selected model default</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+              </select>
+              <small>
+                Effective reasoning:{" "}
+                <code>
+                  {noteGroomerReasoningEffort ?? "selected model default"}
+                </code>
+                {noteGroomerReasoningEffort ? " (saved override)" : ""}
+              </small>
+            </div>
+          </div>
           <label className="form-field" htmlFor="note-groomer-prompt">
             <span>Prompt instructions</span>
             <textarea
@@ -4670,6 +4793,25 @@ function SettingsPanel() {
               Controls how hierarchy and dependency recommendations are
               evaluated.
             </p>
+          </div>
+          <div className="helper-action-toggle">
+            <label htmlFor="relationship-auditor-enabled">
+              <input
+                id="relationship-auditor-enabled"
+                type="checkbox"
+                checked={relationshipAuditorEnabled}
+                disabled={saving}
+                onChange={(event) => {
+                  setRelationshipAuditorEnabled(event.target.checked);
+                  setNotice("");
+                }}
+              />
+              <span>Enable Relationship auditor</span>
+            </label>
+            <small>
+              Show the auditor in Actionable relationships and allow direct API
+              requests.
+            </small>
           </div>
           <label className="form-field" htmlFor="relationship-auditor-prompt">
             <span>Prompt instructions</span>
@@ -4710,7 +4852,7 @@ function SettingsPanel() {
               !relationshipAuditorPrompt.trim()
             }
           >
-            {saving ? "Saving…" : "Save prompts"}
+            {saving ? "Saving…" : "Save settings"}
           </button>
         </footer>
       </form>
