@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { resolveApiRuntimeConfig } from "@actionables/contracts";
+import { resolveRuntimeConfig } from "@actionables/contracts";
 
-const runtimeConfig = resolveApiRuntimeConfig(process.env.API_PORT);
+const runtimeConfig = resolveRuntimeConfig({
+  webPort: process.env.WEB_PORT,
+  apiPort: process.env.API_PORT,
+});
 const runtimeEnvironment = {
   ...process.env,
+  WEB_PORT: String(runtimeConfig.webPort),
   API_PORT: String(runtimeConfig.apiPort),
 };
 
@@ -13,18 +17,10 @@ const children = [
     stdio: "inherit",
     env: runtimeEnvironment,
   }),
-  spawn(
-    process.execPath,
-    [
-      "node_modules/vite/bin/vite.js",
-      "preview",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "4173",
-    ],
-    { stdio: "inherit", env: runtimeEnvironment },
-  ),
+  spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview"], {
+    stdio: "inherit",
+    env: runtimeEnvironment,
+  }),
 ];
 
 let stopping = false;

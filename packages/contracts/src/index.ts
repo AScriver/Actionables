@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+export const defaultWebPort = 4173;
 export const defaultApiPort = 4174;
 export const loopbackApiHost = "127.0.0.1";
 
@@ -10,29 +11,70 @@ export type ApiRuntimeConfig = {
   mcpEndpoint: string;
 };
 
-export function resolveApiRuntimeConfig(
+export type RuntimeConfig = ApiRuntimeConfig & {
+  webHost: typeof loopbackApiHost;
+  webPort: number;
+  webOrigin: string;
+  healthEndpoint: string;
+};
+
+type RuntimeConfigInput = {
+  webPort?: string;
+  apiPort?: string;
+};
+
+function resolvePort(
   configuredPort: string | undefined,
-): ApiRuntimeConfig {
+  environmentVariable: "WEB_PORT" | "API_PORT",
+  defaultPort: number,
+) {
   const normalizedPort = configuredPort?.trim();
   if (
     configuredPort !== undefined &&
     (!normalizedPort || !/^\d+$/.test(normalizedPort))
   ) {
-    throw new Error("API_PORT must be a whole number from 1 through 65535.");
+    throw new Error(
+      `${environmentVariable} must be a whole number from 1 through 65535.`,
+    );
   }
 
-  const apiPort =
-    normalizedPort === undefined ? defaultApiPort : Number(normalizedPort);
-  if (!Number.isSafeInteger(apiPort) || apiPort < 1 || apiPort > 65_535) {
-    throw new Error("API_PORT must be a whole number from 1 through 65535.");
+  const port =
+    normalizedPort === undefined ? defaultPort : Number(normalizedPort);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(
+      `${environmentVariable} must be a whole number from 1 through 65535.`,
+    );
   }
 
+  return port;
+}
+
+export function resolveApiRuntimeConfig(
+  configuredPort: string | undefined,
+): ApiRuntimeConfig {
+  const apiPort = resolvePort(configuredPort, "API_PORT", defaultApiPort);
   const apiOrigin = `http://${loopbackApiHost}:${apiPort}`;
   return {
     apiHost: loopbackApiHost,
     apiPort,
     apiOrigin,
     mcpEndpoint: `${apiOrigin}/mcp`,
+  };
+}
+
+export function resolveRuntimeConfig({
+  webPort: configuredWebPort,
+  apiPort: configuredApiPort,
+}: RuntimeConfigInput = {}): RuntimeConfig {
+  const apiRuntimeConfig = resolveApiRuntimeConfig(configuredApiPort);
+  const webPort = resolvePort(configuredWebPort, "WEB_PORT", defaultWebPort);
+  const webOrigin = `http://${loopbackApiHost}:${webPort}`;
+  return {
+    webHost: loopbackApiHost,
+    webPort,
+    webOrigin,
+    healthEndpoint: `${webOrigin}/api/health`,
+    ...apiRuntimeConfig,
   };
 }
 

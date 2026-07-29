@@ -1,9 +1,12 @@
-import { resolveApiRuntimeConfig } from "@actionables/contracts";
+import { resolveRuntimeConfig } from "@actionables/contracts";
 import { buildApp } from "./app.js";
 import { createCodexAssistantRunner } from "./assistant-runner.js";
 import { createPrismaClient } from "./database.js";
 
-const runtimeConfig = resolveApiRuntimeConfig(process.env.API_PORT);
+const runtimeConfig = resolveRuntimeConfig({
+  webPort: process.env.WEB_PORT,
+  apiPort: process.env.API_PORT,
+});
 const mcpBearerToken = process.env.ACTIONABLES_MCP_TOKEN;
 const prisma = createPrismaClient();
 const assistantRunner = createCodexAssistantRunner({
@@ -35,7 +38,9 @@ try {
   app.log.info(
     {
       address,
+      webOrigin: runtimeConfig.webOrigin,
       apiOrigin: runtimeConfig.apiOrigin,
+      healthEndpoint: runtimeConfig.healthEndpoint,
       mcpEndpoint: runtimeConfig.mcpEndpoint,
       mcpEnabled: Boolean(mcpBearerToken?.trim()),
     },

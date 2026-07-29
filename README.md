@@ -57,6 +57,11 @@ pnpm run dev
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173). Press `Ctrl+C` in the
 terminal to stop the web and API processes.
 
+Set `WEB_PORT` and/or `API_PORT` before startup to use explicit custom loopback
+ports. Explicit values must be whole numbers from 1 through 65535 and are never
+silently replaced when occupied. See the Windows operation guide for the
+effective URL and troubleshooting details.
+
 No `.env` file is required. The default SQLite database is created at
 `data/actionables.db`. For detailed setup, restart, recovery, and
 troubleshooting instructions, see

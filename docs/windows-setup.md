@@ -104,18 +104,21 @@ This migrates and seeds the configured database, then starts on these defaults:
 - API: `http://127.0.0.1:4174`
 - Health: `http://127.0.0.1:4173/api/health`
 
-To use a different API port, set a whole number from 1 through 65535 before
-startup. The API listener, web proxy, setup/status UI, and reported MCP endpoint
-then use the same effective value:
+To use explicit custom ports, set either or both variables to a whole number
+from 1 through 65535 before startup. The web listener, API listener, proxy,
+setup/status UI, and reported web, API, health, and MCP URLs then use the same
+normalized pair:
 
 ```powershell
+$env:WEB_PORT = '4273'
 $env:API_PORT = '4274'
 pnpm run dev
 ```
 
 Blank, zero, nonnumeric, fractional, exponential, and out-of-range values fail
-at startup with an `API_PORT` validation error. Actionables remains bound to
-`127.0.0.1`.
+at startup with a variable-specific `WEB_PORT` or `API_PORT` validation error.
+Both services remain bound to `127.0.0.1`. An explicit occupied port fails
+startup and is never silently replaced.
 
 Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
 
@@ -129,13 +132,13 @@ pnpm run db:migrate
 pnpm run start
 ```
 
-`pnpm run start` also honors a valid inherited `API_PORT` and passes the same
-normalized value to the API and Vite preview processes.
+`pnpm run start` also honors valid inherited `WEB_PORT` and `API_PORT` values
+and passes the same normalized pair to the API and Vite preview processes.
 
 Verify health:
 
 ```powershell
-Invoke-RestMethod -Uri 'http://127.0.0.1:4173/api/health'
+Invoke-RestMethod -Uri 'http://127.0.0.1:4273/api/health'
 ```
 
 Stop with `Ctrl+C`; repeat `pnpm run start` to verify a clean restart.
@@ -189,10 +192,12 @@ Get-NetTCPConnection -LocalPort 4173,4174 -ErrorAction SilentlyContinue |
   Select-Object LocalAddress,LocalPort,State,OwningProcess
 ```
 
-Stop the known process. If only the default API port is occupied, set a valid
-`API_PORT` before `pnpm run dev` or `pnpm run start`; Actionables propagates it
-to the API and Vite proxy automatically. Automatic fallback-port selection is
-not performed. The documented release proof uses the default ports.
+Stop the known process or set explicit `WEB_PORT` and/or `API_PORT` values
+before `pnpm run dev` or `pnpm run start`; Actionables propagates the normalized
+pair automatically. Explicit values are authoritative and are never replaced
+when occupied. When the variables are omitted, this version uses the default
+ports and does not perform automatic fallback selection. The documented release
+proof uses the defaults.
 
 ### MCP returns 401, 403, or 404
 
