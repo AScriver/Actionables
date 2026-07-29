@@ -8,6 +8,11 @@ can research, claim, implement, and validate. The original evidence, decisions,
 dependencies, and activity history stay attached to each item across Codex
 tasks instead of disappearing into chat history or a flat to-do list.
 
+![Actionables showing a selected Ready task and a wide Start with Codex handoff panel](docs/images/actionables-codex-workflow.png)
+
+_The execution queue, lifecycle controls, recorded research and validation, and
+built-in Codex handoff._
+
 ## What Actionables gives Codex
 
 - A durable task record with priorities, intended outcomes, source references,
