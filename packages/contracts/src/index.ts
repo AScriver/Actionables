@@ -839,6 +839,7 @@ export const updateHelperAgentSettingsRequestSchema =
     .superRefine(validateAgentCoordinationSettings);
 
 export const agentIntegrationComponentIdSchema = z.enum([
+  "mcpServer",
   "agentInstructions",
   "skill",
 ]);
@@ -864,6 +865,7 @@ export const agentIntegrationSettingsSchema = z
         bearerTokenEnvironmentVariable: z.literal("ACTIONABLES_MCP_TOKEN"),
       })
       .strict(),
+    mcpServer: agentIntegrationComponentSchema,
     agentInstructions: agentIntegrationComponentSchema,
     skill: agentIntegrationComponentSchema,
   })
@@ -871,14 +873,18 @@ export const agentIntegrationSettingsSchema = z
 
 export const installAgentIntegrationRequestSchema = z
   .object({
+    mcpServer: z.boolean(),
     agentInstructions: z.boolean(),
     skill: z.boolean(),
   })
   .strict()
-  .refine((input) => input.agentInstructions || input.skill, {
-    message: "Select at least one component to install.",
-    path: ["components"],
-  });
+  .refine(
+    (input) => input.mcpServer || input.agentInstructions || input.skill,
+    {
+      message: "Select at least one component to install.",
+      path: ["components"],
+    },
+  );
 
 export const agentIntegrationInstallResultSchema = z
   .object({
@@ -891,7 +897,7 @@ export const agentIntegrationInstallResultSchema = z
 export const agentIntegrationInstallResponseSchema = z
   .object({
     settings: agentIntegrationSettingsSchema,
-    results: z.array(agentIntegrationInstallResultSchema).min(1).max(2),
+    results: z.array(agentIntegrationInstallResultSchema).min(1).max(3),
   })
   .strict();
 

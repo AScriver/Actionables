@@ -8,6 +8,14 @@ const missingIntegration = {
     enabled: false,
     bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
   },
+  mcpServer: {
+    id: "mcpServer",
+    label: "Actionables MCP server",
+    description: "Registers the effective Actionables MCP endpoint.",
+    targetPath: "C:\\TestUser\\.codex\\config.toml",
+    state: "missing",
+    installed: false,
+  },
   agentInstructions: {
     id: "agentInstructions",
     label: "Actionables agent instructions",
@@ -43,7 +51,11 @@ test("@a11y agent integration onboarding and settings pass axe", async ({
   ).toBeVisible();
   await expect(page.getByText("http://127.0.0.1:4274/mcp")).toBeVisible();
   await expect(
-    page.getByText(/Set a non-empty ACTIONABLES_MCP_TOKEN/),
+    page.getByText(/Create a strong local token.*ACTIONABLES_MCP_TOKEN/),
+  ).toBeVisible();
+  await expect(page.getByText(/Restart Codex after registering/)).toBeVisible();
+  await expect(
+    page.getByText("Generate and save a token on Windows"),
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
@@ -103,7 +115,7 @@ test("first-run setup is unchecked and can be skipped without installing", async
     name: "Set up Actionables for Codex",
   });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(2);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(3);
   await expect(dialog.getByRole("checkbox").first()).not.toBeChecked();
   await expect(dialog.getByRole("checkbox").last()).not.toBeChecked();
   await expect(
@@ -116,6 +128,49 @@ test("first-run setup is unchecked and can be skipped without installing", async
 
   await page.reload();
   await expect(dialog).toBeHidden();
+});
+
+test("first-run setup sends conflicting MCP registration to manual review", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(() =>
+    localStorage.removeItem("actionables-agent-integration-setup-dismissed-v1"),
+  );
+  await page.route("**/api/settings/agent-integration", (route) =>
+    route.fulfill({
+      json: {
+        ...missingIntegration,
+        mcpServer: {
+          ...missingIntegration.mcpServer,
+          state: "modified",
+        },
+        agentInstructions: {
+          ...missingIntegration.agentInstructions,
+          state: "installed",
+          installed: true,
+        },
+        skill: {
+          ...missingIntegration.skill,
+          state: "installed",
+          installed: true,
+        },
+      },
+    }),
+  );
+
+  await page.reload();
+  const dialog = page.getByRole("dialog", {
+    name: "Set up Actionables for Codex",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables MCP server/ }),
+  ).toBeDisabled();
+  await expect(dialog.getByText("Manual review required")).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Install selected" }),
+  ).toBeDisabled();
 });
 
 test("first-run setup installs only the selected component", async ({
@@ -166,12 +221,16 @@ test("first-run setup installs only the selected component", async ({
   await expect(dialog.getByRole("status")).toContainText(
     "workflow skill was installed",
   );
-  expect(payload).toEqual({ agentInstructions: false, skill: true });
+  expect(payload).toEqual({
+    mcpServer: false,
+    agentInstructions: false,
+    skill: true,
+  });
   await dialog.getByRole("button", { name: "Continue" }).click();
   await expect(dialog).toBeHidden();
 });
 
-test("settings can install both missing components later", async ({ page }) => {
+test("settings can install all missing components later", async ({ page }) => {
   let payload: unknown;
   await page.route("**/api/settings/agent-integration", (route) =>
     route.fulfill({ json: missingIntegration }),
@@ -184,6 +243,11 @@ test("settings can install both missing components later", async ({ page }) => {
         json: {
           settings: {
             mcp: missingIntegration.mcp,
+            mcpServer: {
+              ...missingIntegration.mcpServer,
+              state: "installed",
+              installed: true,
+            },
             agentInstructions: {
               ...missingIntegration.agentInstructions,
               state: "installed",
@@ -196,6 +260,12 @@ test("settings can install both missing components later", async ({ page }) => {
             },
           },
           results: [
+            {
+              component: "mcpServer",
+              outcome: "installed",
+              message:
+                "The Actionables MCP server was registered. Restart Codex.",
+            },
             {
               component: "agentInstructions",
               outcome: "installed",
@@ -217,10 +287,16 @@ test("settings can install both missing components later", async ({ page }) => {
     name: "Actionables agent integration",
   });
   await expect(integration).toBeVisible();
-  await integration.getByRole("button", { name: "Install both" }).click();
-  expect(payload).toEqual({ agentInstructions: true, skill: true });
+  await integration
+    .getByRole("button", { name: "Install all available" })
+    .click();
+  expect(payload).toEqual({
+    mcpServer: true,
+    agentInstructions: true,
+    skill: true,
+  });
   await expect(integration.getByText("Installed", { exact: true })).toHaveCount(
-    2,
+    3,
   );
   await expect(integration.getByRole("status")).toContainText(
     "Agent instructions were appended",

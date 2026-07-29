@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse } from "smol-toml";
 import type {
   ApiRuntimeConfig,
   AgentIntegrationComponent,
@@ -14,6 +15,8 @@ import { resolveApiRuntimeConfig } from "@actionables/contracts";
 
 const instructionsStart = "<!-- actionables-agent-instructions:start -->";
 const instructionsEnd = "<!-- actionables-agent-instructions:end -->";
+const mcpBearerTokenEnvironmentVariable = "ACTIONABLES_MCP_TOKEN";
+const actionablesMcpTableHeader = "[mcp_servers.actionables]";
 const knownLegacySkillHashes = new Set([
   "d75e5b9094b6bb0f4c8c31059e8bbfac88178ad2b46736c570db217aea19cf42",
 ]);
@@ -31,6 +34,18 @@ type InstallerOptions = {
   resourcesDirectory?: string;
   runtimeConfig?: ApiRuntimeConfig;
   mcpEnabled?: boolean;
+};
+
+type CodexMcpConfigState = "missing" | "outdated" | "installed" | "modified";
+
+export type CodexMcpConfigReconciliation = {
+  state: CodexMcpConfigState;
+  content: string;
+  changed: boolean;
+};
+
+type ReconcileCodexMcpConfigOptions = {
+  previousEndpoint?: string;
 };
 
 function normalizeContent(value: string) {
@@ -55,6 +70,157 @@ async function readOptional(path: string) {
     }
     throw error;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function newlineFor(value: string) {
+  return value.includes("\r\n") ? "\r\n" : "\n";
+}
+
+function actionablesMcpBlock(endpoint: string, newline: string) {
+  return [
+    actionablesMcpTableHeader,
+    `url = ${JSON.stringify(endpoint)}`,
+    `bearer_token_env_var = ${JSON.stringify(mcpBearerTokenEnvironmentVariable)}`,
+    "enabled = true",
+    "required = false",
+    "",
+  ].join(newline);
+}
+
+function appendActionablesMcpBlock(current: string, endpoint: string) {
+  const newline = newlineFor(current);
+  const block = actionablesMcpBlock(endpoint, newline);
+  if (current.length === 0) return block;
+  const separator =
+    current.endsWith("\n") || current.endsWith("\r")
+      ? current.endsWith(`${newline}${newline}`)
+        ? ""
+        : newline
+      : `${newline}${newline}`;
+  return `${current}${separator}${block}`;
+}
+
+function isSafeActionablesMcpConfig(
+  value: unknown,
+  endpoint: string,
+): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const supportedKeys = new Set([
+    "url",
+    "bearer_token_env_var",
+    "enabled",
+    "required",
+  ]);
+  if (Object.keys(value).some((key) => !supportedKeys.has(key))) return false;
+  return (
+    value.url === endpoint &&
+    value.bearer_token_env_var === mcpBearerTokenEnvironmentVariable &&
+    (value.enabled === undefined || value.enabled === true) &&
+    (value.required === undefined || value.required === false)
+  );
+}
+
+function replaceManagedActionablesMcpUrl(
+  current: string,
+  previousEndpoint: string,
+  endpoint: string,
+) {
+  const headerPattern =
+    /^[ \t]*\[mcp_servers\.actionables\][ \t]*(?:#[^\r\n]*)?$/gm;
+  const headers = [...current.matchAll(headerPattern)];
+  if (headers.length !== 1 || headers[0].index === undefined) return null;
+
+  const header = headers[0];
+  const headerEnd = header.index + header[0].length;
+  const remainder = current.slice(headerEnd);
+  const nextTable = remainder.match(
+    /(?:\r\n|\n|\r)[ \t]*\[\[?[^\r\n]+\]?\][ \t]*(?:#[^\r\n]*)?/,
+  );
+  const sectionEnd =
+    nextTable?.index === undefined
+      ? current.length
+      : headerEnd + nextTable.index;
+  const section = current.slice(headerEnd, sectionEnd);
+  const expectedUrl = JSON.stringify(previousEndpoint).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  const urlPattern = new RegExp(
+    `(^|\\r\\n|\\n|\\r)([ \\t]*url[ \\t]*=[ \\t]*)${expectedUrl}([ \\t]*(?:#[^\\r\\n]*)?)(?=\\r\\n|\\n|\\r|$)`,
+    "g",
+  );
+  const matches = [...section.matchAll(urlPattern)];
+  if (matches.length !== 1 || matches[0].index === undefined) return null;
+
+  const match = matches[0];
+  const valueStart =
+    headerEnd + match.index + match[1].length + match[2].length;
+  return `${current.slice(0, valueStart)}${JSON.stringify(endpoint)}${current.slice(valueStart + JSON.stringify(previousEndpoint).length)}`;
+}
+
+export function reconcileCodexMcpConfig(
+  current: string | null,
+  endpoint: string,
+  options: ReconcileCodexMcpConfigOptions = {},
+): CodexMcpConfigReconciliation {
+  if (current === null) {
+    return {
+      state: "missing",
+      content: actionablesMcpBlock(endpoint, "\n"),
+      changed: true,
+    };
+  }
+
+  let document: Record<string, unknown>;
+  try {
+    document = parse(current);
+  } catch {
+    return { state: "modified", content: current, changed: false };
+  }
+
+  const mcpServers = document.mcp_servers;
+  if (mcpServers === undefined) {
+    return {
+      state: "missing",
+      content: appendActionablesMcpBlock(current, endpoint),
+      changed: true,
+    };
+  }
+  if (!isRecord(mcpServers)) {
+    return { state: "modified", content: current, changed: false };
+  }
+
+  const actionables = mcpServers.actionables;
+  if (actionables === undefined) {
+    return {
+      state: "missing",
+      content: appendActionablesMcpBlock(current, endpoint),
+      changed: true,
+    };
+  }
+  if (isSafeActionablesMcpConfig(actionables, endpoint)) {
+    return { state: "installed", content: current, changed: false };
+  }
+
+  if (
+    options.previousEndpoint &&
+    isSafeActionablesMcpConfig(actionables, options.previousEndpoint)
+  ) {
+    const updated = replaceManagedActionablesMcpUrl(
+      current,
+      options.previousEndpoint,
+      endpoint,
+    );
+    if (updated !== null) {
+      return { state: "outdated", content: updated, changed: true };
+    }
+  }
+
+  return { state: "modified", content: current, changed: false };
 }
 
 function instructionsComponent(
@@ -115,12 +281,27 @@ function skillComponent(
   };
 }
 
+function mcpServerComponent(
+  targetPath: string,
+  reconciliation: CodexMcpConfigReconciliation,
+): AgentIntegrationComponent {
+  return {
+    id: "mcpServer",
+    label: "Actionables MCP server",
+    description:
+      "Registers the effective Actionables MCP endpoint in the current user's shared Codex configuration.",
+    targetPath,
+    state: reconciliation.state,
+    installed: reconciliation.state === "installed",
+  };
+}
+
 export class AgentIntegrationConflictError extends Error {
   readonly code = "AGENT_INTEGRATION_CONFLICT";
 
   constructor(public readonly conflicts: AgentIntegrationComponent[]) {
     super(
-      "One or more selected files already contain user-managed changes. Actionables did not overwrite them.",
+      "One or more selected integration components contain user-managed or ambiguous configuration. Actionables did not overwrite them.",
     );
   }
 }
@@ -143,6 +324,7 @@ export class AgentIntegrationInstaller {
   readonly resourcesDirectory: string;
   readonly instructionsPath: string;
   readonly skillPath: string;
+  readonly codexConfigPath: string;
   readonly runtimeConfig: ApiRuntimeConfig;
   readonly mcpEnabled: boolean;
 
@@ -152,6 +334,7 @@ export class AgentIntegrationInstaller {
       options.resourcesDirectory ?? defaultResourcesDirectory,
     );
     this.instructionsPath = resolve(this.homeDirectory, ".codex", "AGENTS.md");
+    this.codexConfigPath = resolve(this.homeDirectory, ".codex", "config.toml");
     this.skillPath = resolve(
       this.homeDirectory,
       ".agents",
@@ -176,20 +359,30 @@ export class AgentIntegrationInstaller {
   }
 
   async status(): Promise<AgentIntegrationSettings> {
-    const [{ instructions, skill }, currentInstructions, currentSkill] =
-      await Promise.all([
-        this.sources(),
-        readOptional(this.instructionsPath),
-        readOptional(this.skillPath),
-      ]);
+    const [
+      { instructions, skill },
+      currentInstructions,
+      currentSkill,
+      currentCodexConfig,
+    ] = await Promise.all([
+      this.sources(),
+      readOptional(this.instructionsPath),
+      readOptional(this.skillPath),
+      readOptional(this.codexConfigPath),
+    ]);
+    const mcpReconciliation = reconcileCodexMcpConfig(
+      currentCodexConfig,
+      this.runtimeConfig.mcpEndpoint,
+    );
 
     return {
       mcp: {
         apiOrigin: this.runtimeConfig.apiOrigin,
         endpoint: this.runtimeConfig.mcpEndpoint,
         enabled: this.mcpEnabled,
-        bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+        bearerTokenEnvironmentVariable: mcpBearerTokenEnvironmentVariable,
       },
+      mcpServer: mcpServerComponent(this.codexConfigPath, mcpReconciliation),
       agentInstructions: instructionsComponent(
         this.instructionsPath,
         currentInstructions,
@@ -204,6 +397,7 @@ export class AgentIntegrationInstaller {
   ): Promise<AgentIntegrationInstallResponse> {
     const before = await this.status();
     const selected = [
+      ...(input.mcpServer ? [before.mcpServer] : []),
       ...(input.agentInstructions ? [before.agentInstructions] : []),
       ...(input.skill ? [before.skill] : []),
     ];
@@ -216,6 +410,43 @@ export class AgentIntegrationInstaller {
 
     const { instructions, skill } = await this.sources();
     const results: AgentIntegrationInstallResponse["results"] = [];
+
+    if (input.mcpServer) {
+      const current = await readOptional(this.codexConfigPath);
+      const reconciliation = reconcileCodexMcpConfig(
+        current,
+        this.runtimeConfig.mcpEndpoint,
+      );
+      if (reconciliation.state === "modified") {
+        throw new AgentIntegrationConflictError([
+          mcpServerComponent(this.codexConfigPath, reconciliation),
+        ]);
+      }
+      if (!reconciliation.changed) {
+        results.push({
+          component: "mcpServer",
+          outcome: "already-installed",
+          message:
+            "The Actionables MCP server was already registered; no configuration changed.",
+        });
+      } else {
+        try {
+          await mkdir(dirname(this.codexConfigPath), { recursive: true });
+          await writeFile(this.codexConfigPath, reconciliation.content, {
+            encoding: "utf8",
+            ...(current === null ? { flag: "wx" } : {}),
+          });
+          results.push({
+            component: "mcpServer",
+            outcome: "installed",
+            message:
+              "The Actionables MCP server was registered. Restart Codex to load the configuration.",
+          });
+        } catch (error) {
+          throw new AgentIntegrationInstallError(this.codexConfigPath, error);
+        }
+      }
+    }
 
     if (input.agentInstructions) {
       if (before.agentInstructions.installed) {

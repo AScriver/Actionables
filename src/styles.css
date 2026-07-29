@@ -1975,7 +1975,7 @@ button {
 
 .agent-integration-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2047,6 +2047,25 @@ button {
 
 .agent-mcp-status p {
   margin: 0;
+}
+
+.agent-mcp-status details {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.agent-mcp-status summary {
+  cursor: pointer;
+}
+
+.agent-mcp-status pre {
+  overflow-x: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  white-space: pre;
 }
 
 .agent-integration-grid article {

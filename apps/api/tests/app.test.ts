@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -816,7 +816,7 @@ describe("Actionables API", () => {
     }
   });
 
-  it("reports and explicitly installs optional agent components", async () => {
+  it("reports and explicitly installs optional Codex integration components", async () => {
     const initial = await app!.inject({
       method: "GET",
       url: "/api/settings/agent-integration",
@@ -829,6 +829,7 @@ describe("Actionables API", () => {
         enabled: false,
         bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
       },
+      mcpServer: { state: "missing", installed: false },
       agentInstructions: { state: "missing", installed: false },
       skill: { state: "missing", installed: false },
     });
@@ -836,21 +837,49 @@ describe("Actionables API", () => {
     const noSelection = await app!.inject({
       method: "POST",
       url: "/api/settings/agent-integration/install",
-      payload: { agentInstructions: false, skill: false },
+      payload: {
+        mcpServer: false,
+        agentInstructions: false,
+        skill: false,
+      },
     });
     expect(noSelection.statusCode).toBe(422);
     expect(noSelection.json()).toMatchObject({
       code: "VALIDATION_FAILED",
     });
 
-    const installed = await app!.inject({
+    const registered = await app!.inject({
       method: "POST",
       url: "/api/settings/agent-integration/install",
-      payload: { agentInstructions: true, skill: true },
+      payload: {
+        mcpServer: true,
+        agentInstructions: false,
+        skill: false,
+      },
     });
-    expect(installed.statusCode).toBe(200);
-    expect(installed.json()).toMatchObject({
+    expect(registered.statusCode).toBe(200);
+    expect(registered.json()).toMatchObject({
       settings: {
+        mcpServer: { state: "installed", installed: true },
+        agentInstructions: { state: "missing", installed: false },
+        skill: { state: "missing", installed: false },
+      },
+      results: [{ component: "mcpServer", outcome: "installed" }],
+    });
+
+    const installedFiles = await app!.inject({
+      method: "POST",
+      url: "/api/settings/agent-integration/install",
+      payload: {
+        mcpServer: false,
+        agentInstructions: true,
+        skill: true,
+      },
+    });
+    expect(installedFiles.statusCode).toBe(200);
+    expect(installedFiles.json()).toMatchObject({
+      settings: {
+        mcpServer: { state: "installed", installed: true },
         agentInstructions: { state: "installed", installed: true },
         skill: { state: "installed", installed: true },
       },
@@ -885,6 +914,39 @@ describe("Actionables API", () => {
       expect(response.body).not.toContain("test-secret-token");
     } finally {
       await configured.close();
+    }
+  });
+
+  it("returns a conservative MCP configuration conflict without writing", async () => {
+    const configPath = resolve(agentHomeDirectory, ".codex", "config.toml");
+    const installed = await readFile(configPath, "utf8");
+    const conflicting = installed.replace(
+      "http://127.0.0.1:4174/mcp",
+      "http://127.0.0.1:9999/mcp",
+    );
+    await writeFile(configPath, conflicting, "utf8");
+
+    try {
+      const response = await app!.inject({
+        method: "POST",
+        url: "/api/settings/agent-integration/install",
+        payload: {
+          mcpServer: true,
+          agentInstructions: false,
+          skill: false,
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        code: "AGENT_INTEGRATION_CONFLICT",
+        errors: {
+          mcpServer: [expect.stringContaining(".codex")],
+        },
+      });
+      await expect(readFile(configPath, "utf8")).resolves.toBe(conflicting);
+    } finally {
+      await writeFile(configPath, installed, "utf8");
     }
   });
 

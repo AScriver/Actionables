@@ -3721,11 +3721,17 @@ function agentIntegrationState(component: AgentIntegrationComponent) {
   return "Not installed";
 }
 
+const mcpTokenSetupPowerShell = `$bytes = [byte[]]::new(32)
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$token = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+[Environment]::SetEnvironmentVariable("ACTIONABLES_MCP_TOKEN", $token, "User")
+Remove-Variable token,bytes`;
+
 function AgentMcpStatus({ mcp }: { mcp: AgentIntegrationSettings["mcp"] }) {
   return (
     <div className="agent-mcp-status" data-enabled={mcp.enabled}>
       <div>
-        <strong>Actionables MCP endpoint</strong>
+        <strong>Actionables MCP route</strong>
         <span>{mcp.enabled ? "Enabled" : "Disabled"}</span>
       </div>
       <dl>
@@ -3744,9 +3750,20 @@ function AgentMcpStatus({ mcp }: { mcp: AgentIntegrationSettings["mcp"] }) {
       </dl>
       <p>
         {mcp.enabled
-          ? `Codex can authenticate with the token from ${mcp.bearerTokenEnvironmentVariable}.`
-          : `Set a non-empty ${mcp.bearerTokenEnvironmentVariable} and restart Actionables to enable this route.`}
+          ? `The route is available. Codex reads its bearer token from ${mcp.bearerTokenEnvironmentVariable}.`
+          : `Create a strong local token, save it in the current Windows user's ${mcp.bearerTokenEnvironmentVariable} environment variable, and restart Actionables to enable this route.`}
       </p>
+      <p>
+        Actionables never displays the token. Restart Codex after registering
+        the server or changing its configuration so it reloads both the
+        configuration and user environment.
+      </p>
+      <details>
+        <summary>Generate and save a token on Windows</summary>
+        <pre>
+          <code>{mcpTokenSetupPowerShell}</code>
+        </pre>
+      </details>
     </div>
   );
 }
@@ -3758,21 +3775,23 @@ function AgentIntegrationSettingsSection() {
     queryFn: fetchAgentIntegrationSettings,
   });
   const [installing, setInstalling] = useState<
-    AgentIntegrationComponent["id"] | "both" | null
+    AgentIntegrationComponent["id"] | "all" | null
   >(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   const install = async (
+    mcpServer: boolean,
     agentInstructions: boolean,
     skill: boolean,
-    pending: AgentIntegrationComponent["id"] | "both",
+    pending: AgentIntegrationComponent["id"] | "all",
   ) => {
     setInstalling(pending);
     setNotice("");
     setError("");
     try {
       const response = await installAgentIntegration({
+        mcpServer,
         agentInstructions,
         skill,
       });
@@ -3819,6 +3838,7 @@ function AgentIntegrationSettingsSection() {
   }
 
   const components = [
+    integrationQuery.data.mcpServer,
     integrationQuery.data.agentInstructions,
     integrationQuery.data.skill,
   ];
@@ -3836,18 +3856,28 @@ function AgentIntegrationSettingsSection() {
         <div>
           <h2 id="agent-integration-title">Actionables agent integration</h2>
           <p>
-            These optional files are never installed automatically. Install
-            either component now or return here later.
+            MCP registration, Codex instructions, and the workflow skill are
+            separate and never installed automatically. Choose only the
+            components you want.
           </p>
         </div>
-        {installable.length === 2 && (
+        {installable.length > 1 && (
           <button
             type="button"
             className="primary-action"
             disabled={installing !== null}
-            onClick={() => void install(true, true, "both")}
+            onClick={() =>
+              void install(
+                installable.some((component) => component.id === "mcpServer"),
+                installable.some(
+                  (component) => component.id === "agentInstructions",
+                ),
+                installable.some((component) => component.id === "skill"),
+                "all",
+              )
+            }
           >
-            {installing === "both" ? "Installing…" : "Install both"}
+            {installing === "all" ? "Installing…" : "Install all available"}
           </button>
         )}
       </div>
@@ -3878,6 +3908,7 @@ function AgentIntegrationSettingsSection() {
                 disabled={installing !== null}
                 onClick={() =>
                   void install(
+                    component.id === "mcpServer",
                     component.id === "agentInstructions",
                     component.id === "skill",
                     component.id,
@@ -3886,7 +3917,9 @@ function AgentIntegrationSettingsSection() {
               >
                 {installing === component.id
                   ? "Installing…"
-                  : `${component.state === "outdated" ? "Update" : "Install"} ${component.id === "skill" ? "skill" : "instructions"}`}
+                  : component.id === "mcpServer"
+                    ? "Register server"
+                    : `${component.state === "outdated" ? "Update" : "Install"} ${component.id === "skill" ? "skill" : "instructions"}`}
               </button>
             )}
             {component.state === "outdated" && (
@@ -3897,8 +3930,8 @@ function AgentIntegrationSettingsSection() {
             )}
             {component.state === "modified" && (
               <small>
-                Actionables will not overwrite this file. Reconcile it manually
-                with the bundled copy, then retry.
+                Actionables will not overwrite this user-managed or ambiguous
+                configuration. Reconcile it manually, then retry.
               </small>
             )}
           </article>
@@ -3929,6 +3962,7 @@ function AgentIntegrationSetupDialog({
 }) {
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLElement>(null);
+  const [mcpServer, setMcpServer] = useState(false);
   const [agentInstructions, setAgentInstructions] = useState(false);
   const [skill, setSkill] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -3942,6 +3976,7 @@ function AgentIntegrationSetupDialog({
     setError("");
     try {
       const response = await installAgentIntegration({
+        mcpServer,
         agentInstructions,
         skill,
       });
@@ -3957,7 +3992,11 @@ function AgentIntegrationSetupDialog({
     }
   };
 
-  const components = [settings.agentInstructions, settings.skill];
+  const components = [
+    settings.mcpServer,
+    settings.agentInstructions,
+    settings.skill,
+  ];
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -3974,8 +4013,9 @@ function AgentIntegrationSetupDialog({
           <div>
             <h2 id="agent-setup-title">Set up Actionables for Codex</h2>
             <p id="agent-setup-description">
-              Both components are optional and unchecked by default. You can
-              install either or both later from Settings.
+              MCP registration, Codex instructions, and the workflow skill are
+              independent, optional, and unchecked by default. You can install
+              any combination later from Settings.
             </p>
           </div>
         </header>
@@ -3983,7 +4023,11 @@ function AgentIntegrationSetupDialog({
         <div className="agent-setup-options">
           {components.map((component) => {
             const checked =
-              component.id === "agentInstructions" ? agentInstructions : skill;
+              component.id === "mcpServer"
+                ? mcpServer
+                : component.id === "agentInstructions"
+                  ? agentInstructions
+                  : skill;
             const unavailable =
               component.state === "installed" || component.state === "modified";
             return (
@@ -3993,7 +4037,9 @@ function AgentIntegrationSetupDialog({
                   checked={checked}
                   disabled={unavailable || installing || Boolean(notice)}
                   onChange={(event) => {
-                    if (component.id === "agentInstructions") {
+                    if (component.id === "mcpServer") {
+                      setMcpServer(event.target.checked);
+                    } else if (component.id === "agentInstructions") {
                       setAgentInstructions(event.target.checked);
                     } else {
                       setSkill(event.target.checked);
@@ -4047,7 +4093,9 @@ function AgentIntegrationSetupDialog({
               <button
                 type="button"
                 className="primary-action"
-                disabled={installing || (!agentInstructions && !skill)}
+                disabled={
+                  installing || (!mcpServer && !agentInstructions && !skill)
+                }
                 onClick={() => void install()}
               >
                 {installing ? "Installing…" : "Install selected"}
@@ -7449,7 +7497,8 @@ export default function App() {
       )}
       {!agentSetupDismissed &&
         agentIntegrationQuery.data &&
-        (!agentIntegrationQuery.data.agentInstructions.installed ||
+        (!agentIntegrationQuery.data.mcpServer.installed ||
+          !agentIntegrationQuery.data.agentInstructions.installed ||
           !agentIntegrationQuery.data.skill.installed) && (
           <AgentIntegrationSetupDialog
             settings={agentIntegrationQuery.data}

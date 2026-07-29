@@ -280,14 +280,14 @@ export function buildApp({
         reply,
         409,
         error.code,
-        "Existing agent files need manual review.",
+        "Existing Codex integration configuration needs manual review.",
         {
           detail: error.message,
           errors: Object.fromEntries(
             error.conflicts.map((component) => [
               component.id,
               [
-                `${component.targetPath} differs from the bundled Actionables content. Keep the existing file or reconcile it manually before retrying.`,
+                `${component.targetPath} differs from the expected Actionables configuration. Keep the existing content or reconcile it manually before retrying.`,
               ],
             ]),
           ),
@@ -461,7 +461,7 @@ export function buildApp({
           "Select an Actionables agent component to install.",
           {
             detail:
-              "Choose the agent instructions, the workflow skill, or both. Nothing is installed by default.",
+              "Choose the MCP server registration, agent instructions, workflow skill, or any combination. Nothing is installed by default.",
             errors: fieldErrors(parsed.error),
           },
         );
