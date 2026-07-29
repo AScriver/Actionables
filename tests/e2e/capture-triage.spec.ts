@@ -145,12 +145,20 @@ test("triage to Ready persists the required fields and server-approved status", 
     .locator("#finding")
     .fill("The browser flow has a concrete finding.");
   await page.locator("#description").fill("Persist the triaged actionable.");
+  await page
+    .locator("#research")
+    .fill("The browser flow research is complete.");
   await page.locator("#validation").fill("Reload the stable deep link");
   await page.getByRole("button", { name: "Save changes" }).click();
 
   const inspector = page.getByRole("complementary", {
     name: "Selected actionable",
   });
+  await inspector
+    .getByRole("button", { name: "Researching", exact: true })
+    .click();
+  await inspector.getByRole("button", { name: "Confirm Researching" }).click();
+  await expect(inspector.getByLabel(/^Researching\./)).toBeVisible();
   await inspector.getByRole("button", { name: "Ready", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm Ready" }).click();
   await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
@@ -159,6 +167,9 @@ test("triage to Ready persists the required fields and server-approved status", 
   await expect(page).toHaveURL(deepLink);
   await expect(
     page.getByText("The browser flow has a concrete finding."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The browser flow research is complete."),
   ).toBeVisible();
   await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
 });
