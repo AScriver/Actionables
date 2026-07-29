@@ -2024,6 +2024,10 @@ button {
   color: var(--warning);
 }
 
+.agent-integration-grid header span[data-state="outdated"] {
+  color: var(--warning);
+}
+
 .agent-integration-grid p {
   margin: 0;
 }

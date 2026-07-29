@@ -1,4 +1,5 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,9 @@ import type {
 
 const instructionsStart = "<!-- actionables-agent-instructions:start -->";
 const instructionsEnd = "<!-- actionables-agent-instructions:end -->";
+const knownLegacySkillHashes = new Set([
+  "d75e5b9094b6bb0f4c8c31059e8bbfac88178ad2b46736c570db217aea19cf42",
+]);
 const repositoryRoot = resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
 );
@@ -27,6 +31,10 @@ type InstallerOptions = {
 
 function normalizeContent(value: string) {
   return value.replace(/\r\n/g, "\n").trim();
+}
+
+function contentHash(value: string) {
+  return createHash("sha256").update(normalizeContent(value)).digest("hex");
 }
 
 async function readOptional(path: string) {
@@ -88,7 +96,9 @@ function skillComponent(
       ? "missing"
       : normalizeContent(current) === normalizeContent(source)
         ? "installed"
-        : "modified";
+        : knownLegacySkillHashes.has(contentHash(current))
+          ? "outdated"
+          : "modified";
 
   return {
     id: "skill",
@@ -239,7 +249,12 @@ export class AgentIntegrationInstaller {
     }
 
     if (input.skill) {
-      if (before.skill.installed) {
+      const current = await readOptional(this.skillPath);
+      const currentComponent = skillComponent(this.skillPath, current, skill);
+      if (currentComponent.state === "modified") {
+        throw new AgentIntegrationConflictError([currentComponent]);
+      }
+      if (currentComponent.installed) {
         results.push({
           component: "skill",
           outcome: "already-installed",
@@ -250,12 +265,16 @@ export class AgentIntegrationInstaller {
           await mkdir(dirname(this.skillPath), { recursive: true });
           await writeFile(this.skillPath, `${normalizeContent(skill)}\n`, {
             encoding: "utf8",
-            flag: "wx",
+            ...(currentComponent.state === "missing" ? { flag: "wx" } : {}),
           });
           results.push({
             component: "skill",
-            outcome: "installed",
-            message: "The Actionables workflow skill was installed.",
+            outcome:
+              currentComponent.state === "outdated" ? "updated" : "installed",
+            message:
+              currentComponent.state === "outdated"
+                ? "The unmodified Actionables workflow skill was updated."
+                : "The Actionables workflow skill was installed.",
           });
         } catch (error) {
           throw new AgentIntegrationInstallError(this.skillPath, error);

@@ -813,7 +813,7 @@ export const agentIntegrationComponentSchema = z
     label: z.string().min(1),
     description: z.string().min(1),
     targetPath: z.string().min(1),
-    state: z.enum(["missing", "installed", "modified"]),
+    state: z.enum(["missing", "outdated", "installed", "modified"]),
     installed: z.boolean(),
   })
   .strict();
@@ -839,7 +839,7 @@ export const installAgentIntegrationRequestSchema = z
 export const agentIntegrationInstallResultSchema = z
   .object({
     component: agentIntegrationComponentIdSchema,
-    outcome: z.enum(["installed", "already-installed"]),
+    outcome: z.enum(["installed", "updated", "already-installed"]),
     message: z.string().min(1),
   })
   .strict();

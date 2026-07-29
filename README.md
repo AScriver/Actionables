@@ -82,7 +82,8 @@ Restart Codex after changing its configuration. On first use, or later under
 **Settings → Actionables agent integration**, Actionables can also install its
 Codex coordination instructions and workflow skill. Both components are
 optional, unchecked by default, and installed without replacing unrelated
-instructions.
+instructions. Known unmodified older skill copies can be updated explicitly;
+customized files are never overwritten.
 
 The endpoint stays disabled until a non-empty token is configured and only
 accepts loopback connections. Do not print, paste into task records, or commit

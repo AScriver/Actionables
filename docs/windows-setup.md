@@ -22,7 +22,7 @@ On first use, Actionables offers two independent, unchecked choices:
 
 Neither file is installed automatically. Choose either component, both, or **Not now**. The same installation controls and current file paths remain available under **Settings → Actionables agent integration**.
 
-Installation is idempotent. Existing unrelated content in `AGENTS.md` is preserved, and an already matching component is left unchanged. If a managed instructions section or skill file differs from the bundled copy, Actionables reports that manual review is required and does not overwrite it. Reconcile the target with the bundled files under `resources\agent-integration`, then retry from Settings.
+Installation is idempotent. Existing unrelated content in `AGENTS.md` is preserved, and an already matching component is left unchanged. A skill file that exactly matches a known older bundled copy is shown as **Update available** and is replaced only when you explicitly select the update. If a managed instructions section or skill file has any other difference, Actionables reports that manual review is required and does not overwrite it. Reconcile the target with the bundled files under `resources\agent-integration`, then retry from Settings.
 
 Set `ACTIONABLES_AGENT_HOME` before starting the API only when Actionables should use a profile root other than the current Windows user's home directory. This override is primarily intended for isolated validation.
 

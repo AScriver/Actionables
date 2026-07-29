@@ -25,13 +25,12 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 ## Create authorized tasks
 
 - Create a task only when the user explicitly requests or approves its creation and the dedicated `actionables.create_task` tool is available.
-- For a creation-only request, create each authorized Actionable unclaimed in Inbox and stop unless the user also requested triage, research, or implementation.
 - Generate one caller-stable idempotency UUID for each intended task. Reuse it only for an exact retry and never for a different task.
 - For a direct subtask, pass `parentId`; the server inherits the parent's scope. Do not also pass top-level placement fields.
 - For a top-level task with known scope IDs, pass `projectId`, `repositoryId`, and `worktreeId`.
 - If the current local Git repository is not tracked yet, pass its absolute path as `repositoryPath` with `ensureScope: true`. The server resolves the Git roots and atomically creates any missing project, repository, or worktree before creating the task.
 - Treat the task detail returned by creation as verification. Do not claim a newly created task only to fetch it again.
-- Creation records the calling Codex thread as creator provenance. Do not dismiss, archive, or delete an invalid, accidental, or disposable task without explicit user authorization. When dismissal is authorized and a task created by this same thread is still active and unclaimed, call `actionables.dismiss_task` with only its ID and a required reason.
+- Creation records the calling Codex thread as creator provenance. When an explicitly authorized task created by this same thread is still active and unclaimed but should be discarded, call `actionables.dismiss_task` with only its ID and a required reason.
 - Automatic scope provisioning does not authorize arbitrary backlog discovery or creation outside the repository and task content the user placed in scope.
 
 ## Maintain the task
@@ -46,21 +45,6 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Follow permitted lifecycle transitions instead of forcing a status.
 - Do not edit implementation files until the claimed task is In progress. Inbox is untriaged, Researching is investigation, and Ready means implementation may begin after the explicit transition.
 - Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem writes outside the MCP. A hard write gate requires orchestration support and is outside this workflow unless separately authorized.
-
-## Lifecycle accountability
-
-- Track every Actionable created, claimed, or transitioned during the task, including accidental creations. Read-only inspection does not create lifecycle ownership.
-- Treat user-provided reports as sources, not research. Recording, restating, or paraphrasing a report does not satisfy the Researching phase.
-- A claimed Actionable may remain Researching between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, remaining questions, and the next research step. Do not force a status transition merely because a turn ended.
-- Move an Actionable to Ready only after at least one independent investigative action, such as inspecting relevant code, reproducing the behavior, or consulting authoritative documentation. Record the action and its observed result; an unverified research note is insufficient.
-- Before reporting completion, reconcile every lifecycle-owned Actionable:
-  - Completed work: record actual validation and move it to Done.
-  - Research complete but implementation remains: move it from Researching to Ready.
-  - Invalid, accidental, or disposable work: without explicit user authorization, document the issue, leave its status unchanged, release any claim, and provide an explicit handoff.
-  - Unfinished work: update its status, release any claim, and provide an explicit handoff.
-- Never report research or the overall task complete while a lifecycle-owned Actionable remains Researching. If research is the entire requested outcome, advance it through the permitted lifecycle, record actual validation, and move it to Done.
-- Do not advance an Actionable merely because a turn or coding task ended. Creation-only Inbox work may remain unclaimed; reconcile lifecycle-owned work according to its actual state. Archiving changes visibility; it does not satisfy lifecycle completion.
-- In the final response, list every lifecycle-owned Actionable ID and status. If reconciliation failed, report the exact blocker instead of claiming completion.
 
 Use lifecycle states consistently:
 

@@ -1,10 +1,14 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentIntegrationInstaller } from "../src/agent-integration.js";
 
 const temporaryHomes: string[] = [];
+const legacySkillPath = fileURLToPath(
+  new URL("./fixtures/actionables-workflow-v1.md", import.meta.url),
+);
 
 async function temporaryHome() {
   const path = await mkdtemp(resolve(tmpdir(), "actionables-agent-home-"));
@@ -110,6 +114,65 @@ describe("Actionables agent integration", () => {
     await expect(
       readFile(resolve(home, ".codex", "AGENTS.md"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("updates a known unmodified older skill only when selected", async () => {
+    const home = await temporaryHome();
+    const skillPath = resolve(
+      home,
+      ".agents",
+      "skills",
+      "actionables-workflow",
+      "SKILL.md",
+    );
+    const legacySkill = await readFile(legacySkillPath, "utf8");
+    await mkdir(resolve(skillPath, ".."), { recursive: true });
+    await writeFile(skillPath, legacySkill, "utf8");
+    const installer = new AgentIntegrationInstaller({ homeDirectory: home });
+
+    await expect(installer.status()).resolves.toMatchObject({
+      skill: { state: "outdated", installed: false },
+    });
+    await expect(readFile(skillPath, "utf8")).resolves.toBe(legacySkill);
+
+    const result = await installer.install({
+      agentInstructions: false,
+      skill: true,
+    });
+
+    expect(result).toMatchObject({
+      settings: { skill: { state: "installed", installed: true } },
+      results: [{ component: "skill", outcome: "updated" }],
+    });
+    await expect(readFile(skillPath, "utf8")).resolves.toContain(
+      "## Lifecycle accountability",
+    );
+  });
+
+  it("does not replace a customized older skill", async () => {
+    const home = await temporaryHome();
+    const skillPath = resolve(
+      home,
+      ".agents",
+      "skills",
+      "actionables-workflow",
+      "SKILL.md",
+    );
+    const customized = `${await readFile(legacySkillPath, "utf8")}\n# My customization\n`;
+    await mkdir(resolve(skillPath, ".."), { recursive: true });
+    await writeFile(skillPath, customized, "utf8");
+    const installer = new AgentIntegrationInstaller({ homeDirectory: home });
+
+    await expect(installer.status()).resolves.toMatchObject({
+      skill: { state: "modified", installed: false },
+    });
+    await expect(
+      installer.install({ agentInstructions: false, skill: true }),
+    ).rejects.toMatchObject({
+      code: "AGENT_INTEGRATION_CONFLICT",
+      conflicts: [expect.objectContaining({ id: "skill", state: "modified" })],
+    });
+    await expect(readFile(skillPath, "utf8")).resolves.toBe(customized);
   });
 
   it("does not replace a user-edited managed instructions section", async () => {

@@ -3716,6 +3716,7 @@ function agentIntegrationError(error: unknown) {
 
 function agentIntegrationState(component: AgentIntegrationComponent) {
   if (component.state === "installed") return "Installed";
+  if (component.state === "outdated") return "Update available";
   if (component.state === "modified") return "Manual review required";
   return "Not installed";
 }
@@ -3791,8 +3792,9 @@ function AgentIntegrationSettingsSection() {
     integrationQuery.data.agentInstructions,
     integrationQuery.data.skill,
   ];
-  const missing = components.filter(
-    (component) => component.state === "missing",
+  const installable = components.filter(
+    (component) =>
+      component.state === "missing" || component.state === "outdated",
   );
 
   return (
@@ -3808,7 +3810,7 @@ function AgentIntegrationSettingsSection() {
             either component now or return here later.
           </p>
         </div>
-        {missing.length === 2 && (
+        {installable.length === 2 && (
           <button
             type="button"
             className="primary-action"
@@ -3837,7 +3839,8 @@ function AgentIntegrationSettingsSection() {
             </header>
             <p>{component.description}</p>
             <code>{component.targetPath}</code>
-            {component.state === "missing" && (
+            {(component.state === "missing" ||
+              component.state === "outdated") && (
               <button
                 type="button"
                 className="toolbar-button"
@@ -3852,8 +3855,14 @@ function AgentIntegrationSettingsSection() {
               >
                 {installing === component.id
                   ? "Installing…"
-                  : `Install ${component.id === "skill" ? "skill" : "instructions"}`}
+                  : `${component.state === "outdated" ? "Update" : "Install"} ${component.id === "skill" ? "skill" : "instructions"}`}
               </button>
+            )}
+            {component.state === "outdated" && (
+              <small>
+                This matches a known older bundled copy. Updating replaces only
+                that unmodified copy.
+              </small>
             )}
             {component.state === "modified" && (
               <small>
@@ -3943,7 +3952,8 @@ function AgentIntegrationSetupDialog({
           {components.map((component) => {
             const checked =
               component.id === "agentInstructions" ? agentInstructions : skill;
-            const unavailable = component.state !== "missing";
+            const unavailable =
+              component.state === "installed" || component.state === "modified";
             return (
               <label key={component.id}>
                 <input
