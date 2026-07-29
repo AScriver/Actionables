@@ -2,6 +2,12 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 const missingIntegration = {
+  mcp: {
+    apiOrigin: "http://127.0.0.1:4274",
+    endpoint: "http://127.0.0.1:4274/mcp",
+    enabled: false,
+    bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+  },
   agentInstructions: {
     id: "agentInstructions",
     label: "Actionables agent instructions",
@@ -34,6 +40,10 @@ test("@a11y agent integration onboarding and settings pass axe", async ({
 
   await expect(
     page.getByRole("dialog", { name: "Set up Actionables for Codex" }),
+  ).toBeVisible();
+  await expect(page.getByText("http://127.0.0.1:4274/mcp")).toBeVisible();
+  await expect(
+    page.getByText(/Set a non-empty ACTIONABLES_MCP_TOKEN/),
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
@@ -173,6 +183,7 @@ test("settings can install both missing components later", async ({ page }) => {
       await route.fulfill({
         json: {
           settings: {
+            mcp: missingIntegration.mcp,
             agentInstructions: {
               ...missingIntegration.agentInstructions,
               state: "installed",

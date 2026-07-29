@@ -66,12 +66,15 @@ troubleshooting instructions, see
 
 The Codex connection is opt-in. Generate an `ACTIONABLES_MCP_TOKEN` by following
 [Agent task MCP endpoint](docs/mcp-agent-tasks.md#enable-it), then restart
-Actionables so it exposes `http://127.0.0.1:4174/mcp`.
+Actionables. The default MCP endpoint is `http://127.0.0.1:4174/mcp`. If
+`API_PORT` is set before startup, use the effective endpoint shown by first-run
+setup or **Settings → Actionables agent integration** instead.
 
 Add the server to `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
 [mcp_servers.actionables]
+# Replace this default URL when Settings reports a custom effective endpoint.
 url = "http://127.0.0.1:4174/mcp"
 bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"
 enabled = true
@@ -86,9 +89,11 @@ instructions. Known unmodified older skill copies can be updated explicitly;
 customized files are never overwritten.
 
 The endpoint stays disabled until a non-empty token is configured and only
-accepts loopback connections. Do not print, paste into task records, or commit
-the token. See [Agent task MCP endpoint](docs/mcp-agent-tasks.md) for token
-generation, security details, and troubleshooting.
+accepts loopback connections. Setup and Settings report `Disabled` in that
+state; the URL is not usable until Actionables is restarted with the token. Do
+not print, paste into task records, or commit the token. See
+[Agent task MCP endpoint](docs/mcp-agent-tasks.md) for token generation,
+security details, and troubleshooting.
 
 ## Hand work to Codex
 

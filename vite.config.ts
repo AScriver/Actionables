@@ -1,7 +1,8 @@
+import { resolveApiRuntimeConfig } from "@actionables/contracts";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const apiOrigin = `http://127.0.0.1:${process.env.API_PORT ?? "4174"}`;
+const { apiOrigin } = resolveApiRuntimeConfig(process.env.API_PORT);
 
 export default defineConfig({
   plugins: [react()],

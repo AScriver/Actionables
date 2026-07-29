@@ -1,7 +1,10 @@
+import { resolveApiRuntimeConfig } from "@actionables/contracts";
 import { buildApp } from "./app.js";
 import { createCodexAssistantRunner } from "./assistant-runner.js";
 import { createPrismaClient } from "./database.js";
 
+const runtimeConfig = resolveApiRuntimeConfig(process.env.API_PORT);
+const mcpBearerToken = process.env.ACTIONABLES_MCP_TOKEN;
 const prisma = createPrismaClient();
 const assistantRunner = createCodexAssistantRunner({
   executable: process.env.ACTIONABLES_CODEX_PATH?.trim() || "codex",
@@ -10,7 +13,8 @@ const assistantRunner = createCodexAssistantRunner({
 const app = buildApp({
   prisma,
   logger: true,
-  mcpBearerToken: process.env.ACTIONABLES_MCP_TOKEN,
+  mcpBearerToken,
+  runtimeConfig,
   assistantRunner,
   agentHomeDirectory: process.env.ACTIONABLES_AGENT_HOME,
 });
@@ -25,10 +29,18 @@ process.once("SIGTERM", close);
 
 try {
   const address = await app.listen({
-    host: process.env.API_HOST ?? "127.0.0.1",
-    port: Number(process.env.API_PORT ?? 4174),
+    host: runtimeConfig.apiHost,
+    port: runtimeConfig.apiPort,
   });
-  app.log.info({ address }, "Actionables API listening");
+  app.log.info(
+    {
+      address,
+      apiOrigin: runtimeConfig.apiOrigin,
+      mcpEndpoint: runtimeConfig.mcpEndpoint,
+      mcpEnabled: Boolean(mcpBearerToken?.trim()),
+    },
+    "Actionables API listening",
+  );
 } catch (error) {
   app.log.error(error);
   await prisma.$disconnect();

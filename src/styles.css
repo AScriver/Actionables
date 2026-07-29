@@ -1979,6 +1979,76 @@ button {
   gap: 10px;
 }
 
+.agent-mcp-status {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.agent-setup-dialog > .agent-mcp-status {
+  margin: 16px 16px 0;
+}
+
+.agent-mcp-status > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-mcp-status strong {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.agent-mcp-status span,
+.agent-mcp-status p {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-mcp-status[data-enabled="true"] span {
+  color: var(--accent);
+}
+
+.agent-mcp-status[data-enabled="false"] span {
+  color: var(--warning);
+}
+
+.agent-mcp-status dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.agent-mcp-status dl > div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.agent-mcp-status dt,
+.agent-mcp-status dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.agent-mcp-status code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.agent-mcp-status p {
+  margin: 0;
+}
+
 .agent-integration-grid article {
   display: grid;
   align-content: start;

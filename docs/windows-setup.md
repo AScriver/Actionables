@@ -98,11 +98,24 @@ Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
 pnpm run dev
 ```
 
-This migrates and seeds the configured database, then starts:
+This migrates and seeds the configured database, then starts on these defaults:
 
 - Web: `http://127.0.0.1:4173`
 - API: `http://127.0.0.1:4174`
 - Health: `http://127.0.0.1:4173/api/health`
+
+To use a different API port, set a whole number from 1 through 65535 before
+startup. The API listener, web proxy, setup/status UI, and reported MCP endpoint
+then use the same effective value:
+
+```powershell
+$env:API_PORT = '4274'
+pnpm run dev
+```
+
+Blank, zero, nonnumeric, fractional, exponential, and out-of-range values fail
+at startup with an `API_PORT` validation error. Actionables remains bound to
+`127.0.0.1`.
 
 Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
 
@@ -115,6 +128,9 @@ pnpm run build
 pnpm run db:migrate
 pnpm run start
 ```
+
+`pnpm run start` also honors a valid inherited `API_PORT` and passes the same
+normalized value to the API and Vite preview processes.
 
 Verify health:
 
@@ -173,13 +189,19 @@ Get-NetTCPConnection -LocalPort 4173,4174 -ErrorAction SilentlyContinue |
   Select-Object LocalAddress,LocalPort,State,OwningProcess
 ```
 
-Stop the known process or use a different API port and matching Vite proxy configuration. The documented release proof uses the default ports.
+Stop the known process. If only the default API port is occupied, set a valid
+`API_PORT` before `pnpm run dev` or `pnpm run start`; Actionables propagates it
+to the API and Vite proxy automatically. Automatic fallback-port selection is
+not performed. The documented release proof uses the default ports.
 
 ### MCP returns 401, 403, or 404
 
-- `404`: set a non-empty `ACTIONABLES_MCP_TOKEN` and restart the app.
+- `404`: setup/status should report `Disabled`; set a non-empty
+  `ACTIONABLES_MCP_TOKEN` and restart the app.
 - `401`: make the MCP client read the same token and send it as a bearer token.
-- `403`: use `http://127.0.0.1:4174/mcp` or another loopback host. The MCP route rejects non-loopback Host and Origin values.
+- `403`: use the effective loopback endpoint reported by first-run setup or
+  **Settings → Actionables agent integration**. The MCP route rejects
+  non-loopback Host and Origin values.
 
 ### Migrations fail
 

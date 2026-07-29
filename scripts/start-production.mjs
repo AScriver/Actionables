@@ -1,10 +1,17 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { resolveApiRuntimeConfig } from "@actionables/contracts";
+
+const runtimeConfig = resolveApiRuntimeConfig(process.env.API_PORT);
+const runtimeEnvironment = {
+  ...process.env,
+  API_PORT: String(runtimeConfig.apiPort),
+};
 
 const children = [
   spawn(process.execPath, ["apps/api/dist/server.js"], {
     stdio: "inherit",
-    env: { ...process.env, API_HOST: "127.0.0.1", API_PORT: "4174" },
+    env: runtimeEnvironment,
   }),
   spawn(
     process.execPath,
@@ -16,7 +23,7 @@ const children = [
       "--port",
       "4173",
     ],
-    { stdio: "inherit" },
+    { stdio: "inherit", env: runtimeEnvironment },
   ),
 ];
 

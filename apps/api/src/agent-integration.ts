@@ -4,11 +4,13 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
+  ApiRuntimeConfig,
   AgentIntegrationComponent,
   AgentIntegrationInstallResponse,
   AgentIntegrationSettings,
   InstallAgentIntegrationRequest,
 } from "@actionables/contracts";
+import { resolveApiRuntimeConfig } from "@actionables/contracts";
 
 const instructionsStart = "<!-- actionables-agent-instructions:start -->";
 const instructionsEnd = "<!-- actionables-agent-instructions:end -->";
@@ -27,6 +29,8 @@ const defaultResourcesDirectory = resolve(
 type InstallerOptions = {
   homeDirectory?: string;
   resourcesDirectory?: string;
+  runtimeConfig?: ApiRuntimeConfig;
+  mcpEnabled?: boolean;
 };
 
 function normalizeContent(value: string) {
@@ -139,6 +143,8 @@ export class AgentIntegrationInstaller {
   readonly resourcesDirectory: string;
   readonly instructionsPath: string;
   readonly skillPath: string;
+  readonly runtimeConfig: ApiRuntimeConfig;
+  readonly mcpEnabled: boolean;
 
   constructor(options: InstallerOptions = {}) {
     this.homeDirectory = resolve(options.homeDirectory ?? homedir());
@@ -153,6 +159,9 @@ export class AgentIntegrationInstaller {
       "actionables-workflow",
       "SKILL.md",
     );
+    this.runtimeConfig =
+      options.runtimeConfig ?? resolveApiRuntimeConfig(undefined);
+    this.mcpEnabled = options.mcpEnabled ?? false;
   }
 
   private async sources() {
@@ -175,6 +184,12 @@ export class AgentIntegrationInstaller {
       ]);
 
     return {
+      mcp: {
+        apiOrigin: this.runtimeConfig.apiOrigin,
+        endpoint: this.runtimeConfig.mcpEndpoint,
+        enabled: this.mcpEnabled,
+        bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+      },
       agentInstructions: instructionsComponent(
         this.instructionsPath,
         currentInstructions,

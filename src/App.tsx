@@ -3721,6 +3721,36 @@ function agentIntegrationState(component: AgentIntegrationComponent) {
   return "Not installed";
 }
 
+function AgentMcpStatus({ mcp }: { mcp: AgentIntegrationSettings["mcp"] }) {
+  return (
+    <div className="agent-mcp-status" data-enabled={mcp.enabled}>
+      <div>
+        <strong>Actionables MCP endpoint</strong>
+        <span>{mcp.enabled ? "Enabled" : "Disabled"}</span>
+      </div>
+      <dl>
+        <div>
+          <dt>API origin</dt>
+          <dd>
+            <code>{mcp.apiOrigin}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>MCP endpoint</dt>
+          <dd>
+            <code>{mcp.endpoint}</code>
+          </dd>
+        </div>
+      </dl>
+      <p>
+        {mcp.enabled
+          ? `Codex can authenticate with the token from ${mcp.bearerTokenEnvironmentVariable}.`
+          : `Set a non-empty ${mcp.bearerTokenEnvironmentVariable} and restart Actionables to enable this route.`}
+      </p>
+    </div>
+  );
+}
+
 function AgentIntegrationSettingsSection() {
   const queryClient = useQueryClient();
   const integrationQuery = useQuery({
@@ -3821,6 +3851,7 @@ function AgentIntegrationSettingsSection() {
           </button>
         )}
       </div>
+      <AgentMcpStatus mcp={integrationQuery.data.mcp} />
       <div className="agent-integration-grid">
         {components.map((component) => (
           <article key={component.id}>
@@ -3948,6 +3979,7 @@ function AgentIntegrationSetupDialog({
             </p>
           </div>
         </header>
+        <AgentMcpStatus mcp={settings.mcp} />
         <div className="agent-setup-options">
           {components.map((component) => {
             const checked =

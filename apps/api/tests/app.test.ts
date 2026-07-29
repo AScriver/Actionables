@@ -4,6 +4,7 @@ import { mkdir, open, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { resolveApiRuntimeConfig } from "@actionables/contracts";
 import { buildApp } from "../src/app.js";
 import { claimAgentTask, renewAgentTaskClaim } from "../src/agent-tasks.js";
 import {
@@ -822,6 +823,12 @@ describe("Actionables API", () => {
     });
     expect(initial.statusCode).toBe(200);
     expect(initial.json()).toMatchObject({
+      mcp: {
+        apiOrigin: "http://127.0.0.1:4174",
+        endpoint: "http://127.0.0.1:4174/mcp",
+        enabled: false,
+        bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+      },
       agentInstructions: { state: "missing", installed: false },
       skill: { state: "missing", installed: false },
     });
@@ -852,6 +859,33 @@ describe("Actionables API", () => {
         { component: "skill", outcome: "installed" },
       ],
     });
+  });
+
+  it("reports the effective custom MCP endpoint and enabled state without the token", async () => {
+    const configured = buildApp({
+      prisma: prisma!,
+      mcpBearerToken: "test-secret-token",
+      runtimeConfig: resolveApiRuntimeConfig("4274"),
+      agentHomeDirectory,
+    });
+
+    try {
+      const response = await configured.inject({
+        method: "GET",
+        url: "/api/settings/agent-integration",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().mcp).toEqual({
+        apiOrigin: "http://127.0.0.1:4274",
+        endpoint: "http://127.0.0.1:4274/mcp",
+        enabled: true,
+        bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+      });
+      expect(response.body).not.toContain("test-secret-token");
+    } finally {
+      await configured.close();
+    }
   });
 
   it("generates a schema-validated note proposal without mutating the actionable", async () => {

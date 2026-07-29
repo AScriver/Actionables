@@ -1,6 +1,10 @@
 # Agent task MCP endpoint
 
-Actionables can expose existing tasks to local agents at `http://127.0.0.1:4174/mcp`. The endpoint uses stateless Streamable HTTP with JSON responses and is disabled until a bearer token is configured.
+Actionables can expose existing tasks to local agents through a loopback MCP
+endpoint. The default is `http://127.0.0.1:4174/mcp`; a valid custom
+`API_PORT` changes the effective endpoint. The endpoint uses stateless
+Streamable HTTP with JSON responses and is disabled until a bearer token is
+configured.
 
 ## Enable it
 
@@ -15,12 +19,16 @@ $env:ACTIONABLES_MCP_TOKEN = $token
 Remove-Variable token,bytes
 ```
 
-Restart Actionables after setting the token. The normal API shutdown also closes the MCP endpoint; no separate MCP process is created.
+Restart Actionables after setting the token. The normal API shutdown also
+closes the MCP endpoint; no separate MCP process is created. First-run setup and
+**Settings → Actionables agent integration** show the effective API origin, MCP
+endpoint, and whether the route is enabled. They never display the token.
 
 Configure Codex globally in `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
 [mcp_servers.actionables]
+# Use the effective endpoint reported by Actionables.
 url = "http://127.0.0.1:4174/mcp"
 bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"
 enabled = true
@@ -28,6 +36,8 @@ required = false
 ```
 
 Restart Codex so it reads both the global configuration and user environment.
+If `API_PORT` is customized later, update the URL to the newly reported
+endpoint and restart Codex again.
 
 The Codex instructions and Actionables workflow skill are separate, optional
 files. First-run setup and **Settings → Actionables agent integration** can

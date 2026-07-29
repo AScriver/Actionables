@@ -1,5 +1,41 @@
 import { z } from "zod";
 
+export const defaultApiPort = 4174;
+export const loopbackApiHost = "127.0.0.1";
+
+export type ApiRuntimeConfig = {
+  apiHost: typeof loopbackApiHost;
+  apiPort: number;
+  apiOrigin: string;
+  mcpEndpoint: string;
+};
+
+export function resolveApiRuntimeConfig(
+  configuredPort: string | undefined,
+): ApiRuntimeConfig {
+  const normalizedPort = configuredPort?.trim();
+  if (
+    configuredPort !== undefined &&
+    (!normalizedPort || !/^\d+$/.test(normalizedPort))
+  ) {
+    throw new Error("API_PORT must be a whole number from 1 through 65535.");
+  }
+
+  const apiPort =
+    normalizedPort === undefined ? defaultApiPort : Number(normalizedPort);
+  if (!Number.isSafeInteger(apiPort) || apiPort < 1 || apiPort > 65_535) {
+    throw new Error("API_PORT must be a whole number from 1 through 65535.");
+  }
+
+  const apiOrigin = `http://${loopbackApiHost}:${apiPort}`;
+  return {
+    apiHost: loopbackApiHost,
+    apiPort,
+    apiOrigin,
+    mcpEndpoint: `${apiOrigin}/mcp`,
+  };
+}
+
 export const prioritySchema = z.enum([
   "Unset",
   "Critical",
@@ -820,6 +856,14 @@ export const agentIntegrationComponentSchema = z
 
 export const agentIntegrationSettingsSchema = z
   .object({
+    mcp: z
+      .object({
+        apiOrigin: z.string().url(),
+        endpoint: z.string().url(),
+        enabled: z.boolean(),
+        bearerTokenEnvironmentVariable: z.literal("ACTIONABLES_MCP_TOKEN"),
+      })
+      .strict(),
     agentInstructions: agentIntegrationComponentSchema,
     skill: agentIntegrationComponentSchema,
   })

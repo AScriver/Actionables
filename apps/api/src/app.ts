@@ -24,6 +24,7 @@ import {
   agentIntegrationSettingsSchema,
   agentIntegrationInstallResponseSchema,
   installAgentIntegrationRequestSchema,
+  resolveApiRuntimeConfig,
   scopeOptionsResponseSchema,
   setParentRequestSchema,
   statusTransitionRequestSchema,
@@ -37,6 +38,7 @@ import {
   forceReleaseAgentClaimRequestSchema,
   relationshipAuditResponseSchema,
   type ActionableQuery,
+  type ApiRuntimeConfig,
 } from "@actionables/contracts";
 import Fastify, {
   type FastifyBaseLogger,
@@ -102,6 +104,7 @@ type BuildAppOptions = {
   prisma: AppPrismaClient;
   logger?: boolean | FastifyBaseLogger;
   mcpBearerToken?: string;
+  runtimeConfig?: ApiRuntimeConfig;
   assistantRunner?: AssistantRunner;
   agentHomeDirectory?: string;
 };
@@ -201,12 +204,15 @@ export function buildApp({
   prisma,
   logger = false,
   mcpBearerToken,
+  runtimeConfig = resolveApiRuntimeConfig(undefined),
   assistantRunner,
   agentHomeDirectory,
 }: BuildAppOptions) {
   const dataImports = new DataImportService(prisma);
   const agentIntegration = new AgentIntegrationInstaller({
     homeDirectory: agentHomeDirectory,
+    runtimeConfig,
+    mcpEnabled: Boolean(mcpBearerToken?.trim()),
   });
   const assistantDefaultModel =
     assistantRunner?.defaultModel ?? defaultCodexAssistantModel;

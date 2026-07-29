@@ -31,9 +31,38 @@ describe("Actionables agent integration", () => {
     });
 
     await expect(installer.status()).resolves.toMatchObject({
+      mcp: {
+        apiOrigin: "http://127.0.0.1:4174",
+        endpoint: "http://127.0.0.1:4174/mcp",
+        enabled: false,
+        bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+      },
       agentInstructions: { state: "missing", installed: false },
       skill: { state: "missing", installed: false },
     });
+  });
+
+  it("reports a custom effective endpoint without exposing the token", async () => {
+    const installer = new AgentIntegrationInstaller({
+      homeDirectory: await temporaryHome(),
+      runtimeConfig: {
+        apiHost: "127.0.0.1",
+        apiPort: 4274,
+        apiOrigin: "http://127.0.0.1:4274",
+        mcpEndpoint: "http://127.0.0.1:4274/mcp",
+      },
+      mcpEnabled: true,
+    });
+
+    const settings = await installer.status();
+
+    expect(settings.mcp).toEqual({
+      apiOrigin: "http://127.0.0.1:4274",
+      endpoint: "http://127.0.0.1:4274/mcp",
+      enabled: true,
+      bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+    });
+    expect(JSON.stringify(settings)).not.toContain("Bearer ");
   });
 
   it("installs each component independently and is idempotent", async () => {
