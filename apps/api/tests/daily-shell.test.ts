@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
+import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -274,6 +275,80 @@ describe("daily-use shell queries and archive policy", () => {
       });
       expect(list.statusCode).toBe(200);
       expect(list.json().result.matched).toBe(queue.count);
+    }
+  });
+
+  it("uses the configured expiring-claim cutoff and description", async () => {
+    await getAgentCoordinationSettings(prisma);
+    const expiring = await prisma.actionable.findUniqueOrThrow({
+      where: { sourceOrdinal: 1 },
+    });
+
+    try {
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: expiring.id },
+        data: { leaseExpiresAt: new Date(Date.now() + 5 * 60_000) },
+      });
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimExpiryWarningMinutes: 4 },
+      });
+      const outside = (
+        await app.inject({ method: "GET", url: "/api/dashboard" })
+      ).json();
+      expect(
+        outside.alerts.find(
+          (alert: { key: string }) => alert.key === "expiring-claims",
+        ),
+      ).toMatchObject({
+        count: 0,
+        description: "Active agent leases with 4 minutes or less remaining.",
+      });
+
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimExpiryWarningMinutes: 6 },
+      });
+      const inside = (
+        await app.inject({ method: "GET", url: "/api/dashboard" })
+      ).json();
+      expect(
+        inside.alerts.find(
+          (alert: { key: string }) => alert.key === "expiring-claims",
+        ),
+      ).toMatchObject({
+        count: 1,
+        description: "Active agent leases with 6 minutes or less remaining.",
+      });
+
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: expiring.id },
+        data: { leaseExpiresAt: new Date(Date.now() + 30_000) },
+      });
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimExpiryWarningMinutes: 1 },
+      });
+      const singular = (
+        await app.inject({ method: "GET", url: "/api/dashboard" })
+      ).json();
+      expect(
+        singular.alerts.find(
+          (alert: { key: string }) => alert.key === "expiring-claims",
+        ),
+      ).toMatchObject({
+        count: 1,
+        description: "Active agent leases with 1 minute or less remaining.",
+      });
+    } finally {
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimExpiryWarningMinutes: 10 },
+      });
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: expiring.id },
+        data: { leaseExpiresAt: new Date(Date.now() + 5 * 60_000) },
+      });
     }
   });
 

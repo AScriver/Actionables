@@ -182,6 +182,8 @@ describe("Actionables API", () => {
     const initial = initialResponse.json();
     expect(initial).toMatchObject({
       version: 1,
+      agentClaimLeaseMinutes: 30,
+      agentClaimExpiryWarningMinutes: 10,
       noteGroomerEnabled: true,
       noteGroomerModel: null,
       noteGroomerReasoningEffort: null,
@@ -204,6 +206,8 @@ describe("Actionables API", () => {
       url: "/api/settings/helper-agents",
       payload: {
         version: initial.version,
+        agentClaimLeaseMinutes: 45,
+        agentClaimExpiryWarningMinutes: 12,
         noteGroomerEnabled: true,
         noteGroomerModel: "gpt-5.6-sol",
         noteGroomerReasoningEffort: "high",
@@ -218,6 +222,8 @@ describe("Actionables API", () => {
     const updated = updatedResponse.json();
     expect(updated).toMatchObject({
       version: initial.version + 1,
+      agentClaimLeaseMinutes: 45,
+      agentClaimExpiryWarningMinutes: 12,
       noteGroomerEnabled: true,
       noteGroomerModel: "gpt-5.6-sol",
       noteGroomerReasoningEffort: "high",
@@ -277,6 +283,8 @@ describe("Actionables API", () => {
         url: "/api/settings/helper-agents",
         payload: {
           version: initial.version,
+          agentClaimLeaseMinutes: 60,
+          agentClaimExpiryWarningMinutes: 20,
           noteGroomerEnabled: false,
           noteGroomerModel: null,
           noteGroomerReasoningEffort: null,
@@ -292,6 +300,8 @@ describe("Actionables API", () => {
         code: "VERSION_CONFLICT",
         current: {
           version: updated.version,
+          agentClaimLeaseMinutes: 45,
+          agentClaimExpiryWarningMinutes: 12,
           noteGroomerEnabled: true,
           noteGroomerModel: "gpt-5.6-sol",
           noteGroomerReasoningEffort: "high",
@@ -311,6 +321,9 @@ describe("Actionables API", () => {
         url: "/api/settings/helper-agents",
         payload: {
           version: updated.version,
+          agentClaimLeaseMinutes: initial.agentClaimLeaseMinutes,
+          agentClaimExpiryWarningMinutes:
+            initial.agentClaimExpiryWarningMinutes,
           noteGroomerEnabled: initial.noteGroomerEnabled,
           noteGroomerModel: initial.noteGroomerModel,
           noteGroomerReasoningEffort: initial.noteGroomerReasoningEffort,
@@ -324,6 +337,8 @@ describe("Actionables API", () => {
       });
       expect(restored.statusCode).toBe(200);
       expect(restored.json()).toMatchObject({
+        agentClaimLeaseMinutes: 30,
+        agentClaimExpiryWarningMinutes: 10,
         noteGroomerModel: null,
         noteGroomerReasoningEffort: null,
         noteGroomerEffectiveModel: assistantDefaultModel,
@@ -331,6 +346,91 @@ describe("Actionables API", () => {
         relationshipAuditorReasoningEffort: null,
         relationshipAuditorEffectiveModel: assistantDefaultModel,
       });
+    }
+  });
+
+  it("validates agent coordination bounds and the warning-to-lease relationship", async () => {
+    const initial = (
+      await app!.inject({
+        method: "GET",
+        url: "/api/settings/helper-agents",
+      })
+    ).json();
+    const payload = (
+      version: number,
+      agentClaimLeaseMinutes: number,
+      agentClaimExpiryWarningMinutes: number,
+    ) => ({
+      version,
+      agentClaimLeaseMinutes,
+      agentClaimExpiryWarningMinutes,
+      noteGroomerEnabled: initial.noteGroomerEnabled,
+      noteGroomerModel: initial.noteGroomerModel,
+      noteGroomerReasoningEffort: initial.noteGroomerReasoningEffort,
+      noteGroomerPrompt: initial.noteGroomerPrompt,
+      relationshipAuditorEnabled: initial.relationshipAuditorEnabled,
+      relationshipAuditorModel: initial.relationshipAuditorModel,
+      relationshipAuditorReasoningEffort:
+        initial.relationshipAuditorReasoningEffort,
+      relationshipAuditorPrompt: initial.relationshipAuditorPrompt,
+    });
+
+    let current = initial;
+    try {
+      const minimum = await app!.inject({
+        method: "PATCH",
+        url: "/api/settings/helper-agents",
+        payload: payload(current.version, 5, 1),
+      });
+      expect(minimum.statusCode).toBe(200);
+      current = minimum.json();
+      expect(current).toMatchObject({
+        agentClaimLeaseMinutes: 5,
+        agentClaimExpiryWarningMinutes: 1,
+      });
+
+      const maximum = await app!.inject({
+        method: "PATCH",
+        url: "/api/settings/helper-agents",
+        payload: payload(current.version, 120, 119),
+      });
+      expect(maximum.statusCode).toBe(200);
+      current = maximum.json();
+      expect(current).toMatchObject({
+        agentClaimLeaseMinutes: 120,
+        agentClaimExpiryWarningMinutes: 119,
+      });
+
+      for (const [lease, warning, field] of [
+        [4, 1, "agentClaimLeaseMinutes"],
+        [121, 1, "agentClaimLeaseMinutes"],
+        [30.5, 10, "agentClaimLeaseMinutes"],
+        [30, 0, "agentClaimExpiryWarningMinutes"],
+        [120, 120, "agentClaimExpiryWarningMinutes"],
+        [5, 5, "agentClaimExpiryWarningMinutes"],
+      ] as const) {
+        const invalid = await app!.inject({
+          method: "PATCH",
+          url: "/api/settings/helper-agents",
+          payload: payload(current.version, lease, warning),
+        });
+        expect(invalid.statusCode).toBe(422);
+        expect(invalid.json()).toMatchObject({
+          code: "VALIDATION_ERROR",
+          errors: { [field]: expect.any(Array) },
+        });
+      }
+    } finally {
+      const restored = await app!.inject({
+        method: "PATCH",
+        url: "/api/settings/helper-agents",
+        payload: payload(
+          current.version,
+          initial.agentClaimLeaseMinutes,
+          initial.agentClaimExpiryWarningMinutes,
+        ),
+      });
+      expect(restored.statusCode).toBe(200);
     }
   });
 
@@ -346,6 +446,8 @@ describe("Actionables API", () => {
       url: "/api/settings/helper-agents",
       payload: {
         version: current.version,
+        agentClaimLeaseMinutes: current.agentClaimLeaseMinutes,
+        agentClaimExpiryWarningMinutes: current.agentClaimExpiryWarningMinutes,
         noteGroomerEnabled: current.noteGroomerEnabled,
         noteGroomerModel: "unsupported-model",
         noteGroomerReasoningEffort: "maximum",
@@ -380,6 +482,8 @@ describe("Actionables API", () => {
       url: "/api/settings/helper-agents",
       payload: {
         version: current.version,
+        agentClaimLeaseMinutes: current.agentClaimLeaseMinutes,
+        agentClaimExpiryWarningMinutes: current.agentClaimExpiryWarningMinutes,
         noteGroomerEnabled: current.noteGroomerEnabled,
         noteGroomerModel: current.noteGroomerModel,
         noteGroomerReasoningEffort: current.noteGroomerReasoningEffort,
@@ -425,6 +529,9 @@ describe("Actionables API", () => {
           url: "/api/settings/helper-agents",
           payload: {
             version: current.version,
+            agentClaimLeaseMinutes: current.agentClaimLeaseMinutes,
+            agentClaimExpiryWarningMinutes:
+              current.agentClaimExpiryWarningMinutes,
             noteGroomerEnabled: false,
             noteGroomerModel: current.noteGroomerModel,
             noteGroomerReasoningEffort: current.noteGroomerReasoningEffort,
@@ -474,6 +581,9 @@ describe("Actionables API", () => {
           url: "/api/settings/helper-agents",
           payload: {
             version: current.version,
+            agentClaimLeaseMinutes: current.agentClaimLeaseMinutes,
+            agentClaimExpiryWarningMinutes:
+              current.agentClaimExpiryWarningMinutes,
             noteGroomerEnabled: true,
             noteGroomerModel: current.noteGroomerModel,
             noteGroomerReasoningEffort: current.noteGroomerReasoningEffort,
@@ -523,6 +633,9 @@ describe("Actionables API", () => {
         url: "/api/settings/helper-agents",
         payload: {
           version: current.version,
+          agentClaimLeaseMinutes: initial.agentClaimLeaseMinutes,
+          agentClaimExpiryWarningMinutes:
+            initial.agentClaimExpiryWarningMinutes,
           noteGroomerEnabled: initial.noteGroomerEnabled,
           noteGroomerModel: initial.noteGroomerModel,
           noteGroomerReasoningEffort: initial.noteGroomerReasoningEffort,

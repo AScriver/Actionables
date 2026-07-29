@@ -9,6 +9,8 @@ datasource db {
 
 model HelperAgentSettings {
   id                         String   @id
+  agentClaimLeaseMinutes Int @default(30)
+  agentClaimExpiryWarningMinutes Int @default(10)
   noteGroomerEnabled         Boolean  @default(true)
   noteGroomerModel           String?
   noteGroomerReasoningEffort String?

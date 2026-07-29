@@ -19,6 +19,7 @@ import {
   updateClaimedAgentTask,
 } from "../src/agent-tasks.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
+import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
 import { exportPortableDocument } from "../src/portable-format.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -864,6 +865,90 @@ describe("agent task claims", () => {
         })
       ).map((event) => event.type),
     ).toEqual(["agent-claimed", "agent-released"]);
+  });
+
+  it("uses the saved lease for omitted durations and automatic mutation renewal", async () => {
+    await getAgentCoordinationSettings(prisma);
+    await prisma.helperAgentSettings.update({
+      where: { id: "helper-agents" },
+      data: { agentClaimLeaseMinutes: 45 },
+    });
+    const task = await createTask();
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df63";
+
+    try {
+      const claimed = await claimAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        {
+          agentId: `codex:${threadId}`,
+          workItemId: task.sourceOrdinal,
+          version: task.version,
+        },
+        new Date("2026-07-25T12:00:00.000Z"),
+      );
+      expect(claimed.claim.leaseExpiresAt).toBe("2026-07-25T12:45:00.000Z");
+
+      const recovered = await recoverAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        { version: claimed.task.version },
+        { threadId },
+        new Date("2026-07-25T12:05:00.000Z"),
+      );
+      expect(recovered.claim.leaseExpiresAt).toBe("2026-07-25T12:50:00.000Z");
+
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimLeaseMinutes: 50 },
+      });
+      const updated = await updateClaimedAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        {
+          claimToken: recovered.claim.claimToken,
+          version: recovered.task.version,
+          title: "Renewed with the saved default",
+        },
+        new Date("2026-07-25T12:10:00.000Z"),
+      );
+      expect(updated.title).toBe("Renewed with the saved default");
+      expect(
+        (
+          await prisma.agentTaskClaim.findUniqueOrThrow({
+            where: { actionableId: task.id },
+          })
+        ).leaseExpiresAt.toISOString(),
+      ).toBe("2026-07-25T13:00:00.000Z");
+
+      const explicit = await renewAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        {
+          claimToken: recovered.claim.claimToken,
+          leaseMinutes: 5,
+        },
+        new Date("2026-07-25T12:11:00.000Z"),
+      );
+      expect(explicit.task.claim?.leaseExpiresAt).toBe(
+        "2026-07-25T12:16:00.000Z",
+      );
+
+      const omitted = await renewAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        { claimToken: recovered.claim.claimToken },
+        new Date("2026-07-25T12:12:00.000Z"),
+      );
+      expect(omitted.task.claim?.leaseExpiresAt).toBe(
+        "2026-07-25T13:02:00.000Z",
+      );
+    } finally {
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimLeaseMinutes: 30 },
+      });
+    }
   });
 
   it("force releases the confirmed claim without changing lifecycle state", async () => {

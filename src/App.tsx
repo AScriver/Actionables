@@ -4555,6 +4555,9 @@ function SettingsPanel() {
     queryKey: ["helper-agent-settings"],
     queryFn: fetchHelperAgentSettings,
   });
+  const [agentClaimLeaseMinutes, setAgentClaimLeaseMinutes] = useState("30");
+  const [agentClaimExpiryWarningMinutes, setAgentClaimExpiryWarningMinutes] =
+    useState("10");
   const [noteGroomerEnabled, setNoteGroomerEnabled] = useState(true);
   const [noteGroomerModel, setNoteGroomerModel] =
     useState<NoteGroomerModel | null>(null);
@@ -4574,8 +4577,13 @@ function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [errors, setErrors] = useState<Record<string, string[]>>({});
 
   const loadDraft = (settings: HelperAgentSettings) => {
+    setAgentClaimLeaseMinutes(String(settings.agentClaimLeaseMinutes));
+    setAgentClaimExpiryWarningMinutes(
+      String(settings.agentClaimExpiryWarningMinutes),
+    );
     setNoteGroomerEnabled(settings.noteGroomerEnabled);
     setNoteGroomerModel(settings.noteGroomerModel);
     setNoteGroomerReasoningEffort(settings.noteGroomerReasoningEffort);
@@ -4594,7 +4602,11 @@ function SettingsPanel() {
 
   const dirty = Boolean(
     settingsQuery.data &&
-    (noteGroomerEnabled !== settingsQuery.data.noteGroomerEnabled ||
+    (agentClaimLeaseMinutes !==
+      String(settingsQuery.data.agentClaimLeaseMinutes) ||
+      agentClaimExpiryWarningMinutes !==
+        String(settingsQuery.data.agentClaimExpiryWarningMinutes) ||
+      noteGroomerEnabled !== settingsQuery.data.noteGroomerEnabled ||
       noteGroomerModel !== settingsQuery.data.noteGroomerModel ||
       noteGroomerReasoningEffort !==
         settingsQuery.data.noteGroomerReasoningEffort ||
@@ -4609,15 +4621,63 @@ function SettingsPanel() {
         settingsQuery.data.relationshipAuditorPrompt),
   );
 
+  const clearFieldError = (field: string) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setError("");
+    setNotice("");
+  };
+
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!settingsQuery.data) return;
+    const leaseMinutes = Number(agentClaimLeaseMinutes);
+    const warningMinutes = Number(agentClaimExpiryWarningMinutes);
+    const validationErrors: Record<string, string[]> = {};
+    if (
+      !Number.isInteger(leaseMinutes) ||
+      leaseMinutes < 5 ||
+      leaseMinutes > 120
+    ) {
+      validationErrors.agentClaimLeaseMinutes = [
+        "Enter a whole number from 5 through 120.",
+      ];
+    }
+    if (
+      !Number.isInteger(warningMinutes) ||
+      warningMinutes < 1 ||
+      warningMinutes > 119
+    ) {
+      validationErrors.agentClaimExpiryWarningMinutes = [
+        "Enter a whole number from 1 through 119.",
+      ];
+    } else if (
+      Number.isInteger(leaseMinutes) &&
+      warningMinutes >= leaseMinutes
+    ) {
+      validationErrors.agentClaimExpiryWarningMinutes = [
+        "The expiry warning must be shorter than the claim lease.",
+      ];
+    }
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setError("Check the agent coordination settings.");
+      setNotice("");
+      return;
+    }
     setSaving(true);
     setNotice("");
     setError("");
+    setErrors({});
     try {
       const saved = await updateHelperAgentSettings({
         version: settingsQuery.data.version,
+        agentClaimLeaseMinutes: leaseMinutes,
+        agentClaimExpiryWarningMinutes: warningMinutes,
         noteGroomerEnabled,
         noteGroomerModel,
         noteGroomerReasoningEffort,
@@ -4645,6 +4705,9 @@ function SettingsPanel() {
         } catch (reloadError) {
           setError(errorMessage(reloadError));
         }
+      } else if (caught instanceof ApiProblem) {
+        setErrors(caught.problem.errors ?? {});
+        setError(caught.problem.title);
       } else {
         setError(errorMessage(caught));
       }
@@ -4695,7 +4758,79 @@ function SettingsPanel() {
         </div>
       </header>
       <AgentIntegrationSettingsSection />
-      <form className="settings-form" onSubmit={(event) => void save(event)}>
+      <form
+        className="settings-form"
+        noValidate
+        onSubmit={(event) => void save(event)}
+      >
+        <section aria-labelledby="agent-coordination-title">
+          <div>
+            <h2 id="agent-coordination-title">Agent coordination</h2>
+            <p>
+              Controls the default claim lease and when active claims appear as
+              expiring soon.
+            </p>
+          </div>
+          <div className="helper-runtime-grid">
+            <label className="form-field" htmlFor="agent-claim-lease-minutes">
+              <span>Default claim lease (minutes)</span>
+              <input
+                id="agent-claim-lease-minutes"
+                type="number"
+                inputMode="numeric"
+                min={5}
+                max={120}
+                step={1}
+                value={agentClaimLeaseMinutes}
+                onChange={(event) => {
+                  setAgentClaimLeaseMinutes(event.target.value);
+                  clearFieldError("agentClaimLeaseMinutes");
+                }}
+                aria-invalid={Boolean(errors.agentClaimLeaseMinutes)}
+                aria-describedby={
+                  errors.agentClaimLeaseMinutes
+                    ? "agentClaimLeaseMinutes-help agentClaimLeaseMinutes-error"
+                    : "agentClaimLeaseMinutes-help"
+                }
+                disabled={saving}
+              />
+              <small id="agentClaimLeaseMinutes-help">
+                Used when a claim or renewal omits an explicit lease duration.
+              </small>
+              {fieldError(errors, "agentClaimLeaseMinutes")}
+            </label>
+            <label
+              className="form-field"
+              htmlFor="agent-claim-expiry-warning-minutes"
+            >
+              <span>Expiry warning window (minutes)</span>
+              <input
+                id="agent-claim-expiry-warning-minutes"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={119}
+                step={1}
+                value={agentClaimExpiryWarningMinutes}
+                onChange={(event) => {
+                  setAgentClaimExpiryWarningMinutes(event.target.value);
+                  clearFieldError("agentClaimExpiryWarningMinutes");
+                }}
+                aria-invalid={Boolean(errors.agentClaimExpiryWarningMinutes)}
+                aria-describedby={
+                  errors.agentClaimExpiryWarningMinutes
+                    ? "agentClaimExpiryWarningMinutes-help agentClaimExpiryWarningMinutes-error"
+                    : "agentClaimExpiryWarningMinutes-help"
+                }
+                disabled={saving}
+              />
+              <small id="agentClaimExpiryWarningMinutes-help">
+                Must be shorter than the default claim lease.
+              </small>
+              {fieldError(errors, "agentClaimExpiryWarningMinutes")}
+            </label>
+          </div>
+        </section>
         <section aria-labelledby="note-groomer-prompt-title">
           <div>
             <h2 id="note-groomer-prompt-title">Groom notes with local Codex</h2>

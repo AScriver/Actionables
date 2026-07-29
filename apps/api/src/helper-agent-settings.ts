@@ -4,15 +4,19 @@ import {
   type UpdateHelperAgentSettingsRequest,
 } from "@actionables/contracts";
 import type { AppPrismaClient } from "./database.js";
+import type { Prisma } from "./generated/prisma/client.js";
 import {
   defaultNoteGroomerPrompt,
   defaultRelationshipAuditorPrompt,
 } from "./assistant-prompts.js";
 
 const settingsId = "helper-agents";
+type SettingsClient = AppPrismaClient | Prisma.TransactionClient;
 
 function toContract(
   settings: {
+    agentClaimLeaseMinutes: number;
+    agentClaimExpiryWarningMinutes: number;
     noteGroomerEnabled: boolean;
     noteGroomerModel: string | null;
     noteGroomerReasoningEffort: string | null;
@@ -27,6 +31,8 @@ function toContract(
   defaultModel: string,
 ): HelperAgentSettings {
   return helperAgentSettingsSchema.parse({
+    agentClaimLeaseMinutes: settings.agentClaimLeaseMinutes,
+    agentClaimExpiryWarningMinutes: settings.agentClaimExpiryWarningMinutes,
     noteGroomerEnabled: settings.noteGroomerEnabled,
     noteGroomerModel: settings.noteGroomerModel,
     noteGroomerReasoningEffort: settings.noteGroomerReasoningEffort,
@@ -50,11 +56,8 @@ export class HelperAgentSettingsVersionConflictError extends Error {
   }
 }
 
-export async function getHelperAgentSettings(
-  prisma: AppPrismaClient,
-  defaultModel: string,
-): Promise<HelperAgentSettings> {
-  const settings = await prisma.helperAgentSettings.upsert({
+function getHelperAgentSettingsRow(prisma: SettingsClient) {
+  return prisma.helperAgentSettings.upsert({
     where: { id: settingsId },
     update: {},
     create: {
@@ -63,6 +66,21 @@ export async function getHelperAgentSettings(
       relationshipAuditorPrompt: defaultRelationshipAuditorPrompt,
     },
   });
+}
+
+export async function getAgentCoordinationSettings(prisma: SettingsClient) {
+  const settings = await getHelperAgentSettingsRow(prisma);
+  return {
+    agentClaimLeaseMinutes: settings.agentClaimLeaseMinutes,
+    agentClaimExpiryWarningMinutes: settings.agentClaimExpiryWarningMinutes,
+  };
+}
+
+export async function getHelperAgentSettings(
+  prisma: AppPrismaClient,
+  defaultModel: string,
+): Promise<HelperAgentSettings> {
+  const settings = await getHelperAgentSettingsRow(prisma);
   return toContract(settings, defaultModel);
 }
 
@@ -75,6 +93,8 @@ export async function updateHelperAgentSettings(
   const updated = await prisma.helperAgentSettings.updateMany({
     where: { id: settingsId, version: input.version },
     data: {
+      agentClaimLeaseMinutes: input.agentClaimLeaseMinutes,
+      agentClaimExpiryWarningMinutes: input.agentClaimExpiryWarningMinutes,
       noteGroomerEnabled: input.noteGroomerEnabled,
       noteGroomerModel: input.noteGroomerModel,
       noteGroomerReasoningEffort: input.noteGroomerReasoningEffort,

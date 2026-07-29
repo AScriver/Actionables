@@ -93,7 +93,11 @@ const claimTaskSchema = z
       .int()
       .positive()
       .describe("Exact task version returned by list_tasks."),
-    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+    leaseMinutes: agentTaskLeaseMinutesSchema
+      .optional()
+      .describe(
+        "Optional claim lease duration; omit to use the saved default.",
+      ),
   })
   .strict();
 const recoverTaskClaimSchema = recoverAgentTaskClaimRequestSchema.extend({

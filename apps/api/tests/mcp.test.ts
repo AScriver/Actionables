@@ -10,6 +10,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
+import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -324,6 +325,95 @@ describe("Actionables MCP", () => {
         "record findings so far, remaining questions, and the next research step",
       );
     } finally {
+      await transport.close();
+    }
+  });
+
+  it("uses the saved lease when MCP calls omit it and preserves explicit overrides", async () => {
+    await getAgentCoordinationSettings(prisma);
+    await prisma.helperAgentSettings.update({
+      where: { id: "helper-agents" },
+      data: { agentClaimLeaseMinutes: 45 },
+    });
+    const task = await createTask({ title: "Configured MCP lease" });
+    const { client, transport } = await connectClient();
+
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: {
+          claimToken: string;
+          claimedAt: string;
+          leaseExpiresAt: string;
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      expect(
+        Date.parse(claimed.claim.leaseExpiresAt) -
+          Date.parse(claimed.claim.claimedAt),
+      ).toBe(45 * 60_000);
+
+      const omitted = output<{
+        task: {
+          claim: { renewedAt: string; leaseExpiresAt: string };
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.renew_task_claim",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
+      const omittedDuration =
+        Date.parse(omitted.task.claim.leaseExpiresAt) -
+        Date.parse(omitted.task.claim.renewedAt);
+      expect(omittedDuration).toBeGreaterThanOrEqual(45 * 60_000 - 1_000);
+      expect(omittedDuration).toBeLessThanOrEqual(45 * 60_000);
+
+      const explicit = output<{
+        task: {
+          claim: { renewedAt: string; leaseExpiresAt: string };
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.renew_task_claim",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+            leaseMinutes: 60,
+          },
+        }),
+      );
+      const explicitDuration =
+        Date.parse(explicit.task.claim.leaseExpiresAt) -
+        Date.parse(explicit.task.claim.renewedAt);
+      expect(explicitDuration).toBeGreaterThanOrEqual(60 * 60_000 - 1_000);
+      expect(explicitDuration).toBeLessThanOrEqual(60 * 60_000);
+
+      output(
+        await client.callTool({
+          name: "actionables.release_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
+    } finally {
+      await prisma.helperAgentSettings.update({
+        where: { id: "helper-agents" },
+        data: { agentClaimLeaseMinutes: 30 },
+      });
       await transport.close();
     }
   });

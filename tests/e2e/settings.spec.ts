@@ -231,6 +231,15 @@ test("edits and persists helper agent settings on the settings page", async ({
   const relationshipSettings = page.getByRole("region", {
     name: "Relationship auditor",
   });
+  const coordinationSettings = page.getByRole("region", {
+    name: "Agent coordination",
+  });
+  const leaseMinutes = coordinationSettings.getByLabel(
+    "Default claim lease (minutes)",
+  );
+  const warningMinutes = coordinationSettings.getByLabel(
+    "Expiry warning window (minutes)",
+  );
   const notePrompt = noteSettings.getByLabel("Prompt instructions");
   const relationshipPrompt = relationshipSettings.getByLabel(
     "Prompt instructions",
@@ -248,6 +257,8 @@ test("edits and persists helper agent settings on the settings page", async ({
   );
   await expect(notePrompt).not.toHaveValue("");
   await expect(relationshipPrompt).not.toHaveValue("");
+  await expect(leaseMinutes).toHaveValue("30");
+  await expect(warningMinutes).toHaveValue("10");
   await expect(noteModel).toHaveValue("");
   await expect(noteReasoning).toHaveValue("");
   await expect(relationshipModel).toHaveValue("");
@@ -270,6 +281,19 @@ test("edits and persists helper agent settings on the settings page", async ({
   const savedRelationshipPrompt = `${originalRelationshipPrompt}\n\nPrefer recommendations with direct ID evidence.`;
 
   try {
+    await leaseMinutes.fill("20");
+    await warningMinutes.fill("20");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(warningMinutes).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      page.locator("#agentClaimExpiryWarningMinutes-error"),
+    ).toHaveText("The expiry warning must be shorter than the claim lease.");
+    await expect(page.getByRole("alert")).toContainText(
+      "Check the agent coordination settings.",
+    );
+
+    await leaseMinutes.fill("45");
+    await warningMinutes.fill("12");
     await noteModel.selectOption("gpt-5.6-sol");
     await noteReasoning.selectOption("high");
     await relationshipModel.selectOption("gpt-5.6-luna");
@@ -282,6 +306,8 @@ test("edits and persists helper agent settings on the settings page", async ({
     ).toContainText("Helper agent settings saved.");
 
     await page.reload();
+    await expect(leaseMinutes).toHaveValue("45");
+    await expect(warningMinutes).toHaveValue("12");
     await expect(noteModel).toHaveValue("gpt-5.6-sol");
     await expect(noteReasoning).toHaveValue("high");
     await expect(relationshipModel).toHaveValue("gpt-5.6-luna");
@@ -312,6 +338,8 @@ test("edits and persists helper agent settings on the settings page", async ({
   } finally {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/settings");
+    await leaseMinutes.fill("30");
+    await warningMinutes.fill("10");
     await noteModel.selectOption("");
     await noteReasoning.selectOption("");
     await relationshipModel.selectOption("");
@@ -323,6 +351,8 @@ test("edits and persists helper agent settings on the settings page", async ({
       page.locator(".settings-form footer").getByRole("status"),
     ).toContainText("Helper agent settings saved.");
     await page.reload();
+    await expect(leaseMinutes).toHaveValue("30");
+    await expect(warningMinutes).toHaveValue("10");
     await expect(noteModel).toHaveValue("");
     await expect(noteReasoning).toHaveValue("");
     await expect(relationshipModel).toHaveValue("");

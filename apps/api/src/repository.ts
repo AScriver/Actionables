@@ -27,6 +27,7 @@ import {
 } from "@actionables/contracts";
 import type { Prisma } from "./generated/prisma/client.js";
 import type { AppPrismaClient } from "./database.js";
+import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import {
   canTransition,
   parsePersistedStatus,
@@ -862,7 +863,11 @@ export async function getDashboard(
   scope: Pick<ActionableQuery, "project" | "repository" | "worktree">,
 ): Promise<DashboardResponse> {
   const now = new Date();
-  const expiringClaimCutoff = new Date(now.getTime() + 10 * 60_000);
+  const { agentClaimExpiryWarningMinutes } =
+    await getAgentCoordinationSettings(prisma);
+  const expiringClaimCutoff = new Date(
+    now.getTime() + agentClaimExpiryWarningMinutes * 60_000,
+  );
   const rows = (await allActionableRows(prisma)).filter(
     (row) =>
       (!scope.project || row.projectId === scope.project) &&
@@ -938,7 +943,9 @@ export async function getDashboard(
     alert(
       "expiring-claims",
       "Claims expiring soon",
-      "Active agent leases with 10 minutes or less remaining.",
+      `Active agent leases with ${agentClaimExpiryWarningMinutes} ${
+        agentClaimExpiryWarningMinutes === 1 ? "minute" : "minutes"
+      } or less remaining.`,
       "warning",
       byClaimExpiry(
         rows.filter(

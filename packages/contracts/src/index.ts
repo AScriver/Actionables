@@ -476,6 +476,12 @@ export const agentTaskLeaseMinutesSchema = z
   .min(5)
   .max(120)
   .describe("Claim lease duration in minutes, from 5 through 120.");
+export const agentClaimExpiryWarningMinutesSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(119)
+  .describe("Expiring-claim warning window in minutes, from 1 through 119.");
 export const agentTaskListViewSchema = z
   .enum(["available", "mine"])
   .describe("Use mine for owned claims or available within one work item.");
@@ -561,7 +567,11 @@ export const claimAgentTaskRequestSchema = z
       .int()
       .positive()
       .describe("Exact task version returned by list_tasks."),
-    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+    leaseMinutes: agentTaskLeaseMinutesSchema
+      .optional()
+      .describe(
+        "Optional claim lease duration; omit to use the saved default.",
+      ),
   })
   .strict();
 
@@ -589,7 +599,11 @@ export const recoverAgentTaskClaimRequestSchema = z
       .int()
       .positive()
       .describe("Current task version returned by list_tasks(view: mine)."),
-    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+    leaseMinutes: agentTaskLeaseMinutesSchema
+      .optional()
+      .describe(
+        "Optional recovered-claim lease duration; omit to use the saved default.",
+      ),
   })
   .strict();
 
@@ -602,7 +616,11 @@ export const renewAgentTaskClaimRequestSchema = z
       .min(32)
       .max(256)
       .describe("Secret claim token returned by claim_task."),
-    leaseMinutes: agentTaskLeaseMinutesSchema.default(30),
+    leaseMinutes: agentTaskLeaseMinutesSchema
+      .optional()
+      .describe(
+        "Optional renewal lease duration; omit to use the saved default.",
+      ),
   })
   .strict();
 
@@ -720,8 +738,10 @@ export const assistantReasoningEfforts = [
 ] as const;
 export const assistantReasoningEffortSchema = z.enum(assistantReasoningEfforts);
 
-export const helperAgentSettingsSchema = z
+const helperAgentSettingsBaseSchema = z
   .object({
+    agentClaimLeaseMinutes: agentTaskLeaseMinutesSchema,
+    agentClaimExpiryWarningMinutes: agentClaimExpiryWarningMinutesSchema,
     noteGroomerEnabled: z.boolean(),
     noteGroomerModel: noteGroomerModelSchema.nullable(),
     noteGroomerReasoningEffort: assistantReasoningEffortSchema.nullable(),
@@ -738,13 +758,34 @@ export const helperAgentSettingsSchema = z
   })
   .strict();
 
-export const updateHelperAgentSettingsRequestSchema = helperAgentSettingsSchema
-  .omit({
-    noteGroomerEffectiveModel: true,
-    relationshipAuditorEffectiveModel: true,
-    updatedAt: true,
-  })
-  .strict();
+function validateAgentCoordinationSettings(
+  input: {
+    agentClaimLeaseMinutes: number;
+    agentClaimExpiryWarningMinutes: number;
+  },
+  context: z.RefinementCtx,
+) {
+  if (input.agentClaimExpiryWarningMinutes >= input.agentClaimLeaseMinutes) {
+    context.addIssue({
+      code: "custom",
+      path: ["agentClaimExpiryWarningMinutes"],
+      message: "The expiry warning must be shorter than the claim lease.",
+    });
+  }
+}
+
+export const helperAgentSettingsSchema =
+  helperAgentSettingsBaseSchema.superRefine(validateAgentCoordinationSettings);
+
+export const updateHelperAgentSettingsRequestSchema =
+  helperAgentSettingsBaseSchema
+    .omit({
+      noteGroomerEffectiveModel: true,
+      relationshipAuditorEffectiveModel: true,
+      updatedAt: true,
+    })
+    .strict()
+    .superRefine(validateAgentCoordinationSettings);
 
 export const agentIntegrationComponentIdSchema = z.enum([
   "agentInstructions",

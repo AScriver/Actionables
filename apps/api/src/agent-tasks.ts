@@ -47,6 +47,7 @@ import {
 } from "@actionables/contracts";
 import type { AppPrismaClient } from "./database.js";
 import type { Prisma } from "./generated/prisma/client.js";
+import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import {
   createActionable,
   getActionable,
@@ -60,7 +61,6 @@ import { createSubtask } from "./relationships.js";
 
 const execFileAsync = promisify(execFile);
 const terminalStatuses = ["Done", "Dismissed"];
-const defaultAgentTaskLeaseMinutes = 30;
 const claimLocks = new Map<string, Promise<void>>();
 const agentTaskInclude = {
   project: true,
@@ -566,10 +566,11 @@ async function renewClaimAfterMutation(
   row: AgentTaskMutationRow,
   now: Date,
 ) {
+  const { agentClaimLeaseMinutes } = await getAgentCoordinationSettings(tx);
   await tx.agentTaskClaim.update({
     where: { actionableId: row.id },
     data: {
-      leaseExpiresAt: leaseExpiry(now, defaultAgentTaskLeaseMinutes),
+      leaseExpiresAt: leaseExpiry(now, agentClaimLeaseMinutes),
     },
   });
 }
@@ -1558,7 +1559,6 @@ async function claimAgentTaskUnlocked(
   const request = parseInput(claimAgentTaskRequestSchema, input);
   const claimToken = randomBytes(32).toString("base64url");
   const claimTokenHash = hashToken(claimToken);
-  const leaseExpiresAt = leaseExpiry(now, request.leaseMinutes);
 
   try {
     const task = await prisma.$transaction(async (tx) => {
@@ -1590,13 +1590,16 @@ async function claimAgentTaskUnlocked(
         );
       }
       await recordObservedExpiry(tx, row, now);
+      const leaseMinutes =
+        request.leaseMinutes ??
+        (await getAgentCoordinationSettings(tx)).agentClaimLeaseMinutes;
       await tx.agentTaskClaim.create({
         data: {
           actionableId: row.id,
           agentId: request.agentId,
           claimTokenHash,
           claimedAt: now,
-          leaseExpiresAt,
+          leaseExpiresAt: leaseExpiry(now, leaseMinutes),
         },
       });
       await tx.actionable.update({
@@ -1663,7 +1666,6 @@ export async function recoverAgentTaskClaim(
   const agentId = `codex:${caller.threadId}`;
   const claimToken = randomBytes(32).toString("base64url");
   const claimTokenHash = hashToken(claimToken);
-  const leaseExpiresAt = leaseExpiry(now, request.leaseMinutes);
 
   const result = await withClaimLock(String(sourceOrdinal), () =>
     prisma.$transaction(async (tx) => {
@@ -1706,11 +1708,14 @@ export async function recoverAgentTaskClaim(
         );
       }
 
+      const leaseMinutes =
+        request.leaseMinutes ??
+        (await getAgentCoordinationSettings(tx)).agentClaimLeaseMinutes;
       await tx.agentTaskClaim.update({
         where: { actionableId: row.id },
         data: {
           claimTokenHash,
-          leaseExpiresAt,
+          leaseExpiresAt: leaseExpiry(now, leaseMinutes),
           renewedAt: now,
         },
       });
@@ -1783,9 +1788,12 @@ export async function renewAgentTaskClaim(
       });
       return { expired: true as const };
     }
+    const leaseMinutes =
+      request.leaseMinutes ??
+      (await getAgentCoordinationSettings(tx)).agentClaimLeaseMinutes;
     await tx.agentTaskClaim.update({
       where: { actionableId: row!.id },
-      data: { leaseExpiresAt: leaseExpiry(now, request.leaseMinutes) },
+      data: { leaseExpiresAt: leaseExpiry(now, leaseMinutes) },
     });
     return { expired: false as const, task: await findTask(tx, sourceOrdinal) };
   });
