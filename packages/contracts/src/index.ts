@@ -722,6 +722,18 @@ export const groomActionableNotesRequestSchema = z
 
 const helperAgentPromptSchema = z.string().trim().min(1).max(20_000);
 
+export const defaultLocalCodexTimeoutSeconds = 120;
+export const minimumLocalCodexTimeoutSeconds = 30;
+export const maximumLocalCodexTimeoutSeconds = 900;
+export const localCodexTimeoutSecondsSchema = z
+  .number()
+  .int()
+  .min(minimumLocalCodexTimeoutSeconds)
+  .max(maximumLocalCodexTimeoutSeconds)
+  .describe(
+    `Local Codex request timeout in seconds, from ${minimumLocalCodexTimeoutSeconds} through ${maximumLocalCodexTimeoutSeconds}.`,
+  );
+
 export const noteGroomerModels = [
   "gpt-5.6-sol",
   "gpt-5.6-terra",
@@ -742,6 +754,8 @@ const helperAgentSettingsBaseSchema = z
   .object({
     agentClaimLeaseMinutes: agentTaskLeaseMinutesSchema,
     agentClaimExpiryWarningMinutes: agentClaimExpiryWarningMinutesSchema,
+    localCodexTimeoutSeconds: localCodexTimeoutSecondsSchema.nullable(),
+    localCodexEffectiveTimeoutSeconds: localCodexTimeoutSecondsSchema,
     noteGroomerEnabled: z.boolean(),
     noteGroomerModel: noteGroomerModelSchema.nullable(),
     noteGroomerReasoningEffort: assistantReasoningEffortSchema.nullable(),
@@ -780,6 +794,7 @@ export const helperAgentSettingsSchema =
 export const updateHelperAgentSettingsRequestSchema =
   helperAgentSettingsBaseSchema
     .omit({
+      localCodexEffectiveTimeoutSeconds: true,
       noteGroomerEffectiveModel: true,
       relationshipAuditorEffectiveModel: true,
       updatedAt: true,

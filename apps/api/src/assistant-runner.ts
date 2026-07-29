@@ -2,13 +2,17 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AssistantReasoningEffort } from "@actionables/contracts";
+import {
+  defaultLocalCodexTimeoutSeconds,
+  type AssistantReasoningEffort,
+} from "@actionables/contracts";
 
 export type AssistantRequest = {
   prompt: string;
   outputSchema: unknown;
   model?: string;
   reasoningEffort?: AssistantReasoningEffort;
+  timeoutMs?: number;
 };
 
 export type AssistantResult = {
@@ -29,6 +33,7 @@ export class AssistantRunnerError extends Error {
       | "ASSISTANT_FAILED"
       | "ASSISTANT_INVALID_OUTPUT",
     message: string,
+    public readonly timeoutMs?: number,
   ) {
     super(message);
   }
@@ -48,6 +53,8 @@ type CodexAssistantRunnerOptions = {
 
 const outputLimit = 20_000;
 export const defaultCodexAssistantModel = "gpt-5.6-terra";
+export const defaultCodexAssistantTimeoutMs =
+  defaultLocalCodexTimeoutSeconds * 1_000;
 
 export function buildCodexAssistantArguments({
   model,
@@ -88,15 +95,22 @@ export function buildCodexAssistantArguments({
 export function createCodexAssistantRunner({
   executable = "codex",
   model = defaultCodexAssistantModel,
-  timeoutMs = 120_000,
+  timeoutMs = defaultCodexAssistantTimeoutMs,
 }: CodexAssistantRunnerOptions = {}): AssistantRunner {
   return {
     defaultModel: model,
-    async run({ prompt, outputSchema, model: requestModel, reasoningEffort }) {
+    async run({
+      prompt,
+      outputSchema,
+      model: requestModel,
+      reasoningEffort,
+      timeoutMs: requestTimeoutMs,
+    }) {
       const directory = await mkdtemp(join(tmpdir(), "actionables-assistant-"));
       const schemaPath = join(directory, "output.schema.json");
       const outputPath = join(directory, "output.json");
       const effectiveModel = requestModel ?? model;
+      const effectiveTimeoutMs = requestTimeoutMs ?? timeoutMs;
 
       try {
         await writeFile(schemaPath, JSON.stringify(outputSchema), "utf8");
@@ -137,9 +151,10 @@ export function createCodexAssistantRunner({
               new AssistantRunnerError(
                 "ASSISTANT_TIMEOUT",
                 "The local Codex assistant timed out.",
+                effectiveTimeoutMs,
               ),
             );
-          }, timeoutMs);
+          }, effectiveTimeoutMs);
           timeout.unref();
           child.once("error", (error) => {
             clearTimeout(timeout);

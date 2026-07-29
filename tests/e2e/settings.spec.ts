@@ -234,12 +234,21 @@ test("edits and persists helper agent settings on the settings page", async ({
   const coordinationSettings = page.getByRole("region", {
     name: "Agent coordination",
   });
+  const localCodexSettings = page.getByRole("region", {
+    name: "Local Codex runtime",
+  });
   const leaseMinutes = coordinationSettings.getByLabel(
     "Default claim lease (minutes)",
   );
   const warningMinutes = coordinationSettings.getByLabel(
     "Expiry warning window (minutes)",
   );
+  const timeoutSeconds = localCodexSettings.getByLabel(
+    "Request timeout (seconds)",
+  );
+  const resetTimeout = localCodexSettings.getByRole("button", {
+    name: "Reset to default",
+  });
   const notePrompt = noteSettings.getByLabel("Prompt instructions");
   const relationshipPrompt = relationshipSettings.getByLabel(
     "Prompt instructions",
@@ -259,6 +268,12 @@ test("edits and persists helper agent settings on the settings page", async ({
   await expect(relationshipPrompt).not.toHaveValue("");
   await expect(leaseMinutes).toHaveValue("30");
   await expect(warningMinutes).toHaveValue("10");
+  await expect(timeoutSeconds).toHaveValue("");
+  await expect(timeoutSeconds).toHaveAttribute("placeholder", "120");
+  await expect(resetTimeout).toBeDisabled();
+  await expect(
+    localCodexSettings.getByText(/Effective timeout:/),
+  ).toContainText("120 seconds (default)");
   await expect(noteModel).toHaveValue("");
   await expect(noteReasoning).toHaveValue("");
   await expect(relationshipModel).toHaveValue("");
@@ -294,6 +309,17 @@ test("edits and persists helper agent settings on the settings page", async ({
 
     await leaseMinutes.fill("45");
     await warningMinutes.fill("12");
+    await timeoutSeconds.fill("29");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(timeoutSeconds).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#localCodexTimeoutSeconds-error")).toHaveText(
+      "Enter a whole number from 30 through 900, or reset to the default.",
+    );
+    await expect(page.getByRole("alert")).toContainText(
+      "Check the Local Codex runtime settings.",
+    );
+
+    await timeoutSeconds.fill("300");
     await noteModel.selectOption("gpt-5.6-sol");
     await noteReasoning.selectOption("high");
     await relationshipModel.selectOption("gpt-5.6-luna");
@@ -308,6 +334,10 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.reload();
     await expect(leaseMinutes).toHaveValue("45");
     await expect(warningMinutes).toHaveValue("12");
+    await expect(timeoutSeconds).toHaveValue("300");
+    await expect(
+      localCodexSettings.getByText(/Effective timeout:/),
+    ).toContainText("300 seconds (override)");
     await expect(noteModel).toHaveValue("gpt-5.6-sol");
     await expect(noteReasoning).toHaveValue("high");
     await expect(relationshipModel).toHaveValue("gpt-5.6-luna");
@@ -327,6 +357,18 @@ test("edits and persists helper agent settings on the settings page", async ({
     await expect(notePrompt).toHaveValue(savedNotePrompt);
     await expect(relationshipPrompt).toHaveValue(savedRelationshipPrompt);
 
+    await resetTimeout.click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(
+      page.locator(".settings-form footer").getByRole("status"),
+    ).toContainText("Helper agent settings saved.");
+    await page.reload();
+    await expect(timeoutSeconds).toHaveValue("");
+    await expect(
+      localCodexSettings.getByText(/Effective timeout:/),
+    ).toContainText("120 seconds (default)");
+    await expect(resetTimeout).toBeDisabled();
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -340,6 +382,7 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.goto("/settings");
     await leaseMinutes.fill("30");
     await warningMinutes.fill("10");
+    await timeoutSeconds.fill("");
     await noteModel.selectOption("");
     await noteReasoning.selectOption("");
     await relationshipModel.selectOption("");

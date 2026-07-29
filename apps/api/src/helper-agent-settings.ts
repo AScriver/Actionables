@@ -1,4 +1,5 @@
 import {
+  defaultLocalCodexTimeoutSeconds,
   helperAgentSettingsSchema,
   type HelperAgentSettings,
   type UpdateHelperAgentSettingsRequest,
@@ -17,6 +18,7 @@ function toContract(
   settings: {
     agentClaimLeaseMinutes: number;
     agentClaimExpiryWarningMinutes: number;
+    localCodexTimeoutSeconds: number | null;
     noteGroomerEnabled: boolean;
     noteGroomerModel: string | null;
     noteGroomerReasoningEffort: string | null;
@@ -33,6 +35,9 @@ function toContract(
   return helperAgentSettingsSchema.parse({
     agentClaimLeaseMinutes: settings.agentClaimLeaseMinutes,
     agentClaimExpiryWarningMinutes: settings.agentClaimExpiryWarningMinutes,
+    localCodexTimeoutSeconds: settings.localCodexTimeoutSeconds,
+    localCodexEffectiveTimeoutSeconds:
+      settings.localCodexTimeoutSeconds ?? defaultLocalCodexTimeoutSeconds,
     noteGroomerEnabled: settings.noteGroomerEnabled,
     noteGroomerModel: settings.noteGroomerModel,
     noteGroomerReasoningEffort: settings.noteGroomerReasoningEffort,
@@ -95,6 +100,7 @@ export async function updateHelperAgentSettings(
     data: {
       agentClaimLeaseMinutes: input.agentClaimLeaseMinutes,
       agentClaimExpiryWarningMinutes: input.agentClaimExpiryWarningMinutes,
+      localCodexTimeoutSeconds: input.localCodexTimeoutSeconds,
       noteGroomerEnabled: input.noteGroomerEnabled,
       noteGroomerModel: input.noteGroomerModel,
       noteGroomerReasoningEffort: input.noteGroomerReasoningEffort,

@@ -346,7 +346,9 @@ export function buildApp({
         error.code === "ASSISTANT_UNAVAILABLE"
           ? "Confirm that Codex is installed and signed in, then retry."
           : error.code === "ASSISTANT_TIMEOUT"
-            ? "The request exceeded the local assistant time limit. Retry with shorter notes."
+            ? error.timeoutMs
+              ? `The request exceeded the configured ${error.timeoutMs / 1_000}-second local assistant time limit. Retry with shorter notes or increase the timeout in Settings.`
+              : "The request exceeded the local assistant time limit. Retry with shorter notes or increase the timeout in Settings."
             : "The model did not produce a usable proposal. No Actionable data was changed.";
       return problem(
         request,
@@ -669,6 +671,7 @@ export function buildApp({
           {
             model: settings.noteGroomerModel ?? undefined,
             reasoningEffort: settings.noteGroomerReasoningEffort ?? undefined,
+            timeoutMs: settings.localCodexEffectiveTimeoutSeconds * 1_000,
           },
         ),
       );
@@ -738,6 +741,7 @@ export function buildApp({
             model: settings.relationshipAuditorModel ?? undefined,
             reasoningEffort:
               settings.relationshipAuditorReasoningEffort ?? undefined,
+            timeoutMs: settings.localCodexEffectiveTimeoutSeconds * 1_000,
           },
         ),
       );

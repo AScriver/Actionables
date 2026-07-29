@@ -11,6 +11,7 @@ model HelperAgentSettings {
   id                         String   @id
   agentClaimLeaseMinutes Int @default(30)
   agentClaimExpiryWarningMinutes Int @default(10)
+  localCodexTimeoutSeconds   Int?
   noteGroomerEnabled         Boolean  @default(true)
   noteGroomerModel           String?
   noteGroomerReasoningEffort String?

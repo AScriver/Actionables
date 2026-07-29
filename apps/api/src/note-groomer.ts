@@ -18,7 +18,10 @@ export async function groomActionableNotes(
   runner: AssistantRunner,
   actionable: ActionableDetail,
   instructions = defaultNoteGroomerPrompt,
-  runtime: Pick<AssistantRequest, "model" | "reasoningEffort"> = {},
+  runtime: Pick<
+    AssistantRequest,
+    "model" | "reasoningEffort" | "timeoutMs"
+  > = {},
 ): Promise<GroomActionableNotesResponse> {
   const context = JSON.stringify({
     title: actionable.title,

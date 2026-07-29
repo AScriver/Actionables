@@ -35,6 +35,9 @@ import {
 } from "lucide-react";
 import {
   assistantReasoningEfforts,
+  defaultLocalCodexTimeoutSeconds,
+  maximumLocalCodexTimeoutSeconds,
+  minimumLocalCodexTimeoutSeconds,
   noteGroomerModels,
   type CreateActionableRequest,
   type CreateRepositoryResponse,
@@ -4558,6 +4561,7 @@ function SettingsPanel() {
   const [agentClaimLeaseMinutes, setAgentClaimLeaseMinutes] = useState("30");
   const [agentClaimExpiryWarningMinutes, setAgentClaimExpiryWarningMinutes] =
     useState("10");
+  const [localCodexTimeoutSeconds, setLocalCodexTimeoutSeconds] = useState("");
   const [noteGroomerEnabled, setNoteGroomerEnabled] = useState(true);
   const [noteGroomerModel, setNoteGroomerModel] =
     useState<NoteGroomerModel | null>(null);
@@ -4584,6 +4588,11 @@ function SettingsPanel() {
     setAgentClaimExpiryWarningMinutes(
       String(settings.agentClaimExpiryWarningMinutes),
     );
+    setLocalCodexTimeoutSeconds(
+      settings.localCodexTimeoutSeconds === null
+        ? ""
+        : String(settings.localCodexTimeoutSeconds),
+    );
     setNoteGroomerEnabled(settings.noteGroomerEnabled);
     setNoteGroomerModel(settings.noteGroomerModel);
     setNoteGroomerReasoningEffort(settings.noteGroomerReasoningEffort);
@@ -4606,6 +4615,10 @@ function SettingsPanel() {
       String(settingsQuery.data.agentClaimLeaseMinutes) ||
       agentClaimExpiryWarningMinutes !==
         String(settingsQuery.data.agentClaimExpiryWarningMinutes) ||
+      localCodexTimeoutSeconds !==
+        (settingsQuery.data.localCodexTimeoutSeconds === null
+          ? ""
+          : String(settingsQuery.data.localCodexTimeoutSeconds)) ||
       noteGroomerEnabled !== settingsQuery.data.noteGroomerEnabled ||
       noteGroomerModel !== settingsQuery.data.noteGroomerModel ||
       noteGroomerReasoningEffort !==
@@ -4637,6 +4650,8 @@ function SettingsPanel() {
     if (!settingsQuery.data) return;
     const leaseMinutes = Number(agentClaimLeaseMinutes);
     const warningMinutes = Number(agentClaimExpiryWarningMinutes);
+    const timeoutSeconds =
+      localCodexTimeoutSeconds === "" ? null : Number(localCodexTimeoutSeconds);
     const validationErrors: Record<string, string[]> = {};
     if (
       !Number.isInteger(leaseMinutes) ||
@@ -4663,9 +4678,23 @@ function SettingsPanel() {
         "The expiry warning must be shorter than the claim lease.",
       ];
     }
+    if (
+      timeoutSeconds !== null &&
+      (!Number.isInteger(timeoutSeconds) ||
+        timeoutSeconds < minimumLocalCodexTimeoutSeconds ||
+        timeoutSeconds > maximumLocalCodexTimeoutSeconds)
+    ) {
+      validationErrors.localCodexTimeoutSeconds = [
+        `Enter a whole number from ${minimumLocalCodexTimeoutSeconds} through ${maximumLocalCodexTimeoutSeconds}, or reset to the default.`,
+      ];
+    }
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
-      setError("Check the agent coordination settings.");
+      setError(
+        validationErrors.localCodexTimeoutSeconds
+          ? "Check the Local Codex runtime settings."
+          : "Check the agent coordination settings.",
+      );
       setNotice("");
       return;
     }
@@ -4678,6 +4707,7 @@ function SettingsPanel() {
         version: settingsQuery.data.version,
         agentClaimLeaseMinutes: leaseMinutes,
         agentClaimExpiryWarningMinutes: warningMinutes,
+        localCodexTimeoutSeconds: timeoutSeconds,
         noteGroomerEnabled,
         noteGroomerModel,
         noteGroomerReasoningEffort,
@@ -4829,6 +4859,70 @@ function SettingsPanel() {
               </small>
               {fieldError(errors, "agentClaimExpiryWarningMinutes")}
             </label>
+          </div>
+        </section>
+        <section aria-labelledby="local-codex-runtime-title">
+          <div>
+            <h2 id="local-codex-runtime-title">Local Codex runtime</h2>
+            <p>
+              Sets one request timeout for note grooming and relationship
+              auditing.
+            </p>
+          </div>
+          <div className="helper-runtime-grid">
+            <label className="form-field" htmlFor="local-codex-timeout-seconds">
+              <span>Request timeout (seconds)</span>
+              <input
+                id="local-codex-timeout-seconds"
+                type="number"
+                inputMode="numeric"
+                min={minimumLocalCodexTimeoutSeconds}
+                max={maximumLocalCodexTimeoutSeconds}
+                step={1}
+                placeholder={String(defaultLocalCodexTimeoutSeconds)}
+                value={localCodexTimeoutSeconds}
+                onChange={(event) => {
+                  setLocalCodexTimeoutSeconds(event.target.value);
+                  clearFieldError("localCodexTimeoutSeconds");
+                }}
+                aria-invalid={Boolean(errors.localCodexTimeoutSeconds)}
+                aria-describedby={
+                  errors.localCodexTimeoutSeconds
+                    ? "localCodexTimeoutSeconds-help localCodexTimeoutSeconds-error"
+                    : "localCodexTimeoutSeconds-help"
+                }
+                disabled={saving}
+              />
+              <small id="localCodexTimeoutSeconds-help">
+                Whole seconds from {minimumLocalCodexTimeoutSeconds} through{" "}
+                {maximumLocalCodexTimeoutSeconds}. Effective timeout:{" "}
+                <code>
+                  {localCodexTimeoutSeconds || defaultLocalCodexTimeoutSeconds}
+                </code>{" "}
+                seconds
+                {localCodexTimeoutSeconds ? " (override)" : " (default)"}.
+              </small>
+              {fieldError(errors, "localCodexTimeoutSeconds")}
+            </label>
+            <div className="form-field">
+              <span>Default</span>
+              <button
+                type="button"
+                className="toolbar-button"
+                onClick={() => {
+                  setLocalCodexTimeoutSeconds("");
+                  clearFieldError("localCodexTimeoutSeconds");
+                }}
+                disabled={saving || localCodexTimeoutSeconds === ""}
+              >
+                <RotateCcw aria-hidden="true" />
+                Reset to default
+              </button>
+              <small>
+                Uses the built-in {defaultLocalCodexTimeoutSeconds}-second limit
+                when no override is saved.
+              </small>
+            </div>
           </div>
         </section>
         <section aria-labelledby="note-groomer-prompt-title">

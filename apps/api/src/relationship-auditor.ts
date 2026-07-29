@@ -88,7 +88,10 @@ export async function auditWorkItemRelationships(
   runner: AssistantRunner,
   root: ActionableDetail,
   instructions = defaultRelationshipAuditorPrompt,
-  runtime: Pick<AssistantRequest, "model" | "reasoningEffort"> = {},
+  runtime: Pick<
+    AssistantRequest,
+    "model" | "reasoningEffort" | "timeoutMs"
+  > = {},
 ): Promise<RelationshipAuditResponse> {
   if (root.parentId) {
     throw new DomainValidationError(
