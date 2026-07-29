@@ -1,6 +1,6 @@
 # Actionables
 
-> Turn technical findings into an evidence-backed execution queue.
+> Turn technical findings into an evidence-backed execution queue for Codex.
 
 Actionables is a local, single-user Windows application for developers who need
 to move findings from reviews, audits, and investigations into completed,
