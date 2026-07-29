@@ -1,3 +1,3 @@
 import { runActionables } from "./start-actionables.mjs";
 
-await runActionables("production");
+await runActionables("development");

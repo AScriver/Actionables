@@ -98,11 +98,19 @@ Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
 pnpm run dev
 ```
 
-This migrates and seeds the configured database, then starts on these defaults:
+This migrates and seeds the configured database, then starts on these defaults
+when they are available:
 
 - Web: `http://127.0.0.1:4173`
 - API: `http://127.0.0.1:4174`
 - Health: `http://127.0.0.1:4173/api/health`
+
+If either default is busy, Actionables reserves the next deterministic adjacent
+loopback pair, saves the effective pair in `data/runtime-ports.json`, and reports
+the selected web and API ports before starting both services. Later development
+and production launches prefer that saved pair while it remains available. An
+unavailable saved pair is replaced without stopping or changing the occupying
+process.
 
 To use explicit custom ports, set either or both variables to a whole number
 from 1 through 65535 before startup. The web listener, API listener, proxy,
@@ -118,7 +126,8 @@ pnpm run dev
 Blank, zero, nonnumeric, fractional, exponential, and out-of-range values fail
 at startup with a variable-specific `WEB_PORT` or `API_PORT` validation error.
 Both services remain bound to `127.0.0.1`. An explicit occupied port fails
-startup and is never silently replaced.
+startup and is never silently replaced. When only one variable is set, its
+value is preserved while Actionables safely resolves the other port.
 
 Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
 
@@ -133,7 +142,8 @@ pnpm run start
 ```
 
 `pnpm run start` also honors valid inherited `WEB_PORT` and `API_PORT` values
-and passes the same normalized pair to the API and Vite preview processes.
+and uses the same saved-pair selection and persistence behavior as development.
+It passes the resulting normalized pair to the API and Vite preview processes.
 
 Verify health:
 
@@ -192,12 +202,17 @@ Get-NetTCPConnection -LocalPort 4173,4174 -ErrorAction SilentlyContinue |
   Select-Object LocalAddress,LocalPort,State,OwningProcess
 ```
 
-Stop the known process or set explicit `WEB_PORT` and/or `API_PORT` values
-before `pnpm run dev` or `pnpm run start`; Actionables propagates the normalized
-pair automatically. Explicit values are authoritative and are never replaced
-when occupied. When the variables are omitted, this version uses the default
-ports and does not perform automatic fallback selection. The documented release
-proof uses the defaults.
+When the variables are omitted, `pnpm run dev` and `pnpm run start` leave the
+known process untouched and select another adjacent loopback pair. Startup
+reports the effective ports and saves them in `data/runtime-ports.json`. If a
+saved port later becomes busy, Actionables selects and saves another pair
+without terminating the occupying listener.
+
+Set explicit `WEB_PORT` and/or `API_PORT` values when a particular port is
+required. Explicit values are authoritative and fail clearly when occupied; the
+startup process never stops an unrelated listener. To reset only the saved
+preference, stop Actionables and remove `data\runtime-ports.json`; the next
+launch tries 4173/4174 first.
 
 ### MCP returns 401, 403, or 404
 

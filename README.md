@@ -54,12 +54,16 @@ pnpm run db:setup
 pnpm run dev
 ```
 
-Open [http://127.0.0.1:4173](http://127.0.0.1:4173). Press `Ctrl+C` in the
-terminal to stop the web and API processes.
+On a clean checkout, open
+[http://127.0.0.1:4173](http://127.0.0.1:4173). If either default loopback port
+is busy, startup selects and reports another adjacent web/API pair, saves it in
+`data/runtime-ports.json`, and reuses it on later launches while available.
+Press `Ctrl+C` in the terminal to stop the web and API processes.
 
 Set `WEB_PORT` and/or `API_PORT` before startup to use explicit custom loopback
 ports. Explicit values must be whole numbers from 1 through 65535 and are never
-silently replaced when occupied. See the Windows operation guide for the
+silently replaced when occupied. Explicit values override the corresponding
+saved values. See the startup output or Windows operation guide for the
 effective URL and troubleshooting details.
 
 No `.env` file is required. The default SQLite database is created at

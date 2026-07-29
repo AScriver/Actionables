@@ -15,7 +15,7 @@
     "db:migrate": "tsx scripts/ensure-database-file.ts && prisma migrate deploy",
     "db:seed": "tsx apps/api/src/seed.ts",
     "db:setup": "pnpm run contracts:build && prisma generate && tsx scripts/ensure-database-file.ts && prisma migrate deploy && tsx apps/api/src/seed.ts",
-    "dev": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsx scripts/ensure-database-file.ts && prisma migrate deploy && tsx apps/api/src/seed.ts && concurrently --kill-others-on-fail -n api,web -c cyan,blue \"tsx watch apps/api/src/server.ts\" \"vite\"",
+    "dev": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsx scripts/ensure-database-file.ts && prisma migrate deploy && tsx apps/api/src/seed.ts && node scripts/start-development.mjs",
     "dev:api": "tsx watch apps/api/src/server.ts",
     "dev:web": "vite",
     "format": "prettier --write \"{src,apps,packages,tests,scripts}/**/*.{ts,tsx,js,mjs,json}\" \"*.{ts,js,mjs,json}\"",
