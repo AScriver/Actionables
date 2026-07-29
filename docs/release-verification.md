@@ -6,7 +6,7 @@ This report is the T-007 release decision for the local Windows MVP. It is evide
 
 ## Release definition and decision
 
-The MVP is complete when a clean supported-runtime checkout installs from the lockfile; generates Prisma; loads native SQLite; migrates an empty database; imports and no-op reimports the reviewed seed; starts in development and production modes; shuts down and restarts without orphaned listeners; passes formatting, type, API/domain/integration, browser E2E, automated accessibility, build, migration, and living-plan gates; passes the recorded manual accessibility/responsive/keyboard/state review; proves portable export/restore equivalence; and retains the documented product boundary.
+The MVP is complete when a clean supported-runtime checkout installs from the lockfile; generates Prisma; loads native SQLite; migrates an empty database; imports and no-op reimports the generic sample seed; starts in development and production modes; shuts down and restarts without orphaned listeners; passes formatting, type, API/domain/integration, browser E2E, automated accessibility, build, migration, and living-plan gates; passes the recorded manual accessibility/responsive/keyboard/state review; proves portable export/restore equivalence; and retains the documented product boundary.
 
 Result: **pass with the limitations below**. No unresolved release blocker was found.
 
@@ -48,7 +48,7 @@ Under **each** Node runtime, the final `pnpm run verify:release` passed as one u
 - Axe/Playwright: 3 suites passed with zero reported violations and no disabled rules.
 - Production build: pass; main JavaScript 393.56 kB / 112.87 kB gzip, lazy Markdown 154.00 kB / 45.88 kB gzip, CSS 47.68 kB / 10.03 kB gzip.
 - Fresh database: all 7 migrations applied and `prisma migrate status` reported up to date.
-- Reviewed seed: first import created 32; second import reported 0 created, 0 updated, 32 unchanged.
+- Generic sample seed: first import created 32; second import reported 0 created, 0 updated, 32 unchanged.
 - Direct `better-sqlite3` load/query: pass.
 - Living-plan validation: pass.
 

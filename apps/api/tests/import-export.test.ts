@@ -7,10 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { DataImportService, PortableImportError } from "../src/data-import.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
-import { readReviewedSeed } from "../src/import-seed.js";
+import { readSampleSeed } from "../src/import-seed.js";
 import {
   exportPortableDocument,
-  reviewedSeedToPortable,
+  sampleSeedToPortable,
   semanticPortableSnapshot,
 } from "../src/portable-format.js";
 import type {
@@ -77,7 +77,7 @@ async function commitPreview(
 }
 
 async function seedDocument() {
-  return reviewedSeedToPortable(await readReviewedSeed());
+  return sampleSeedToPortable(await readSampleSeed());
 }
 
 function actionableClassification(
@@ -107,10 +107,30 @@ function portableInventory(document: PortableDocument) {
 }
 
 describe("portable import and export", () => {
-  it("routes the reviewed 32-item seed through one idempotent order-independent preview and commit pipeline", async () => {
+  it("routes the generic 32-item sample seed through one idempotent order-independent preview and commit pipeline", async () => {
     const prisma = await freshDatabase();
     const service = new DataImportService(prisma);
     const document = await seedDocument();
+
+    expect(document.projects).toEqual([
+      expect.objectContaining({
+        portableId: "project-sample-web-app",
+        name: "Sample Web App",
+      }),
+    ]);
+    expect(
+      document.actionables.every((actionable) =>
+        actionable.portableId.startsWith("sample-review-"),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(document)).not.toMatch(
+      /[a-z]:[\\/]|codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f-]{27,}/i,
+    );
+    expect(
+      document.actionables
+        .flatMap((actionable) => actionable.files)
+        .every((file) => !/^[a-z]:[\\/]/i.test(file.path)),
+    ).toBe(true);
 
     const first = await service.preview(document);
     expect(first.canCommit).toBe(true);
@@ -120,7 +140,7 @@ describe("portable import and export", () => {
       invalid: 0,
     });
     expect(first.totalsByRecordType.hierarchy.creates).toBe(4);
-    expect(first.totals.suggestions).toBeGreaterThan(0);
+    expect(first.totals.suggestions).toBe(8);
     await commitPreview(service, first);
 
     expect(await prisma.actionable.count()).toBe(32);
@@ -694,7 +714,7 @@ describe("portable import and export", () => {
     await source.actionable.update({
       where: { id: seedAction.id },
       data: {
-        tagsJson: ["WWW", "Codex review", "locally-edited"],
+        tagsJson: ["security", "backend", "locally-edited"],
         version: { increment: 1 },
       },
     });

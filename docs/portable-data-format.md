@@ -1,6 +1,7 @@
 # Actionables portable data format
 
-The Data area and reviewed 32-item setup seed use the same `actionables-portable` preview, selection-authorization, reconciliation, and transaction service.
+The Data area and generic 32-item sample seed use the same `actionables-portable` preview, selection-authorization, reconciliation, and transaction service.
+The bundled project names, source references, file paths, and findings are fictional examples intended for public demonstration.
 
 ## Compatibility
 

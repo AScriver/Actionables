@@ -12,7 +12,7 @@ import {
   type AssistantRunner,
 } from "../src/assistant-runner.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
-import { importReviewedSeed, readReviewedSeed } from "../src/import-seed.js";
+import { importSampleSeed, readSampleSeed } from "../src/import-seed.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -65,8 +65,8 @@ beforeAll(async () => {
   });
 
   prisma = createPrismaClient(databaseUrl);
-  const document = await readReviewedSeed();
-  const firstImport = await importReviewedSeed(prisma, document);
+  const document = await readSampleSeed();
+  const firstImport = await importSampleSeed(prisma, document);
   expect(firstImport).toEqual({
     created: 32,
     updated: 0,
@@ -74,7 +74,7 @@ beforeAll(async () => {
     total: 32,
   });
 
-  const secondImport = await importReviewedSeed(prisma, document);
+  const secondImport = await importSampleSeed(prisma, document);
   expect(secondImport).toEqual({
     created: 0,
     updated: 0,
@@ -173,12 +173,12 @@ describe("Actionables API", () => {
 
     expect(response.statusCode).toBe(200);
     expect(payload.item.title).toBe(
-      "Protect generated and downloaded files from anonymous static access",
+      "Require authentication for private file downloads",
     );
     expect(payload.item.files).toContainEqual({
-      path: "Projects/WWW/Startup.cs",
-      lines: "168–174",
-      symbol: "Configure",
+      path: "src/server/routes/downloads.ts",
+      lines: "41–78",
+      symbol: "registerDownloadRoutes",
     });
   });
 
@@ -1315,7 +1315,7 @@ describe("Actionables API", () => {
       scopes.json().projects[0].repositories[0].worktrees[0],
     ).toMatchObject({
       id: scope.worktreeId,
-      name: "CurrentSprint",
+      name: "main",
     });
   });
 

@@ -2978,8 +2978,8 @@ function LegacyApp() {
   });
   const actionables = listQuery.data?.items ?? [];
   const totalFindings = listQuery.data?.counts.total ?? 0;
-  const projectName = listQuery.data?.project.name ?? "MyStotz2023";
-  const worktreeName = listQuery.data?.worktree.name ?? "CurrentSprint";
+  const projectName = listQuery.data?.project.name ?? "Sample Web App";
+  const worktreeName = listQuery.data?.worktree.name ?? "main";
 
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     const match = window.location.pathname.match(/^\/actionables\/(\d+)\/?$/);

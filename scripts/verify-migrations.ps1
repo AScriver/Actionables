@@ -24,7 +24,7 @@ try {
     $firstSeed
     $secondSeed
     if ($LASTEXITCODE -ne 0 -or $secondSeed -notmatch '0 created, 0 updated, 32 unchanged') {
-        throw 'Reviewed seed reimport was not the expected 32-item no-op.'
+        throw 'Sample seed reimport was not the expected 32-item no-op.'
     }
 
     Push-Location (Join-Path $repositoryRoot 'apps/api')

@@ -118,7 +118,7 @@ test("a mobile deep link opens detail and returns to the usable list", async ({
 
   await expect(
     page.getByRole("heading", {
-      name: "Protect generated and downloaded files from anonymous static access",
+      name: "Require authentication for private file downloads",
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Findings", exact: true }).click();

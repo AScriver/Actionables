@@ -173,11 +173,15 @@ test("Done navigation separates completed work and preserves other filters", asy
 test("filters, search, sort, selection, refresh, and history are URL-backed", async ({
   page,
 }) => {
-  await page.goto("/?priority=urgent&sort=random&q=Startup.cs");
-  await expect(page).toHaveURL(/\/\?q=Startup\.cs$/);
-  await expect(page.getByLabel("Search actionables")).toHaveValue("Startup.cs");
+  await page.goto("/?priority=urgent&sort=random&q=downloads.ts");
+  await expect(page).toHaveURL(/\/\?q=downloads\.ts$/);
+  await expect(page.getByLabel("Search actionables")).toHaveValue(
+    "downloads.ts",
+  );
   await expect(
-    page.getByRole("row", { name: /Protect generated and downloaded/ }),
+    page.getByRole("row", {
+      name: /Require authentication for private file downloads/,
+    }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: /Filters/ }).click();
@@ -191,7 +195,7 @@ test("filters, search, sort, selection, refresh, and history are URL-backed", as
   await expect(page).toHaveURL(/priority=Critical/);
 
   const row = page.getByRole("row", {
-    name: /Protect generated and downloaded/,
+    name: /Require authentication for private file downloads/,
   });
   await row.press("Enter");
   await expect(page).toHaveURL(/\/actionables\/1\?/);
@@ -200,12 +204,14 @@ test("filters, search, sort, selection, refresh, and history are URL-backed", as
   await expect(page).toHaveURL(deepLink);
   await expect(
     page.getByRole("heading", {
-      name: "Protect generated and downloaded files from anonymous static access",
+      name: "Require authentication for private file downloads",
     }),
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/priority=Critical/);
-  await expect(page.getByLabel("Search actionables")).toHaveValue("Startup.cs");
+  await expect(page.getByLabel("Search actionables")).toHaveValue(
+    "downloads.ts",
+  );
   await page.goForward();
   await expect(page).toHaveURL(deepLink);
 });

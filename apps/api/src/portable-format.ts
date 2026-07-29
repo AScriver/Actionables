@@ -367,9 +367,7 @@ export async function exportPortableDocument(
   });
 }
 
-export function reviewedSeedToPortable(
-  document: SeedDocument,
-): PortableDocument {
+export function sampleSeedToPortable(document: SeedDocument): PortableDocument {
   const exportedAt = "2026-07-24T00:00:00.000Z";
   const byOrdinal = new Map(
     document.items.map((item) => [item.ordinal, item.externalKey]),
@@ -389,7 +387,7 @@ export function reviewedSeedToPortable(
         fromId: item.externalKey,
         toId: prerequisiteId,
         reason:
-          "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
+          "The sample seed suggests this prerequisite; it is not an established dependency.",
         provenance: document.source.threadUrl,
       });
     }
@@ -403,7 +401,7 @@ export function reviewedSeedToPortable(
         fromId: dependentId,
         toId: item.externalKey,
         reason:
-          "The reviewed Codex prose suggested this prerequisite; it is not an established dependency.",
+          "The sample seed suggests this prerequisite; it is not an established dependency.",
         provenance: document.source.threadUrl,
       });
     }
@@ -418,7 +416,7 @@ export function reviewedSeedToPortable(
       schema: "2026-07-25",
     },
     metadata: {
-      sourceName: "Reviewed WWW architecture findings (32 items)",
+      sourceName: "Sample Web App findings (32 items)",
       sourceKind: "reviewed-seed",
     },
     projects: [
@@ -494,7 +492,7 @@ export function reviewedSeedToPortable(
               childId: item.externalKey,
               createdAt: exportedAt,
               detachedAt: null,
-              provenance: "reviewed-seed",
+              provenance: "sample-seed",
             },
           ]
         : [];

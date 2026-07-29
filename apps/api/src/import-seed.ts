@@ -2,26 +2,26 @@ import { readFile } from "node:fs/promises";
 import { seedDocumentSchema, type SeedDocument } from "@actionables/contracts";
 import type { AppPrismaClient } from "./database.js";
 import { DataImportService } from "./data-import.js";
-import { reviewedSeedToPortable } from "./portable-format.js";
+import { sampleSeedToPortable } from "./portable-format.js";
 
-export const reviewedSeedUrl = new URL(
-  "../../../seed/codex-www-architecture-review.v1.json",
+export const sampleSeedUrl = new URL(
+  "../../../seed/sample-web-app.v1.json",
   import.meta.url,
 );
 
-export async function readReviewedSeed(
-  url = reviewedSeedUrl,
+export async function readSampleSeed(
+  url = sampleSeedUrl,
 ): Promise<SeedDocument> {
   const contents = await readFile(url, "utf8");
   return seedDocumentSchema.parse(JSON.parse(contents));
 }
 
-export async function importReviewedSeed(
+export async function importSampleSeed(
   prisma: AppPrismaClient,
   document: SeedDocument,
 ) {
   const service = new DataImportService(prisma);
-  const preview = await service.preview(reviewedSeedToPortable(document));
+  const preview = await service.preview(sampleSeedToPortable(document));
   const conflicts = Object.fromEntries(
     preview.items
       .filter((item) => item.classification === "conflict")

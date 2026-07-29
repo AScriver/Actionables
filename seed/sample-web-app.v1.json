@@ -1,0 +1,983 @@
+{
+  "version": 1,
+  "source": {
+    "provider": "CODEX",
+    "containerId": "sample-web-app-seed",
+    "threadUrl": "Public sample seed"
+  },
+  "project": {
+    "externalKey": "project-sample-web-app",
+    "name": "Sample Web App"
+  },
+  "repository": {
+    "externalKey": "repository-sample-web-app",
+    "name": "sample-web-app"
+  },
+  "worktree": {
+    "externalKey": "worktree-main",
+    "name": "main"
+  },
+  "statusPolicy": {
+    "initialStatus": "Inbox",
+    "note": "Example items start in Inbox. Suggested statuses demonstrate triage possibilities and are not established workflow facts."
+  },
+  "items": [
+    {
+      "ordinal": 1,
+      "externalKey": "sample-review-001",
+      "tags": ["security", "backend"],
+      "title": "Require authentication for private file downloads",
+      "priority": "Critical",
+      "effort": "M–L",
+      "updated": "15m ago",
+      "finding": "Private files are served through a route that does not enforce an authenticated session.",
+      "description": "Move private files behind an authenticated download handler, authorize access to the requested record, and remove direct public paths.",
+      "research": [
+        "The current route resolves a file before checking the request identity."
+      ],
+      "validation": [
+        "Verify anonymous requests receive 401.",
+        "Verify authorized users can download only files they are allowed to access."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/downloads.ts",
+          "lines": "41–78",
+          "symbol": "registerDownloadRoutes"
+        }
+      ],
+      "blocks": [19, 20],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 2,
+      "externalKey": "sample-review-002",
+      "tags": ["security", "uploads"],
+      "title": "Normalize uploaded filenames before writing to storage",
+      "priority": "Critical",
+      "effort": "M",
+      "updated": "35m ago",
+      "finding": "Client filenames are combined with a storage directory without normalization.",
+      "description": "Discard client path segments, allow only expected extensions, generate unique server-side names, and verify the resolved path remains inside the upload directory.",
+      "research": [
+        "Traversal and same-name collisions are possible when the original filename is trusted."
+      ],
+      "validation": [
+        "Test traversal, absolute paths, separators, and invalid extensions.",
+        "Test simultaneous uploads that share an original filename."
+      ],
+      "files": [
+        {
+          "path": "src/server/storage/uploads.ts",
+          "lines": "22–66",
+          "symbol": "saveUpload"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 3,
+      "externalKey": "sample-review-003",
+      "tags": ["security", "authorization"],
+      "title": "Enforce administrator access on management endpoints",
+      "priority": "Critical",
+      "effort": "M–L",
+      "updated": "1h ago",
+      "finding": "The management page is hidden from ordinary users, but its API endpoints do not repeat the authorization check.",
+      "description": "Apply the administrator policy to every management read and mutation at the server boundary.",
+      "research": [
+        "Client-side navigation restrictions do not protect directly callable endpoints."
+      ],
+      "validation": [
+        "Test administrator, ordinary authenticated, and anonymous requests.",
+        "Verify denied mutations do not change persisted data."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/admin.ts",
+          "lines": "18–94",
+          "symbol": "registerAdminRoutes"
+        }
+      ],
+      "parentId": 7,
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 4,
+      "externalKey": "sample-review-004",
+      "tags": ["security", "accounts"],
+      "title": "Protect account invitation actions from cross-site requests",
+      "priority": "Critical",
+      "effort": "S",
+      "updated": "2h ago",
+      "finding": "The invitation endpoint changes state without a cross-site request protection check.",
+      "description": "Require POST, validate the request token, and keep recipient and role authorization on the server.",
+      "research": [
+        "A signed-in browser could submit the action from an unrelated origin."
+      ],
+      "validation": [
+        "Reject GET and missing or invalid request tokens.",
+        "Verify valid administrator invitations still succeed."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/invitations.ts",
+          "lines": "54–88",
+          "symbol": "sendInvitation"
+        }
+      ],
+      "parentId": 7,
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 5,
+      "externalKey": "sample-review-005",
+      "tags": ["security", "documents"],
+      "title": "Restrict document deletion to owners and administrators",
+      "priority": "Critical",
+      "effort": "M",
+      "updated": "2h ago",
+      "finding": "The delete route accepts a document identifier without checking ownership.",
+      "description": "Resolve the document server-side and require either ownership or the administrator role before deleting its stored object and database record.",
+      "research": [
+        "The exact sharing rules should be confirmed before implementation."
+      ],
+      "validation": [
+        "Attempt deletion as an unrelated user.",
+        "Verify owners and administrators can delete and an audit event is recorded."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/documents.ts",
+          "lines": "103–137",
+          "symbol": "deleteDocument"
+        }
+      ],
+      "parentId": 7,
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 6,
+      "externalKey": "sample-review-006",
+      "tags": ["security", "http"],
+      "title": "Use explicit methods and request tokens for admin mutations",
+      "priority": "High",
+      "effort": "M",
+      "updated": "3h ago",
+      "finding": "Several administrative mutations accept multiple HTTP methods and omit request-token validation.",
+      "description": "Limit state changes to POST or DELETE as appropriate, validate request tokens, and update existing clients without changing response contracts.",
+      "research": [
+        "The routes are already grouped in one administrative router."
+      ],
+      "validation": [
+        "Reject unsupported methods and missing tokens.",
+        "Run existing client tests for each migrated mutation."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/admin.ts",
+          "lines": "96–178",
+          "symbol": "registerAdminMutations"
+        }
+      ],
+      "parentId": 7,
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example security finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 7,
+      "externalKey": "sample-review-007",
+      "tags": ["security", "audit"],
+      "title": "Audit state-changing endpoints for authorization gaps",
+      "priority": "High",
+      "effort": "L",
+      "updated": "4h ago",
+      "finding": "Authorization and request-token handling vary across mutation endpoints.",
+      "description": "Inventory state-changing routes, document their intended access policy, and create focused fixes only where server-side enforcement is missing.",
+      "research": ["Begin with account, document, and administrative routes."],
+      "validation": [
+        "Record every mutation and its effective authorization policy.",
+        "Add negative tests for each confirmed gap."
+      ],
+      "files": [
+        { "path": "src/server/routes", "symbol": "route registrations" }
+      ],
+      "childIds": [3, 4, 5, 6],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example parent finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 8,
+      "externalKey": "sample-review-008",
+      "tags": ["security", "logging"],
+      "title": "Redact sensitive fields from production logs",
+      "priority": "High",
+      "effort": "S",
+      "updated": "5h ago",
+      "finding": "Debug logging can include access tokens and complete request payloads.",
+      "description": "Disable sensitive debug fields outside development and redact credentials, tokens, and personal fields in structured logs.",
+      "research": [
+        "The production logging configuration inherits verbose request enrichment."
+      ],
+      "validation": [
+        "Inspect production-mode logs for known sensitive field names.",
+        "Verify correlation and error context remain available."
+      ],
+      "files": [
+        {
+          "path": "src/server/logging/config.ts",
+          "lines": "12–49",
+          "symbol": "createLogger"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example blocked finding.",
+        "suggestedStatus": "Blocked"
+      }
+    },
+    {
+      "ordinal": 9,
+      "externalKey": "sample-review-009",
+      "tags": ["security", "delivery"],
+      "title": "Scan release artifacts for embedded secrets",
+      "priority": "High",
+      "effort": "M",
+      "updated": "6h ago",
+      "finding": "The release bundle is published without an automated secret scan.",
+      "description": "Add a release-stage scan for credentials, private keys, environment files, and source maps containing configuration values.",
+      "research": [
+        "The artifact layout must be confirmed with the delivery pipeline owner."
+      ],
+      "validation": [
+        "Seed a harmless test marker and verify the scan blocks publication.",
+        "Confirm normal release artifacts pass."
+      ],
+      "files": [
+        {
+          "path": "pipelines/release.yml",
+          "lines": "44–83",
+          "symbol": "publish-artifact"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example blocked finding.",
+        "suggestedStatus": "Blocked"
+      }
+    },
+    {
+      "ordinal": 10,
+      "externalKey": "sample-review-010",
+      "tags": ["frontend", "correctness"],
+      "title": "Compare job status rows by stable identifier",
+      "priority": "High",
+      "effort": "S",
+      "updated": "7h ago",
+      "finding": "The polling view compares rows by array position, so reordered results can update the wrong row.",
+      "description": "Key status updates by the job identifier and handle added or removed jobs without relying on response order.",
+      "research": ["The API already returns a stable job ID."],
+      "validation": [
+        "Test reordered, inserted, and removed jobs.",
+        "Verify only changed rows re-render."
+      ],
+      "files": [
+        {
+          "path": "src/client/jobs/useJobPolling.ts",
+          "lines": "31–72",
+          "symbol": "mergeJobStatuses"
+        }
+      ],
+      "blocks": [20],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example correctness finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 11,
+      "externalKey": "sample-review-011",
+      "tags": ["performance", "api"],
+      "title": "Return a lightweight payload for job status polling",
+      "priority": "High",
+      "effort": "M",
+      "updated": "8h ago",
+      "finding": "The polling endpoint returns complete job records even though the view needs only identity and status fields.",
+      "description": "Add a compact status response and preserve the full-detail endpoint for explicit navigation.",
+      "research": ["Payload size grows with result history and attachments."],
+      "validation": [
+        "Compare response size and database query shape before and after.",
+        "Verify polling behavior remains unchanged."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/jobs.ts",
+          "lines": "88–126",
+          "symbol": "getJobStatuses"
+        }
+      ],
+      "blocks": [20],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example performance finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 12,
+      "externalKey": "sample-review-012",
+      "tags": ["api", "reliability"],
+      "title": "Define a consistent health-check failure response",
+      "priority": "High",
+      "effort": "S",
+      "updated": "9h ago",
+      "finding": "A dependency failure sometimes returns success with an error-shaped body and sometimes returns a server error.",
+      "description": "Choose one documented status and response contract for dependency failures and apply it consistently.",
+      "research": [
+        "The deployment monitor's expected failure contract needs confirmation."
+      ],
+      "validation": [
+        "Test healthy, degraded, timeout, and dependency-error cases.",
+        "Verify the deployment monitor recognizes the selected contract."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/health.ts",
+          "lines": "14–61",
+          "symbol": "getHealth"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example blocked finding.",
+        "suggestedStatus": "Blocked"
+      }
+    },
+    {
+      "ordinal": 13,
+      "externalKey": "sample-review-013",
+      "tags": ["errors", "data"],
+      "title": "Preserve original errors at the repository boundary",
+      "priority": "High",
+      "effort": "S–M",
+      "updated": "10h ago",
+      "finding": "The repository converts database failures to empty results and discards the original cause.",
+      "description": "Return successful empty results only for valid empty queries and preserve database failures with contextual error information.",
+      "research": [
+        "Current callers cannot distinguish no data from a failed query."
+      ],
+      "validation": [
+        "Test empty results separately from database failures.",
+        "Verify logs include the original cause and request correlation ID."
+      ],
+      "files": [
+        {
+          "path": "src/server/repositories/jobRepository.ts",
+          "lines": "67–104",
+          "symbol": "listJobs"
+        }
+      ],
+      "blocks": [14, 31],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example reliability finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 14,
+      "externalKey": "sample-review-014",
+      "tags": ["errors", "api"],
+      "title": "Centralize API error responses and correlation IDs",
+      "priority": "High",
+      "effort": "M",
+      "updated": "11h ago",
+      "finding": "Routes translate errors independently, producing inconsistent response bodies and missing correlation IDs.",
+      "description": "Add one error boundary that maps known errors to stable problem responses and logs unexpected failures once.",
+      "research": [
+        "Repository failures must preserve their causes before central handling can add useful context."
+      ],
+      "validation": [
+        "Verify validation, authorization, not-found, and unexpected errors use the documented shape.",
+        "Confirm every unexpected response includes a correlation ID."
+      ],
+      "files": [
+        {
+          "path": "src/server/middleware/errorHandler.ts",
+          "lines": "1–96",
+          "symbol": "errorHandler"
+        }
+      ],
+      "blockedBy": [13],
+      "blocks": [31],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example reliability finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 15,
+      "externalKey": "sample-review-015",
+      "tags": ["operations", "health"],
+      "title": "Add separate liveness and readiness endpoints",
+      "priority": "High",
+      "effort": "M",
+      "updated": "12h ago",
+      "finding": "The service has no application-level signal that separates process health from dependency readiness.",
+      "description": "Expose a cheap liveness check and a bounded readiness check for required dependencies.",
+      "research": ["The hosting platform can probe distinct endpoints."],
+      "validation": [
+        "Verify liveness remains available during a dependency outage.",
+        "Verify readiness reports unavailable when a required dependency fails."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/health.ts",
+          "lines": "1–80",
+          "symbol": "registerHealthRoutes"
+        }
+      ],
+      "blocks": [16],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example operations finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 16,
+      "externalKey": "sample-review-016",
+      "tags": ["operations", "delivery"],
+      "title": "Run a smoke check after deployment",
+      "priority": "High",
+      "effort": "M",
+      "updated": "13h ago",
+      "finding": "The delivery pipeline finishes after process startup without checking application readiness.",
+      "description": "Poll the readiness endpoint with a bounded timeout and fail the deployment when the new version does not become ready.",
+      "research": [
+        "The readiness endpoint should land first so the smoke check has a stable contract."
+      ],
+      "validation": [
+        "Verify a healthy deployment passes.",
+        "Verify startup failure, timeout, and dependency failure stop the pipeline."
+      ],
+      "files": [
+        {
+          "path": "pipelines/deploy.yml",
+          "lines": "52–91",
+          "symbol": "post-deploy-smoke"
+        }
+      ],
+      "blockedBy": [15],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example delivery finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 17,
+      "externalKey": "sample-review-017",
+      "tags": ["testing", "ci"],
+      "title": "Run server tests in continuous integration",
+      "priority": "High",
+      "effort": "S",
+      "updated": "14h ago",
+      "finding": "The primary validation job builds the server but does not execute its test suite.",
+      "description": "Add the existing server test command to the required validation job and publish test results on failure.",
+      "research": [
+        "The test command is already deterministic on supported runtimes."
+      ],
+      "validation": [
+        "Introduce a temporary failing test and confirm the job blocks.",
+        "Verify test results are visible in the CI summary."
+      ],
+      "files": [
+        {
+          "path": "pipelines/validate.yml",
+          "lines": "20–55",
+          "symbol": "server-validation"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example testing finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 18,
+      "externalKey": "sample-review-018",
+      "tags": ["testing", "ci"],
+      "title": "Run client tests in continuous integration",
+      "priority": "High",
+      "effort": "S",
+      "updated": "15h ago",
+      "finding": "Client unit tests are available locally but are omitted from the required validation job.",
+      "description": "Install from the lockfile and run client tests in the same supported runtime used for the production build.",
+      "research": [
+        "The current build step already restores client dependencies."
+      ],
+      "validation": [
+        "Confirm a client test failure blocks validation.",
+        "Verify the lockfile-only install succeeds in CI."
+      ],
+      "files": [
+        {
+          "path": "pipelines/validate.yml",
+          "lines": "56–82",
+          "symbol": "client-validation"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example testing finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 19,
+      "externalKey": "sample-review-019",
+      "tags": ["testing", "security"],
+      "title": "Add integration tests for private download authorization",
+      "priority": "High",
+      "effort": "M",
+      "updated": "16h ago",
+      "finding": "Middleware order and direct download authorization lack integration coverage.",
+      "description": "Exercise anonymous, unrelated-user, and authorized-owner requests through the complete server pipeline.",
+      "research": [
+        "The download fix defines the contract that these tests should lock down."
+      ],
+      "validation": [
+        "Verify anonymous requests receive 401 and unrelated users receive 403.",
+        "Verify the owner receives the expected file and content type."
+      ],
+      "files": [
+        { "path": "tests/integration/downloads.test.ts", "lines": "1–120" }
+      ],
+      "blockedBy": [1],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example testing finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 20,
+      "externalKey": "sample-review-020",
+      "tags": ["testing", "browser"],
+      "title": "Add browser coverage for downloads and job polling",
+      "priority": "Medium",
+      "effort": "M–L",
+      "updated": "17h ago",
+      "finding": "Two critical user flows have no browser-level regression coverage.",
+      "description": "Cover authorized downloads and stable job polling after their server and client contracts are corrected.",
+      "research": [
+        "The browser scenarios depend on the download and polling fixes."
+      ],
+      "validation": [
+        "Run the scenarios against a fresh isolated database.",
+        "Verify reordered polling responses and denied downloads are observable in the UI."
+      ],
+      "files": [
+        { "path": "tests/e2e/downloads-and-jobs.spec.ts", "lines": "1–160" }
+      ],
+      "blockedBy": [1, 10, 11],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example testing finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 21,
+      "externalKey": "sample-review-021",
+      "tags": ["performance", "data"],
+      "title": "Profile high-volume database queries before optimizing",
+      "priority": "Medium",
+      "effort": "L",
+      "updated": "18h ago",
+      "finding": "Several frequently used queries may be slow, but production impact has not been measured.",
+      "description": "Capture duration, row counts, query plans, and concurrent request behavior, then optimize only confirmed hotspots.",
+      "research": [
+        "Representative production-like data volume is still needed."
+      ],
+      "validation": [
+        "Record before-and-after query plans for confirmed hotspots.",
+        "Run concurrency tests with cancellation enabled."
+      ],
+      "files": [
+        {
+          "path": "src/server/repositories",
+          "symbol": "high-volume query methods"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example investigation finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 22,
+      "externalKey": "sample-review-022",
+      "tags": ["reliability", "http"],
+      "title": "Use the shared HTTP client for outbound requests",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "19h ago",
+      "finding": "One integration creates ad hoc clients and implements timeout and error handling differently from the rest of the service.",
+      "description": "Route the integration through the existing shared client with bounded timeout, cancellation, and consistent error mapping.",
+      "research": [
+        "A shared client is already configured for the other outbound integration."
+      ],
+      "validation": [
+        "Test success, non-success status, timeout, cancellation, and malformed responses.",
+        "Verify connection reuse under repeated requests."
+      ],
+      "files": [
+        {
+          "path": "src/server/integrations/catalogClient.ts",
+          "lines": "18–93",
+          "symbol": "fetchCatalog"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example reliability finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 23,
+      "externalKey": "sample-review-023",
+      "tags": ["performance", "reports"],
+      "title": "Move expensive report rendering out of the request path",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "20h ago",
+      "finding": "Large reports are rendered synchronously before the request can respond.",
+      "description": "Queue report generation, return a job identifier, and let the existing status flow expose completion.",
+      "research": [
+        "The job infrastructure already supports bounded background work."
+      ],
+      "validation": [
+        "Verify requests return promptly for large reports.",
+        "Verify failed jobs expose an actionable error without losing diagnostics."
+      ],
+      "files": [
+        {
+          "path": "src/server/reports/renderReport.ts",
+          "lines": "27–84",
+          "symbol": "renderReport"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example performance finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 24,
+      "externalKey": "sample-review-024",
+      "tags": ["configuration", "security"],
+      "title": "Disable development middleware in production",
+      "priority": "Medium",
+      "effort": "S",
+      "updated": "21h ago",
+      "finding": "Development diagnostics and source serving are enabled without checking the runtime environment.",
+      "description": "Enable development-only middleware explicitly and keep the production pipeline limited to built assets and stable error responses.",
+      "research": ["The environment flag is available during server startup."],
+      "validation": [
+        "Verify development retains diagnostics and live reload.",
+        "Verify production does not expose source files or diagnostic pages."
+      ],
+      "files": [
+        { "path": "src/server/app.ts", "lines": "24–57", "symbol": "createApp" }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example configuration finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 25,
+      "externalKey": "sample-review-025",
+      "tags": ["authentication", "operations"],
+      "title": "Verify session continuity across service restarts",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "22h ago",
+      "finding": "Session behavior after a process restart has not been verified with the deployed storage configuration.",
+      "description": "Test active sessions before and after a restart before introducing additional session infrastructure.",
+      "research": [
+        "The production topology and acceptable reauthentication behavior need owner confirmation."
+      ],
+      "validation": [
+        "Test navigation and authenticated API requests across a restart.",
+        "Review session and token-acquisition logs for unexpected failures."
+      ],
+      "files": [
+        {
+          "path": "src/server/auth/session.ts",
+          "lines": "1–86",
+          "symbol": "configureSession"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example blocked finding.",
+        "suggestedStatus": "Blocked"
+      }
+    },
+    {
+      "ordinal": 26,
+      "externalKey": "sample-review-026",
+      "tags": ["architecture", "data"],
+      "title": "Route controller data access through the existing repository",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "23h ago",
+      "finding": "One route queries the database client directly and bypasses established repository behavior.",
+      "description": "Add only the missing methods to the existing repository and preserve the route's response contract.",
+      "research": [
+        "The repository already owns logging, filtering, and transaction conventions for this entity."
+      ],
+      "validation": [
+        "Verify the route no longer imports the database client.",
+        "Preserve response status, shape, ordering, and error behavior."
+      ],
+      "files": [
+        {
+          "path": "src/server/routes/reviews.ts",
+          "lines": "61–112",
+          "symbol": "registerReviewRoutes"
+        }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example architecture finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 27,
+      "externalKey": "sample-review-027",
+      "tags": ["architecture", "storage"],
+      "title": "Consolidate duplicate object-storage helpers",
+      "priority": "Medium",
+      "effort": "M–L",
+      "updated": "1d ago",
+      "finding": "Upload and download helpers are duplicated across two server modules and differ in validation and retry behavior.",
+      "description": "Choose the established storage module as owner and migrate one representative caller before removing duplication.",
+      "research": [
+        "Caller-specific authorization must remain at the route boundary."
+      ],
+      "validation": [
+        "Compare path validation, retries, and error mapping before migration.",
+        "Migrate one caller and verify behavior parity."
+      ],
+      "files": [
+        { "path": "src/server/storage", "symbol": "object-storage helpers" }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example architecture finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 28,
+      "externalKey": "sample-review-028",
+      "tags": ["tooling", "runtime"],
+      "title": "Pin supported runtime versions",
+      "priority": "Medium",
+      "effort": "S",
+      "updated": "1d ago",
+      "finding": "Local and CI environments can resolve different major runtime versions.",
+      "description": "Declare the supported runtime and package-manager versions and align CI with those declarations.",
+      "research": [
+        "The current lockfile was generated with the documented supported versions."
+      ],
+      "validation": [
+        "Verify local version resolution matches CI.",
+        "Install from the lockfile and run the build on the pinned runtime."
+      ],
+      "files": [
+        { "path": "package.json", "lines": "1–18", "symbol": "engines" }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example tooling finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 29,
+      "externalKey": "sample-review-029",
+      "tags": ["documentation", "delivery"],
+      "title": "Remove stale deployment instructions",
+      "priority": "Medium",
+      "effort": "S",
+      "updated": "1d ago",
+      "finding": "Several setup documents describe a retired deployment path and obsolete commands.",
+      "description": "Delete obsolete instructions and keep one supported deployment guide linked from the project readme.",
+      "research": [
+        "The active delivery pipeline defines the supported command sequence."
+      ],
+      "validation": [
+        "Search documentation for retired commands and paths.",
+        "Follow the supported guide from a clean checkout."
+      ],
+      "files": [{ "path": "docs/deployment.md", "lines": "1–140" }],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example documentation finding.",
+        "suggestedStatus": "Ready"
+      }
+    },
+    {
+      "ordinal": 30,
+      "externalKey": "sample-review-030",
+      "tags": ["documentation", "testing"],
+      "title": "Document the authoritative verification commands",
+      "priority": "Medium",
+      "effort": "S",
+      "updated": "2d ago",
+      "finding": "Contributors must infer the required validation sequence from CI configuration.",
+      "description": "Document formatting, type, unit, integration, browser, build, and migration checks in one maintained location.",
+      "research": [
+        "The commands exist but ownership and update expectations should be stated."
+      ],
+      "validation": [
+        "Run every documented command from a clean checkout.",
+        "Verify the readme links to the maintained verification guide."
+      ],
+      "files": [{ "path": "docs/verification.md", "lines": "1–120" }],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example documentation finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 31,
+      "externalKey": "sample-review-031",
+      "tags": ["observability", "reliability"],
+      "title": "Add dependency telemetry for critical integrations",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "2d ago",
+      "finding": "Database, storage, and outbound HTTP calls do not emit consistent duration and outcome metrics.",
+      "description": "Add structured dependency spans with bounded names, duration, outcome, and correlation while excluding credentials and payloads.",
+      "research": [
+        "Error propagation and centralized handling should be consistent before telemetry is standardized."
+      ],
+      "validation": [
+        "Verify success, timeout, cancellation, and error outcomes are distinguishable.",
+        "Inspect telemetry for sensitive or high-cardinality fields."
+      ],
+      "files": [
+        {
+          "path": "src/server/observability/dependencies.ts",
+          "lines": "1–104",
+          "symbol": "recordDependency"
+        }
+      ],
+      "blockedBy": [13, 14],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example observability finding.",
+        "suggestedStatus": "Researching"
+      }
+    },
+    {
+      "ordinal": 32,
+      "externalKey": "sample-review-032",
+      "tags": ["security", "dependencies"],
+      "title": "Audit third-party dependencies and update policy",
+      "priority": "Medium",
+      "effort": "M",
+      "updated": "2d ago",
+      "finding": "The project lacks a current inventory and policy for vulnerable or unsupported dependencies.",
+      "description": "Inventory direct dependencies, classify security and support risk, and prepare focused upgrades without bundling unrelated framework changes.",
+      "research": [
+        "Runtime-loaded assets and native packages require separate ownership review."
+      ],
+      "validation": [
+        "Run package audits and inspect resolved dependency graphs.",
+        "Document accepted exceptions with owners and review dates."
+      ],
+      "files": [
+        { "path": "package.json", "lines": "20–70", "symbol": "dependencies" }
+      ],
+      "status": "Inbox",
+      "statusProvenance": {
+        "kind": "neutral-import",
+        "note": "Imported as an example dependency finding.",
+        "suggestedStatus": "Researching"
+      }
+    }
+  ]
+}
