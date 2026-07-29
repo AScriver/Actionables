@@ -17,7 +17,7 @@ import {
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
   releaseAgentTaskClaimResponseSchema,
-  releaseExpiredAgentClaimRequestSchema,
+  forceReleaseAgentClaimRequestSchema,
   renewAgentTaskClaimRequestSchema,
   renewAgentTaskClaimResponseSchema,
   sourceFileSchema,
@@ -38,7 +38,7 @@ import {
   type RecordClaimedAgentTaskValidationRequest,
   type ReleaseAgentTaskClaimRequest,
   type ReleaseAgentTaskClaimResponse,
-  type ReleaseExpiredAgentClaimRequest,
+  type ForceReleaseAgentClaimRequest,
   type RenewAgentTaskClaimRequest,
   type RenewAgentTaskClaimResponse,
   type SourceFile,
@@ -144,14 +144,14 @@ export class AgentTaskClaimError extends Error {
   }
 }
 
-export class ExpiredAgentClaimReleaseConflictError extends Error {
+export class AgentClaimReleaseConflictError extends Error {
   constructor(
-    public readonly code: "CLAIM_ACTIVE" | "CLAIM_NOT_FOUND",
+    public readonly code: "CLAIM_CHANGED" | "CLAIM_NOT_FOUND",
     public readonly current: ActionableDetail,
   ) {
     super(
-      code === "CLAIM_ACTIVE"
-        ? "This agent claim is still active."
+      code === "CLAIM_CHANGED"
+        ? "This agent claim changed after it was displayed."
         : "This agent claim no longer exists.",
     );
   }
@@ -1848,13 +1848,13 @@ export async function releaseAgentTaskClaim(
   });
 }
 
-export async function releaseExpiredAgentTaskClaim(
+export async function forceReleaseAgentTaskClaim(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
-  input: ReleaseExpiredAgentClaimRequest,
+  input: ForceReleaseAgentClaimRequest,
   now = new Date(),
 ): Promise<ActionableDetail> {
-  const request = parseInput(releaseExpiredAgentClaimRequestSchema, input);
+  const request = parseInput(forceReleaseAgentClaimRequestSchema, input);
   return withClaimLock(String(sourceOrdinal), () =>
     prisma.$transaction(async (tx) => {
       const row = await findTask(tx, sourceOrdinal);
@@ -1869,23 +1869,47 @@ export async function releaseExpiredAgentTaskClaim(
         throw new VersionConflictError(current);
       }
       if (!row.agentTaskClaim) {
-        throw new ExpiredAgentClaimReleaseConflictError(
-          "CLAIM_NOT_FOUND",
-          current,
-        );
+        throw new AgentClaimReleaseConflictError("CLAIM_NOT_FOUND", current);
       }
-      if (row.agentTaskClaim.leaseExpiresAt > now) {
-        throw new ExpiredAgentClaimReleaseConflictError(
-          "CLAIM_ACTIVE",
-          current,
-        );
+      if (
+        row.agentTaskClaim.agentId !== request.agentId ||
+        row.agentTaskClaim.claimedAt.toISOString() !== request.claimedAt
+      ) {
+        throw new AgentClaimReleaseConflictError("CLAIM_CHANGED", current);
       }
-      await recordObservedExpiry(tx, row, now);
+      const deleted = await tx.agentTaskClaim.deleteMany({
+        where: {
+          actionableId: row.id,
+          agentId: request.agentId,
+          claimedAt: new Date(request.claimedAt),
+        },
+      });
+      if (deleted.count !== 1) {
+        const latest = await getActionable(tx, sourceOrdinal);
+        if (!latest) {
+          throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+        }
+        throw new AgentClaimReleaseConflictError("CLAIM_CHANGED", latest);
+      }
       await tx.actionable.update({
         where: { id: row.id },
         data: {
           version: { increment: 1 },
-          updatedLabel: "agent claim expired",
+          updatedLabel: "agent claim force released",
+        },
+      });
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-released",
+          summary: `Force-released by user from agent ${row.agentTaskClaim.agentId}`,
+          metadataJson: {
+            agentId: row.agentTaskClaim.agentId,
+            claimedAt: row.agentTaskClaim.claimedAt.toISOString(),
+            origin: "user",
+            operation: "force-release",
+          },
+          occurredAt: now,
         },
       });
       const released = await getActionable(tx, sourceOrdinal);

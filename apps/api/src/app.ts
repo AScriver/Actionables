@@ -34,7 +34,7 @@ import {
   importPreviewResponseSchema,
   prepareImportCommitRequestSchema,
   prepareImportCommitResponseSchema,
-  releaseExpiredAgentClaimRequestSchema,
+  forceReleaseAgentClaimRequestSchema,
   relationshipAuditResponseSchema,
   type ActionableQuery,
 } from "@actionables/contracts";
@@ -76,8 +76,8 @@ import { exportPortableDocument } from "./portable-format.js";
 import { registerMcpRoutes } from "./mcp.js";
 import {
   AgentTaskClaimError,
-  ExpiredAgentClaimReleaseConflictError,
-  releaseExpiredAgentTaskClaim,
+  AgentClaimReleaseConflictError,
+  forceReleaseAgentTaskClaim,
 } from "./agent-tasks.js";
 import {
   AssistantContextTooLargeError,
@@ -301,11 +301,11 @@ export function buildApp({
         },
       );
     }
-    if (error instanceof ExpiredAgentClaimReleaseConflictError) {
+    if (error instanceof AgentClaimReleaseConflictError) {
       return problem(request, reply, 409, error.code, error.message, {
         detail:
-          error.code === "CLAIM_ACTIVE"
-            ? "The lease was renewed or has not expired. Reload before trying again."
+          error.code === "CLAIM_CHANGED"
+            ? "Reload and confirm the current claim before trying again."
             : "The claim was already released or expired elsewhere.",
         current: error.current,
       });
@@ -774,11 +774,11 @@ export function buildApp({
   );
 
   app.post<{ Params: { id: string } }>(
-    "/api/actionables/:id/agent-claim/release-expired",
+    "/api/actionables/:id/agent-claim/force-release",
     async (request, reply) => {
       const id = parseRouteId(request, reply, request.params.id);
       if (id === null) return;
-      const parsed = releaseExpiredAgentClaimRequestSchema.safeParse(
+      const parsed = forceReleaseAgentClaimRequestSchema.safeParse(
         request.body,
       );
       if (!parsed.success) {
@@ -787,11 +787,11 @@ export function buildApp({
           reply,
           422,
           "VALIDATION_ERROR",
-          "Check the expired claim release.",
+          "Check the agent claim release.",
           { errors: fieldErrors(parsed.error) },
         );
       }
-      const item = await releaseExpiredAgentTaskClaim(prisma, id, parsed.data);
+      const item = await forceReleaseAgentTaskClaim(prisma, id, parsed.data);
       return actionableDetailResponseSchema.parse({ item });
     },
   );

@@ -199,7 +199,7 @@ test("Codex claimants link to their thread while other claimants remain plain te
   await expect(panel.getByRole("link")).toHaveCount(0);
 });
 
-test("claim panel covers unclaimed, active, expired, release, conflict, error, desktop, and mobile states", async ({
+test("claim panel covers unclaimed, active, expired, force release, conflict, error, desktop, and mobile states", async ({
   page,
 }, testInfo) => {
   const original = await detailFixture(page);
@@ -223,9 +223,22 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
   await expect(
     panel.getByRole("button", { name: "Copy Codex start-task prompt" }),
   ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: /Release expired claim/ }),
-  ).toHaveCount(0);
+  const activeReleaseButton = page.getByRole("button", {
+    name: "Force release claim held by agent:browser-active",
+  });
+  await expect(activeReleaseButton).toBeVisible();
+  await activeReleaseButton.click();
+  const activeReleaseDialog = page.getByRole("dialog", {
+    name: "Force release agent claim?",
+  });
+  await expect(activeReleaseDialog).toContainText(
+    `Actionable #${ACTIONABLE_ID}`,
+  );
+  await expect(activeReleaseDialog).toContainText(original.title);
+  await expect(activeReleaseDialog).toContainText("agent:browser-active");
+  await expect(activeReleaseDialog).toContainText("Researching");
+  await activeReleaseDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(activeReleaseButton).toBeFocused();
 
   fixture.setItem({ ...original, status: "Ready" });
   fixture.setState("expired");
@@ -244,8 +257,13 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
   });
 
   await page.route(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
     async (route) => {
+      expect(route.request().postDataJSON()).toMatchObject({
+        version: original.version,
+        agentId: "agent:browser-expired",
+        claimedAt: expect.any(String),
+      });
       fixture.setState("unclaimed");
       await route.fulfill({
         status: 200,
@@ -256,7 +274,7 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
   );
   await releaseButton.click();
   const releaseDialog = page.getByRole("dialog", {
-    name: "Release stale claim?",
+    name: "Release stale agent claim?",
   });
   await expect(releaseDialog).toBeVisible();
   await expect(
@@ -275,11 +293,12 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     .click();
   await expect(releaseDialog).toHaveCount(0);
   await expect(panel).toContainText("Unclaimed");
+  await expect(page.getByText("Agent claim force-released.")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Agent claim", exact: true }),
   ).toBeFocused();
   await page.unroute(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
   );
 
   fixture.setState("expired");
@@ -290,7 +309,7 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     })
     .click();
   await page.route(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
     async (route) => {
       fixture.setState("active");
       await route.fulfill({
@@ -308,21 +327,26 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     },
   );
   const conflictDialog = page.getByRole("dialog", {
-    name: "Release stale claim?",
+    name: "Release stale agent claim?",
   });
   await conflictDialog
     .getByRole("button", { name: "Release stale claim" })
     .click();
-  await expect(conflictDialog.getByRole("alert")).toContainText(
+  const refreshedConflictDialog = page.getByRole("dialog", {
+    name: "Force release agent claim?",
+  });
+  await expect(refreshedConflictDialog.getByRole("alert")).toContainText(
     "newer saved version",
   );
   await expect(
-    conflictDialog.getByRole("button", { name: "Release stale claim" }),
+    refreshedConflictDialog.getByRole("button", {
+      name: "Force release claim",
+    }),
   ).toBeDisabled();
-  await conflictDialog.getByRole("button", { name: "Cancel" }).click();
+  await refreshedConflictDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(panel).toContainText("Claimed");
   await page.unroute(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
   );
 
   fixture.setState("expired");
@@ -333,7 +357,7 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     })
     .click();
   await page.route(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
     async (route) => {
       await route.fulfill({
         status: 500,
@@ -349,7 +373,7 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     },
   );
   const errorDialog = page.getByRole("dialog", {
-    name: "Release stale claim?",
+    name: "Release stale agent claim?",
   });
   await errorDialog
     .getByRole("button", { name: "Release stale claim" })
@@ -358,7 +382,7 @@ test("claim panel covers unclaimed, active, expired, release, conflict, error, d
     "Fixture claim release failure",
   );
   await page.unroute(
-    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/release-expired`,
+    `**/api/actionables/${ACTIONABLE_ID}/agent-claim/force-release`,
   );
   await errorDialog.getByRole("button", { name: "Cancel" }).click();
 
@@ -429,7 +453,7 @@ test("@a11y expired claim panel and confirmation dialog pass axe", async ({
     })
     .click();
   await expect(
-    page.getByRole("dialog", { name: "Release stale claim?" }),
+    page.getByRole("dialog", { name: "Release stale agent claim?" }),
   ).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { claimAgentTask } from "../src/agent-tasks.js";
+import { claimAgentTask, renewAgentTaskClaim } from "../src/agent-tasks.js";
 import type {
   AssistantRequest,
   AssistantRunner,
@@ -793,7 +793,7 @@ describe("Actionables API", () => {
     }
   });
 
-  it("projects non-secret claim state and only releases an expired lease at the current version", async () => {
+  it("force releases only the confirmed current claim and invalidates its token", async () => {
     const created = await app!.inject({
       method: "POST",
       url: "/api/actionables",
@@ -819,68 +819,58 @@ describe("Actionables API", () => {
     });
     expect(active.body).not.toContain(claimed.claim.claimToken);
 
-    const activeRelease = await app!.inject({
+    const malformedRelease = await app!.inject({
       method: "POST",
-      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
+      url: `/api/actionables/${item.id}/agent-claim/force-release`,
       payload: { version: active.json().item.version },
     });
-    expect(activeRelease.statusCode).toBe(409);
-    expect(activeRelease.json()).toMatchObject({
-      code: "CLAIM_ACTIVE",
-      current: {
-        agentClaim: { state: "active", isReleasable: false },
-      },
-    });
-
-    await prisma!.agentTaskClaim.update({
-      where: { actionableId: item.recordId },
-      data: { leaseExpiresAt: new Date(Date.now() - 60_000) },
-    });
-    const expired = await app!.inject({
-      method: "GET",
-      url: `/api/actionables/${item.id}`,
-    });
-    expect(expired.json().item.agentClaim).toMatchObject({
-      agentId: "agent:claim-controls",
-      state: "expired",
-      isReleasable: true,
-    });
-
-    await prisma!.actionable.update({
-      where: { id: item.recordId },
-      data: { version: { increment: 1 } },
-    });
-    const staleRelease = await app!.inject({
-      method: "POST",
-      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
-      payload: { version: expired.json().item.version },
-    });
-    expect(staleRelease.statusCode).toBe(409);
-    expect(staleRelease.json()).toMatchObject({
-      code: "VERSION_CONFLICT",
-      current: {
-        version: expired.json().item.version + 1,
-        agentClaim: { state: "expired", isReleasable: true },
+    expect(malformedRelease.statusCode).toBe(422);
+    expect(malformedRelease.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      errors: {
+        agentId: expect.any(Array),
+        claimedAt: expect.any(Array),
       },
     });
 
     const released = await app!.inject({
       method: "POST",
-      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
-      payload: { version: staleRelease.json().current.version },
+      url: `/api/actionables/${item.id}/agent-claim/force-release`,
+      payload: {
+        version: active.json().item.version,
+        agentId: active.json().item.agentClaim.agentId,
+        claimedAt: active.json().item.agentClaim.claimedAt,
+      },
     });
     expect(released.statusCode).toBe(200);
-    expect(released.json().item.agentClaim).toBeNull();
-    expect(
-      released
-        .json()
-        .item.activity.map((event: { type: string }) => event.type),
-    ).toContain("agent-claim-expired");
+    expect(released.json().item).toMatchObject({
+      status: item.status,
+      version: active.json().item.version + 1,
+      agentClaim: null,
+    });
+    expect(released.json().item.activity.at(-1)).toMatchObject({
+      type: "agent-released",
+      context: {
+        agentId: "agent:claim-controls",
+        origin: "user",
+        operation: "force-release",
+      },
+    });
+    await expect(
+      renewAgentTaskClaim(prisma!, item.id, {
+        claimToken: claimed.claim.claimToken,
+        leaseMinutes: 30,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CLAIM_TOKEN" });
 
     const repeatedRelease = await app!.inject({
       method: "POST",
-      url: `/api/actionables/${item.id}/agent-claim/release-expired`,
-      payload: { version: released.json().item.version },
+      url: `/api/actionables/${item.id}/agent-claim/force-release`,
+      payload: {
+        version: released.json().item.version,
+        agentId: active.json().item.agentClaim.agentId,
+        claimedAt: active.json().item.agentClaim.claimedAt,
+      },
     });
     expect(repeatedRelease.statusCode).toBe(409);
     expect(repeatedRelease.json()).toMatchObject({
@@ -888,10 +878,64 @@ describe("Actionables API", () => {
       current: { agentClaim: null },
     });
 
+    const replacement = await claimAgentTask(
+      prisma!,
+      item.id,
+      {
+        agentId: "agent:replacement",
+        workItemId: item.id,
+        version: released.json().item.version,
+        leaseMinutes: 30,
+      },
+      new Date("2026-07-29T01:00:00.000Z"),
+    );
+    const changedRelease = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/force-release`,
+      payload: {
+        version: replacement.task.version,
+        agentId: active.json().item.agentClaim.agentId,
+        claimedAt: active.json().item.agentClaim.claimedAt,
+      },
+    });
+    expect(changedRelease.statusCode).toBe(409);
+    expect(changedRelease.json()).toMatchObject({
+      code: "CLAIM_CHANGED",
+      current: {
+        version: replacement.task.version,
+        agentClaim: {
+          agentId: "agent:replacement",
+          claimedAt: replacement.claim.claimedAt,
+        },
+      },
+    });
+
+    const staleRelease = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/agent-claim/force-release`,
+      payload: {
+        version: released.json().item.version,
+        agentId: replacement.claim.agentId,
+        claimedAt: replacement.claim.claimedAt,
+      },
+    });
+    expect(staleRelease.statusCode).toBe(409);
+    expect(staleRelease.json()).toMatchObject({
+      code: "VERSION_CONFLICT",
+      current: {
+        version: replacement.task.version,
+        agentClaim: { agentId: "agent:replacement" },
+      },
+    });
+
     const missingRelease = await app!.inject({
       method: "POST",
-      url: "/api/actionables/999999/agent-claim/release-expired",
-      payload: { version: 1 },
+      url: "/api/actionables/999999/agent-claim/force-release",
+      payload: {
+        version: 1,
+        agentId: "agent:missing",
+        claimedAt: "2026-07-29T01:00:00.000Z",
+      },
     });
     expect(missingRelease.statusCode).toBe(404);
     expect(missingRelease.json()).toMatchObject({ code: "NOT_FOUND" });

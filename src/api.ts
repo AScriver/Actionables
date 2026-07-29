@@ -40,7 +40,7 @@ import {
   type PortableDocument,
   type PrepareImportCommitRequest,
   type PrepareImportCommitResponse,
-  type ReleaseExpiredAgentClaimRequest,
+  type ForceReleaseAgentClaimRequest,
   type StatusTransitionRequest,
   type SetParentRequest,
   type UpdateActionableRequest,
@@ -102,12 +102,12 @@ export async function fetchActionable(id: number): Promise<ActionableDetail> {
   return response.item;
 }
 
-export async function releaseExpiredAgentClaim(
+export async function forceReleaseAgentClaim(
   id: number,
-  input: ReleaseExpiredAgentClaimRequest,
+  input: ForceReleaseAgentClaimRequest,
 ): Promise<ActionableDetail> {
   const response = actionableDetailResponseSchema.parse(
-    await requestJson(`/api/actionables/${id}/agent-claim/release-expired`, {
+    await requestJson(`/api/actionables/${id}/agent-claim/force-release`, {
       method: "POST",
       body: JSON.stringify(input),
     }),

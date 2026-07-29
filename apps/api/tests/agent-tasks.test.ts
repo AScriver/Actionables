@@ -8,6 +8,7 @@ import {
   AgentTaskClaimError,
   claimAgentTask,
   dismissAgentTask,
+  forceReleaseAgentTaskClaim,
   handoffClaimedAgentTask,
   listAgentTasks,
   recoverAgentTaskClaim,
@@ -863,6 +864,91 @@ describe("agent task claims", () => {
         })
       ).map((event) => event.type),
     ).toEqual(["agent-claimed", "agent-released"]);
+  });
+
+  it("force releases the confirmed claim without changing lifecycle state", async () => {
+    const task = await createTask({ status: "Researching" });
+    const claimed = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: "agent:force-release",
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+        leaseMinutes: 30,
+      },
+      new Date("2026-07-29T01:00:00.000Z"),
+    );
+
+    const released = await forceReleaseAgentTaskClaim(
+      prisma,
+      task.sourceOrdinal,
+      {
+        version: claimed.task.version,
+        agentId: claimed.claim.agentId,
+        claimedAt: claimed.claim.claimedAt,
+      },
+      new Date("2026-07-29T01:05:00.000Z"),
+    );
+    expect(released).toMatchObject({
+      status: "Researching",
+      version: claimed.task.version + 1,
+      agentClaim: null,
+    });
+    expect(released.activity.at(-1)).toMatchObject({
+      type: "agent-released",
+      summary: "Force-released by user from agent agent:force-release",
+      context: {
+        agentId: "agent:force-release",
+        claimedAt: claimed.claim.claimedAt,
+        origin: "user",
+        operation: "force-release",
+      },
+    });
+    await expect(
+      renewAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        {
+          claimToken: claimed.claim.claimToken,
+          leaseMinutes: 30,
+        },
+        new Date("2026-07-29T01:06:00.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_CLAIM_TOKEN" });
+
+    const replacement = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: "agent:replacement",
+        workItemId: task.sourceOrdinal,
+        version: released.version,
+        leaseMinutes: 30,
+      },
+      new Date("2026-07-29T01:07:00.000Z"),
+    );
+    await expect(
+      forceReleaseAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        {
+          version: replacement.task.version,
+          agentId: claimed.claim.agentId,
+          claimedAt: claimed.claim.claimedAt,
+        },
+        new Date("2026-07-29T01:08:00.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "CLAIM_CHANGED" });
+    const storedReplacement = await prisma.agentTaskClaim.findUniqueOrThrow({
+      where: { actionableId: task.id },
+    });
+    expect(storedReplacement.agentId).toBe("agent:replacement");
+    expect(storedReplacement.claimTokenHash).toBe(
+      createHash("sha256")
+        .update(replacement.claim.claimToken, "utf8")
+        .digest("hex"),
+    );
   });
 
   it("atomically saves handoff state and releases only after every write succeeds", async () => {

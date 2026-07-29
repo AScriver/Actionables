@@ -93,7 +93,7 @@ import {
   preparePortableImport,
   previewPortableImport,
   recordValidation,
-  releaseExpiredAgentClaim,
+  forceReleaseAgentClaim,
   removeDependency,
   restoreDependency,
   setParent,
@@ -1567,11 +1567,11 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
 function AgentClaimPanel({
   selected,
   onNotice,
-  onReleaseExpired,
+  onReleaseClaim,
 }: {
   selected: ActionableDetail;
   onNotice: (notice: string) => void;
-  onReleaseExpired: () => void;
+  onReleaseClaim: () => void;
 }) {
   const claim = selected.agentClaim;
   const claimantUrl =
@@ -1679,14 +1679,20 @@ function AgentClaimPanel({
       {unavailableGuidance && (
         <p className="agent-start-guidance">{unavailableGuidance}</p>
       )}
-      {claim?.isReleasable && (
+      {claim && (
         <button
           type="button"
           className="toolbar-button agent-claim-release"
-          onClick={onReleaseExpired}
-          aria-label={`Release expired claim held by ${claim.agentId}`}
+          onClick={onReleaseClaim}
+          aria-label={
+            claim.state === "expired"
+              ? `Release expired claim held by ${claim.agentId}`
+              : `Force release claim held by ${claim.agentId}`
+          }
         >
-          Release stale claim
+          {claim.state === "expired"
+            ? "Release stale claim"
+            : "Force release claim"}
         </button>
       )}
     </section>
@@ -1928,7 +1934,7 @@ function Inspector({
   onNavigate,
   onNotice,
   onArchive,
-  onReleaseExpiredClaim,
+  onReleaseClaim,
 }: {
   selected: ActionableDetail;
   actionables: ActionableSummary[];
@@ -1942,7 +1948,7 @@ function Inspector({
   onNavigate: (id: number) => void;
   onNotice: (notice: string) => void;
   onArchive: () => void;
-  onReleaseExpiredClaim: () => void;
+  onReleaseClaim: () => void;
 }) {
   const helperSettingsQuery = useQuery({
     queryKey: ["helper-agent-settings"],
@@ -2033,7 +2039,7 @@ function Inspector({
       <AgentClaimPanel
         selected={selected}
         onNotice={onNotice}
-        onReleaseExpired={onReleaseExpiredClaim}
+        onReleaseClaim={onReleaseClaim}
       />
 
       <nav
@@ -3561,7 +3567,7 @@ function LegacyApp() {
             onArchive={() =>
               setNotice("Archive is available in the daily-use shell.")
             }
-            onReleaseExpiredClaim={() =>
+            onReleaseClaim={() =>
               setNotice("Claim release is available in the daily-use shell.")
             }
           />
@@ -5140,16 +5146,18 @@ function ArchiveDialog({
   );
 }
 
-function ExpiredClaimDialog({
+function ClaimReleaseDialog({
   target,
   saving,
   error,
+  conflict,
   onClose,
   onConfirm,
 }: {
   target: ActionableDetail;
   saving: boolean;
   error: string;
+  conflict: boolean;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -5163,8 +5171,8 @@ function ExpiredClaimDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="expired-claim-dialog-title"
-        aria-describedby="expired-claim-dialog-description"
+        aria-labelledby="claim-release-dialog-title"
+        aria-describedby="claim-release-dialog-description"
         onKeyDown={(event) => {
           if (event.key === "Escape" && !saving) {
             onClose();
@@ -5189,10 +5197,14 @@ function ExpiredClaimDialog({
         <div className="archive-dialog-header">
           <AlertTriangle aria-hidden="true" />
           <div>
-            <h2 id="expired-claim-dialog-title">Release stale claim?</h2>
-            <p id="expired-claim-dialog-description">
+            <h2 id="claim-release-dialog-title">
+              {claim?.state === "active"
+                ? "Force release agent claim?"
+                : "Release stale agent claim?"}
+            </h2>
+            <p id="claim-release-dialog-description">
               {claim
-                ? `Confirm that the expired claim held by ${claim.agentId} should be cleared from “${target.title}”.`
+                ? `Confirm release of the claim on Actionable #${target.id} — “${target.title}” — held by ${claim.agentId} since ${new Date(claim.claimedAt).toLocaleString()}. The task will remain ${target.status}, and this agent’s current claim token will stop working.`
                 : "This claim has already been cleared."}
             </p>
           </div>
@@ -5216,9 +5228,13 @@ function ExpiredClaimDialog({
             type="button"
             className="primary-action"
             onClick={onConfirm}
-            disabled={saving || !claim?.isReleasable}
+            disabled={saving || !claim || conflict}
           >
-            {saving ? "Releasing…" : "Release stale claim"}
+            {saving
+              ? "Releasing…"
+              : claim?.state === "active"
+                ? "Force release claim"
+                : "Release stale claim"}
           </button>
         </footer>
       </section>
@@ -5297,6 +5313,7 @@ export default function App() {
     useState<ActionableDetail | null>(null);
   const [claimReleaseSaving, setClaimReleaseSaving] = useState(false);
   const [claimReleaseError, setClaimReleaseError] = useState("");
+  const [claimReleaseConflict, setClaimReleaseConflict] = useState(false);
   const archiveReturnFocus = useRef<HTMLElement | null>(null);
   const claimReleaseReturnFocus = useRef<HTMLElement | null>(null);
   const repositoryReturnFocus = useRef<HTMLElement | null>(null);
@@ -5749,6 +5766,7 @@ export default function App() {
         ? document.activeElement
         : null;
     setClaimReleaseError("");
+    setClaimReleaseConflict(false);
     setClaimReleaseTarget(item);
   };
 
@@ -5770,11 +5788,20 @@ export default function App() {
     if (!claimReleaseTarget) return;
     setClaimReleaseSaving(true);
     setClaimReleaseError("");
+    setClaimReleaseConflict(false);
     try {
-      const saved = await releaseExpiredAgentClaim(claimReleaseTarget.id, {
+      const claim = claimReleaseTarget.agentClaim;
+      if (!claim) {
+        setClaimReleaseConflict(true);
+        setClaimReleaseError("This claim has already been cleared.");
+        return;
+      }
+      const saved = await forceReleaseAgentClaim(claimReleaseTarget.id, {
         version: claimReleaseTarget.version,
+        agentId: claim.agentId,
+        claimedAt: claim.claimedAt,
       });
-      handleMutated(saved, "Expired agent claim released.");
+      handleMutated(saved, "Agent claim force-released.");
       closeClaimRelease(true);
     } catch (error) {
       if (error instanceof ApiProblem && error.problem.current) {
@@ -5783,6 +5810,7 @@ export default function App() {
           error.problem.current,
         );
         setClaimReleaseTarget(error.problem.current);
+        setClaimReleaseConflict(true);
         void invalidateDailyUse();
       }
       setClaimReleaseError(errorMessage(error));
@@ -6971,7 +6999,7 @@ export default function App() {
                   selected.archiveState.directlyArchived,
                 )
               }
-              onReleaseExpiredClaim={() => openClaimRelease(selected)}
+              onReleaseClaim={() => openClaimRelease(selected)}
             />
           ) : (
             <div
@@ -7057,11 +7085,12 @@ export default function App() {
         />
       )}
       {claimReleaseTarget && (
-        <ExpiredClaimDialog
+        <ClaimReleaseDialog
           target={claimReleaseTarget}
           saving={claimReleaseSaving}
           error={claimReleaseError}
-          onClose={closeClaimRelease}
+          conflict={claimReleaseConflict}
+          onClose={() => closeClaimRelease()}
           onConfirm={() => void confirmClaimRelease()}
         />
       )}

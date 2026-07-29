@@ -628,9 +628,11 @@ export const releaseAgentTaskClaimResponseSchema = z
   })
   .strict();
 
-export const releaseExpiredAgentClaimRequestSchema = z
+export const forceReleaseAgentClaimRequestSchema = z
   .object({
     version: z.number().int().positive(),
+    agentId: agentIdSchema,
+    claimedAt: z.string().datetime(),
   })
   .strict();
 
@@ -1737,8 +1739,8 @@ export type ReleaseAgentTaskClaimRequest = z.infer<
 export type ReleaseAgentTaskClaimResponse = z.infer<
   typeof releaseAgentTaskClaimResponseSchema
 >;
-export type ReleaseExpiredAgentClaimRequest = z.infer<
-  typeof releaseExpiredAgentClaimRequestSchema
+export type ForceReleaseAgentClaimRequest = z.infer<
+  typeof forceReleaseAgentClaimRequestSchema
 >;
 export type ArchiveMutationRequest = z.infer<
   typeof archiveMutationRequestSchema
