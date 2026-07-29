@@ -734,6 +734,11 @@ export function buildApp({
           assistantRunner,
           item,
           settings.relationshipAuditorPrompt,
+          {
+            model: settings.relationshipAuditorModel ?? undefined,
+            reasoningEffort:
+              settings.relationshipAuditorReasoningEffort ?? undefined,
+          },
         ),
       );
     },

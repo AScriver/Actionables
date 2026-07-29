@@ -8,6 +8,7 @@ import { z } from "zod/v4";
 import {
   AssistantContextTooLargeError,
   AssistantRunnerError,
+  type AssistantRequest,
   type AssistantRunner,
 } from "./assistant-runner.js";
 import { defaultRelationshipAuditorPrompt } from "./assistant-prompts.js";
@@ -87,6 +88,7 @@ export async function auditWorkItemRelationships(
   runner: AssistantRunner,
   root: ActionableDetail,
   instructions = defaultRelationshipAuditorPrompt,
+  runtime: Pick<AssistantRequest, "model" | "reasoningEffort"> = {},
 ): Promise<RelationshipAuditResponse> {
   if (root.parentId) {
     throw new DomainValidationError(
@@ -144,6 +146,7 @@ export async function auditWorkItemRelationships(
   }
 
   const result = await runner.run({
+    ...runtime,
     outputSchema: z.toJSONSchema(relationshipAuditProposalSchema, {
       io: "output",
     }),

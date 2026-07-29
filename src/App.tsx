@@ -4563,6 +4563,12 @@ function SettingsPanel() {
   const [noteGroomerPrompt, setNoteGroomerPrompt] = useState("");
   const [relationshipAuditorEnabled, setRelationshipAuditorEnabled] =
     useState(true);
+  const [relationshipAuditorModel, setRelationshipAuditorModel] =
+    useState<NoteGroomerModel | null>(null);
+  const [
+    relationshipAuditorReasoningEffort,
+    setRelationshipAuditorReasoningEffort,
+  ] = useState<AssistantReasoningEffort | null>(null);
   const [relationshipAuditorPrompt, setRelationshipAuditorPrompt] =
     useState("");
   const [saving, setSaving] = useState(false);
@@ -4575,6 +4581,10 @@ function SettingsPanel() {
     setNoteGroomerReasoningEffort(settings.noteGroomerReasoningEffort);
     setNoteGroomerPrompt(settings.noteGroomerPrompt);
     setRelationshipAuditorEnabled(settings.relationshipAuditorEnabled);
+    setRelationshipAuditorModel(settings.relationshipAuditorModel);
+    setRelationshipAuditorReasoningEffort(
+      settings.relationshipAuditorReasoningEffort,
+    );
     setRelationshipAuditorPrompt(settings.relationshipAuditorPrompt);
   };
 
@@ -4591,6 +4601,10 @@ function SettingsPanel() {
       noteGroomerPrompt !== settingsQuery.data.noteGroomerPrompt ||
       relationshipAuditorEnabled !==
         settingsQuery.data.relationshipAuditorEnabled ||
+      relationshipAuditorModel !==
+        settingsQuery.data.relationshipAuditorModel ||
+      relationshipAuditorReasoningEffort !==
+        settingsQuery.data.relationshipAuditorReasoningEffort ||
       relationshipAuditorPrompt !==
         settingsQuery.data.relationshipAuditorPrompt),
   );
@@ -4609,6 +4623,8 @@ function SettingsPanel() {
         noteGroomerReasoningEffort,
         noteGroomerPrompt,
         relationshipAuditorEnabled,
+        relationshipAuditorModel,
+        relationshipAuditorReasoningEffort,
         relationshipAuditorPrompt,
       });
       queryClient.setQueryData(["helper-agent-settings"], saved);
@@ -4818,6 +4834,72 @@ function SettingsPanel() {
               Show the auditor in Actionable relationships and allow direct API
               requests.
             </small>
+          </div>
+          <div className="helper-runtime-grid">
+            <div className="form-field">
+              <label htmlFor="relationship-auditor-model">Model</label>
+              <select
+                id="relationship-auditor-model"
+                value={relationshipAuditorModel ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setRelationshipAuditorModel(
+                    noteGroomerModels.find(
+                      (model) => model === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use environment/default model</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+              </select>
+              <small>
+                Effective model:{" "}
+                <code>
+                  {relationshipAuditorModel ??
+                    settingsQuery.data.relationshipAuditorEffectiveModel}
+                </code>
+                {relationshipAuditorModel
+                  ? " (saved override)"
+                  : " (environment/default)"}
+              </small>
+            </div>
+            <div className="form-field">
+              <label htmlFor="relationship-auditor-reasoning-effort">
+                Reasoning level
+              </label>
+              <select
+                id="relationship-auditor-reasoning-effort"
+                value={relationshipAuditorReasoningEffort ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setRelationshipAuditorReasoningEffort(
+                    assistantReasoningEfforts.find(
+                      (effort) => effort === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use selected model default</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+              </select>
+              <small>
+                Effective reasoning:{" "}
+                <code>
+                  {relationshipAuditorReasoningEffort ??
+                    "selected model default"}
+                </code>
+                {relationshipAuditorReasoningEffort ? " (saved override)" : ""}
+              </small>
+            </div>
           </div>
           <label className="form-field" htmlFor="relationship-auditor-prompt">
             <span>Prompt instructions</span>

@@ -728,6 +728,10 @@ export const helperAgentSettingsSchema = z
     noteGroomerEffectiveModel: z.string().trim().min(1).max(200),
     noteGroomerPrompt: helperAgentPromptSchema,
     relationshipAuditorEnabled: z.boolean(),
+    relationshipAuditorModel: noteGroomerModelSchema.nullable(),
+    relationshipAuditorReasoningEffort:
+      assistantReasoningEffortSchema.nullable(),
+    relationshipAuditorEffectiveModel: z.string().trim().min(1).max(200),
     relationshipAuditorPrompt: helperAgentPromptSchema,
     version: z.number().int().positive(),
     updatedAt: z.iso.datetime(),
@@ -735,7 +739,11 @@ export const helperAgentSettingsSchema = z
   .strict();
 
 export const updateHelperAgentSettingsRequestSchema = helperAgentSettingsSchema
-  .omit({ noteGroomerEffectiveModel: true, updatedAt: true })
+  .omit({
+    noteGroomerEffectiveModel: true,
+    relationshipAuditorEffectiveModel: true,
+    updatedAt: true,
+  })
   .strict();
 
 export const agentIntegrationComponentIdSchema = z.enum([

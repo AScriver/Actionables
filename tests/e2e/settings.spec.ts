@@ -225,20 +225,45 @@ test("edits and persists helper agent settings on the settings page", async ({
     page.getByRole("button", { name: "Settings", exact: true }),
   ).toHaveClass(/is-selected/);
 
-  const notePrompt = page.getByLabel("Prompt instructions").first();
-  const relationshipPrompt = page.getByLabel("Prompt instructions").last();
-  const noteModel = page.getByLabel("Model", { exact: true });
-  const noteReasoning = page.getByLabel("Reasoning level", { exact: true });
+  const noteSettings = page.getByRole("region", {
+    name: "Groom notes with local Codex",
+  });
+  const relationshipSettings = page.getByRole("region", {
+    name: "Relationship auditor",
+  });
+  const notePrompt = noteSettings.getByLabel("Prompt instructions");
+  const relationshipPrompt = relationshipSettings.getByLabel(
+    "Prompt instructions",
+  );
+  const noteModel = noteSettings.getByLabel("Model", { exact: true });
+  const noteReasoning = noteSettings.getByLabel("Reasoning level", {
+    exact: true,
+  });
+  const relationshipModel = relationshipSettings.getByLabel("Model", {
+    exact: true,
+  });
+  const relationshipReasoning = relationshipSettings.getByLabel(
+    "Reasoning level",
+    { exact: true },
+  );
   await expect(notePrompt).not.toHaveValue("");
   await expect(relationshipPrompt).not.toHaveValue("");
   await expect(noteModel).toHaveValue("");
   await expect(noteReasoning).toHaveValue("");
-  await expect(page.getByText(/Effective model:/)).toContainText(
+  await expect(relationshipModel).toHaveValue("");
+  await expect(relationshipReasoning).toHaveValue("");
+  await expect(noteSettings.getByText(/Effective model:/)).toContainText(
     "gpt-5.6-terra",
   );
-  await expect(page.getByText(/Effective reasoning:/)).toContainText(
+  await expect(
+    relationshipSettings.getByText(/Effective model:/),
+  ).toContainText("gpt-5.6-terra");
+  await expect(noteSettings.getByText(/Effective reasoning:/)).toContainText(
     "selected model default",
   );
+  await expect(
+    relationshipSettings.getByText(/Effective reasoning:/),
+  ).toContainText("selected model default");
   const originalNotePrompt = await notePrompt.inputValue();
   const originalRelationshipPrompt = await relationshipPrompt.inputValue();
   const savedNotePrompt = `${originalNotePrompt}\n\nKeep section headings concise.`;
@@ -247,6 +272,8 @@ test("edits and persists helper agent settings on the settings page", async ({
   try {
     await noteModel.selectOption("gpt-5.6-sol");
     await noteReasoning.selectOption("high");
+    await relationshipModel.selectOption("gpt-5.6-luna");
+    await relationshipReasoning.selectOption("xhigh");
     await notePrompt.fill(savedNotePrompt);
     await relationshipPrompt.fill(savedRelationshipPrompt);
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -257,10 +284,20 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.reload();
     await expect(noteModel).toHaveValue("gpt-5.6-sol");
     await expect(noteReasoning).toHaveValue("high");
-    await expect(page.getByText(/Effective model:/)).toContainText(
+    await expect(relationshipModel).toHaveValue("gpt-5.6-luna");
+    await expect(relationshipReasoning).toHaveValue("xhigh");
+    await expect(noteSettings.getByText(/Effective model:/)).toContainText(
       "gpt-5.6-sol",
     );
-    await expect(page.getByText(/Effective reasoning:/)).toContainText("high");
+    await expect(
+      relationshipSettings.getByText(/Effective model:/),
+    ).toContainText("gpt-5.6-luna");
+    await expect(noteSettings.getByText(/Effective reasoning:/)).toContainText(
+      "high",
+    );
+    await expect(
+      relationshipSettings.getByText(/Effective reasoning:/),
+    ).toContainText("xhigh");
     await expect(notePrompt).toHaveValue(savedNotePrompt);
     await expect(relationshipPrompt).toHaveValue(savedRelationshipPrompt);
 
@@ -277,14 +314,10 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.goto("/settings");
     await noteModel.selectOption("");
     await noteReasoning.selectOption("");
-    await page
-      .getByLabel("Prompt instructions")
-      .first()
-      .fill(originalNotePrompt);
-    await page
-      .getByLabel("Prompt instructions")
-      .last()
-      .fill(originalRelationshipPrompt);
+    await relationshipModel.selectOption("");
+    await relationshipReasoning.selectOption("");
+    await notePrompt.fill(originalNotePrompt);
+    await relationshipPrompt.fill(originalRelationshipPrompt);
     await page.getByRole("button", { name: "Save settings" }).click();
     await expect(
       page.locator(".settings-form footer").getByRole("status"),
@@ -292,9 +325,14 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.reload();
     await expect(noteModel).toHaveValue("");
     await expect(noteReasoning).toHaveValue("");
-    await expect(page.getByText(/Effective model:/)).toContainText(
+    await expect(relationshipModel).toHaveValue("");
+    await expect(relationshipReasoning).toHaveValue("");
+    await expect(noteSettings.getByText(/Effective model:/)).toContainText(
       "gpt-5.6-terra",
     );
+    await expect(
+      relationshipSettings.getByText(/Effective model:/),
+    ).toContainText("gpt-5.6-terra");
   }
 });
 

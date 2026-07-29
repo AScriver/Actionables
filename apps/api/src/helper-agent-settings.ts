@@ -18,6 +18,8 @@ function toContract(
     noteGroomerReasoningEffort: string | null;
     noteGroomerPrompt: string;
     relationshipAuditorEnabled: boolean;
+    relationshipAuditorModel: string | null;
+    relationshipAuditorReasoningEffort: string | null;
     relationshipAuditorPrompt: string;
     version: number;
     updatedAt: Date;
@@ -31,6 +33,11 @@ function toContract(
     noteGroomerEffectiveModel: settings.noteGroomerModel ?? defaultModel,
     noteGroomerPrompt: settings.noteGroomerPrompt,
     relationshipAuditorEnabled: settings.relationshipAuditorEnabled,
+    relationshipAuditorModel: settings.relationshipAuditorModel,
+    relationshipAuditorReasoningEffort:
+      settings.relationshipAuditorReasoningEffort,
+    relationshipAuditorEffectiveModel:
+      settings.relationshipAuditorModel ?? defaultModel,
     relationshipAuditorPrompt: settings.relationshipAuditorPrompt,
     version: settings.version,
     updatedAt: settings.updatedAt.toISOString(),
@@ -73,6 +80,9 @@ export async function updateHelperAgentSettings(
       noteGroomerReasoningEffort: input.noteGroomerReasoningEffort,
       noteGroomerPrompt: input.noteGroomerPrompt,
       relationshipAuditorEnabled: input.relationshipAuditorEnabled,
+      relationshipAuditorModel: input.relationshipAuditorModel,
+      relationshipAuditorReasoningEffort:
+        input.relationshipAuditorReasoningEffort,
       relationshipAuditorPrompt: input.relationshipAuditorPrompt,
       version: { increment: 1 },
     },
