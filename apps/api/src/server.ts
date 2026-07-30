@@ -1,5 +1,6 @@
 import { resolveRuntimeConfig } from "@actionables/contracts";
 import { buildApp } from "./app.js";
+import { reconcileCodexMcpConfigAtStartup } from "./agent-integration.js";
 import { createCodexAssistantRunner } from "./assistant-runner.js";
 import { createPrismaClient } from "./database.js";
 
@@ -35,6 +36,16 @@ try {
     host: runtimeConfig.apiHost,
     port: runtimeConfig.apiPort,
   });
+  const codexReconciliation = await reconcileCodexMcpConfigAtStartup({
+    environment: process.env,
+    homeDirectory: process.env.ACTIONABLES_AGENT_HOME,
+    runtimeConfig,
+  });
+  if (codexReconciliation.outcome === "updated") {
+    app.log.info(codexReconciliation.message);
+  } else if (codexReconciliation.outcome === "manual-review") {
+    app.log.warn(codexReconciliation.message);
+  }
   app.log.info(
     {
       address,

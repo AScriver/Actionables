@@ -303,6 +303,7 @@ export async function selectRuntimePorts({
       }
       return {
         source: candidate.source,
+        previousPair: persistedPorts,
         pair: {
           webPort: candidate.webPort,
           apiPort: candidate.apiPort,

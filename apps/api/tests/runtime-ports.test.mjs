@@ -157,6 +157,7 @@ describe("runtime port selection and persistence", () => {
     });
     expect(initial).toMatchObject({
       source: "default",
+      previousPair: null,
       pair: { webPort, apiPort },
     });
     await initial.reservations.releaseAll();
@@ -168,6 +169,7 @@ describe("runtime port selection and persistence", () => {
     });
     expect(restarted).toMatchObject({
       source: "saved",
+      previousPair: { webPort, apiPort },
       pair: { webPort, apiPort },
     });
     expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual({
@@ -219,6 +221,10 @@ describe("runtime port selection and persistence", () => {
 
     expect(selection).toMatchObject({
       source: "default",
+      previousPair: {
+        webPort: savedWebPort,
+        apiPort: savedApiPort,
+      },
       pair: { webPort, apiPort },
     });
     expect(occupyingListener.listening).toBe(true);

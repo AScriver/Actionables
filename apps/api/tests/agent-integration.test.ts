@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AgentIntegrationInstaller,
   reconcileCodexMcpConfig,
+  reconcileCodexMcpConfigAtStartup,
 } from "../src/agent-integration.js";
 
 const temporaryHomes: string[] = [];
@@ -257,6 +258,138 @@ describe("Actionables agent integration", () => {
         '"http://127.0.0.1:4274/mcp"',
       ),
     );
+  });
+
+  it("updates a managed endpoint at startup and is byte-idempotent once current", async () => {
+    const home = await temporaryHome();
+    const configPath = resolve(home, ".codex", "config.toml");
+    const previous = [
+      "# Keep every unrelated byte",
+      "[mcp_servers.actionables]",
+      'url = "http://127.0.0.1:4174/mcp" # managed URL',
+      'bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"',
+      "enabled = true",
+      "required = false",
+      "",
+      "[features]",
+      "web_search = true",
+      "",
+    ].join("\r\n");
+    await mkdir(resolve(home, ".codex"), { recursive: true });
+    await writeFile(configPath, previous, "utf8");
+    const options = {
+      environment: { ACTIONABLES_PREVIOUS_API_PORT: "4174" },
+      homeDirectory: home,
+      runtimeConfig: {
+        apiHost: "127.0.0.1" as const,
+        apiPort: 4274,
+        apiOrigin: "http://127.0.0.1:4274",
+        mcpEndpoint: "http://127.0.0.1:4274/mcp",
+      },
+    };
+
+    const updated = await reconcileCodexMcpConfigAtStartup(options);
+
+    expect(updated).toMatchObject({
+      outcome: "updated",
+      message: expect.stringContaining("Restart Codex"),
+    });
+    const expected = previous.replace(
+      '"http://127.0.0.1:4174/mcp"',
+      '"http://127.0.0.1:4274/mcp"',
+    );
+    await expect(readFile(configPath, "utf8")).resolves.toBe(expected);
+
+    const repeated = await reconcileCodexMcpConfigAtStartup(options);
+
+    expect(repeated).toMatchObject({
+      outcome: "unchanged",
+      reason: "current",
+    });
+    await expect(readFile(configPath, "utf8")).resolves.toBe(expected);
+  });
+
+  it("does not install an unconfigured endpoint during startup reconciliation", async () => {
+    const home = await temporaryHome();
+    const configPath = resolve(home, ".codex", "config.toml");
+
+    await expect(
+      reconcileCodexMcpConfigAtStartup({
+        environment: { ACTIONABLES_PREVIOUS_API_PORT: "4174" },
+        homeDirectory: home,
+        runtimeConfig: {
+          apiHost: "127.0.0.1",
+          apiPort: 4274,
+          apiOrigin: "http://127.0.0.1:4274",
+          mcpEndpoint: "http://127.0.0.1:4274/mcp",
+        },
+      }),
+    ).resolves.toMatchObject({
+      outcome: "unchanged",
+      reason: "missing",
+    });
+    await expect(readFile(configPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("leaves malformed, ambiguous, and user-managed startup entries for manual review", async () => {
+    const sensitiveValue = ["fixture", "credential", "value"].join("-");
+    const cases = [
+      [
+        "[mcp_servers.actionables",
+        'url = "http://127.0.0.1:4174/mcp"',
+        "",
+      ].join("\n"),
+      [
+        '[mcp_servers."actionables"]',
+        'url = "http://127.0.0.1:4174/mcp"',
+        'bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"',
+        "",
+      ].join("\n"),
+      [
+        "[mcp_servers.actionables]",
+        'url = "http://127.0.0.1:4174/mcp"',
+        'bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"',
+        "",
+        "[mcp_servers.actionables]",
+        'url = "http://127.0.0.1:4174/mcp"',
+        "",
+      ].join("\n"),
+      [
+        "[mcp_servers.actionables]",
+        'url = "http://127.0.0.1:4174/mcp"',
+        `bearer_token = ${JSON.stringify(sensitiveValue)}`,
+        "",
+      ].join("\n"),
+    ];
+
+    for (const existing of cases) {
+      const home = await temporaryHome();
+      const configPath = resolve(home, ".codex", "config.toml");
+      await mkdir(resolve(home, ".codex"), { recursive: true });
+      await writeFile(configPath, existing, "utf8");
+
+      const result = await reconcileCodexMcpConfigAtStartup({
+        environment: { ACTIONABLES_PREVIOUS_API_PORT: "4174" },
+        homeDirectory: home,
+        runtimeConfig: {
+          apiHost: "127.0.0.1",
+          apiPort: 4274,
+          apiOrigin: "http://127.0.0.1:4274",
+          mcpEndpoint: "http://127.0.0.1:4274/mcp",
+        },
+      });
+
+      expect(result).toMatchObject({
+        outcome: "manual-review",
+        message: expect.stringMatching(
+          /(?:did not overwrite|could not verify).*restart Codex/,
+        ),
+      });
+      expect(JSON.stringify(result)).not.toContain(sensitiveValue);
+      await expect(readFile(configPath, "utf8")).resolves.toBe(existing);
+    }
   });
 
   it("installs each component independently and is idempotent", async () => {

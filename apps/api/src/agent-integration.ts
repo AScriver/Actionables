@@ -48,6 +48,24 @@ type ReconcileCodexMcpConfigOptions = {
   previousEndpoint?: string;
 };
 
+type StartupReconciliationOptions = {
+  environment?: NodeJS.ProcessEnv;
+  homeDirectory?: string;
+  runtimeConfig: ApiRuntimeConfig;
+};
+
+export type CodexMcpStartupReconciliation =
+  | {
+      outcome: "unchanged";
+      reason: "current" | "missing" | "no-endpoint-change";
+      targetPath: string;
+    }
+  | {
+      outcome: "updated" | "manual-review";
+      message: string;
+      targetPath: string;
+    };
+
 function normalizeContent(value: string) {
   return value.replace(/\r\n/g, "\n").trim();
 }
@@ -221,6 +239,79 @@ export function reconcileCodexMcpConfig(
   }
 
   return { state: "modified", content: current, changed: false };
+}
+
+export async function reconcileCodexMcpConfigAtStartup({
+  environment = process.env,
+  homeDirectory = homedir(),
+  runtimeConfig,
+}: StartupReconciliationOptions): Promise<CodexMcpStartupReconciliation> {
+  const targetPath = resolve(homeDirectory, ".codex", "config.toml");
+  const previousApiPort = environment.ACTIONABLES_PREVIOUS_API_PORT;
+  if (previousApiPort === undefined) {
+    return {
+      outcome: "unchanged",
+      reason: "no-endpoint-change",
+      targetPath,
+    };
+  }
+
+  let previousEndpoint: string;
+  try {
+    previousEndpoint = resolveApiRuntimeConfig(previousApiPort).mcpEndpoint;
+  } catch {
+    return {
+      outcome: "manual-review",
+      targetPath,
+      message: `Actionables could not verify the previous MCP endpoint recorded for startup. Review the Actionables entry in ${targetPath}, set its URL to ${runtimeConfig.mcpEndpoint}, and restart Codex.`,
+    };
+  }
+
+  let current: string | null;
+  try {
+    current = await readOptional(targetPath);
+  } catch {
+    return {
+      outcome: "manual-review",
+      targetPath,
+      message: `Actionables could not read the Codex configuration at ${targetPath}. Review its Actionables entry, set the URL to ${runtimeConfig.mcpEndpoint}, and restart Codex.`,
+    };
+  }
+
+  const reconciliation = reconcileCodexMcpConfig(
+    current,
+    runtimeConfig.mcpEndpoint,
+    { previousEndpoint },
+  );
+  if (reconciliation.state === "missing") {
+    return { outcome: "unchanged", reason: "missing", targetPath };
+  }
+  if (reconciliation.state === "installed") {
+    return { outcome: "unchanged", reason: "current", targetPath };
+  }
+  if (reconciliation.state === "modified") {
+    return {
+      outcome: "manual-review",
+      targetPath,
+      message: `Actionables did not overwrite the ambiguous or user-managed Codex configuration at ${targetPath}. Review its Actionables entry, replace the stale URL ${previousEndpoint} with ${runtimeConfig.mcpEndpoint} when appropriate, and restart Codex.`,
+    };
+  }
+
+  try {
+    await writeFile(targetPath, reconciliation.content, "utf8");
+  } catch {
+    return {
+      outcome: "manual-review",
+      targetPath,
+      message: `Actionables could not update the managed Codex configuration at ${targetPath}. Replace the stale URL ${previousEndpoint} with ${runtimeConfig.mcpEndpoint} manually, and restart Codex.`,
+    };
+  }
+
+  return {
+    outcome: "updated",
+    targetPath,
+    message: `Actionables updated the managed Codex MCP endpoint in ${targetPath} from ${previousEndpoint} to ${runtimeConfig.mcpEndpoint}. Restart Codex to load the configuration.`,
+  };
 }
 
 function instructionsComponent(

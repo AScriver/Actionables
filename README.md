@@ -97,6 +97,14 @@ optional, unchecked by default, and installed without replacing unrelated
 instructions. Known unmodified older skill copies can be updated explicitly;
 customized files are never overwritten.
 
+If a saved API port later becomes unavailable, startup selects and persists a
+new endpoint. When `%USERPROFILE%\.codex\config.toml` contains the previously
+managed Actionables entry, startup updates only that URL and tells you to
+restart Codex. Matching configuration is left byte-identical. Malformed,
+ambiguous, or user-managed Actionables entries are never overwritten; startup
+instead reports the file, stale endpoint, replacement endpoint, and required
+manual review.
+
 The endpoint stays disabled until a non-empty token is configured and only
 accepts loopback connections. Setup and Settings report `Disabled` in that
 state; the URL is not usable until Actionables is restarted with the token. Do

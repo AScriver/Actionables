@@ -36,8 +36,15 @@ required = false
 ```
 
 Restart Codex so it reads both the global configuration and user environment.
-If `API_PORT` is customized later, update the URL to the newly reported
-endpoint and restart Codex again.
+If a saved API port later becomes unavailable, Actionables selects and persists
+a new endpoint. Startup narrowly replaces the old URL only when the Actionables
+entry still matches the previously managed configuration, preserves unrelated
+`config.toml` bytes, and tells you to restart Codex. Matching configuration is
+byte-idempotent. Malformed, ambiguous, or user-managed Actionables entries are
+not overwritten; follow startup's manual-review guidance to set the reported
+replacement endpoint and then restart Codex. If `API_PORT` is explicitly
+customized outside this startup flow, use the effective endpoint reported by
+Actionables and review the Codex entry before restarting.
 
 The Codex instructions and Actionables workflow skill are separate, optional
 files. First-run setup and **Settings → Actionables agent integration** can

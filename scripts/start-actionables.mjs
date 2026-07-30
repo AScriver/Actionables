@@ -56,11 +56,23 @@ export async function startActionables(
     environment,
     warn: (message) => output.warn(message),
   });
+  const {
+    ACTIONABLES_PREVIOUS_API_PORT: _ignoredPreviousApiPort,
+    ...baseEnvironment
+  } = environment;
   const runtimeEnvironment = {
-    ...environment,
+    ...baseEnvironment,
     WEB_PORT: String(selection.pair.webPort),
     API_PORT: String(selection.pair.apiPort),
   };
+  if (
+    selection.previousPair &&
+    selection.previousPair.apiPort !== selection.pair.apiPort
+  ) {
+    runtimeEnvironment.ACTIONABLES_PREVIOUS_API_PORT = String(
+      selection.previousPair.apiPort,
+    );
+  }
 
   output.log(
     `Actionables selected web/API ports ${selection.pair.webPort}/${selection.pair.apiPort} (${selection.source}); saved to ${selection.statePath}.`,

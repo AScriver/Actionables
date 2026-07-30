@@ -208,6 +208,15 @@ reports the effective ports and saves them in `data/runtime-ports.json`. If a
 saved port later becomes busy, Actionables selects and saves another pair
 without terminating the occupying listener.
 
+When that fallback changes the saved API port, startup also checks the current
+user's `%USERPROFILE%\.codex\config.toml`. It updates only an exact,
+previously managed Actionables MCP entry and preserves every unrelated byte.
+After a successful change, startup tells you to restart Codex. A matching
+current entry and a missing Actionables entry are left unchanged. Malformed,
+ambiguous, or user-managed entries are never overwritten; startup reports the
+configuration path, stale endpoint, replacement endpoint, and manual restart
+steps instead.
+
 Set explicit `WEB_PORT` and/or `API_PORT` values when a particular port is
 required. Explicit values are authoritative and fail clearly when occupied; the
 startup process never stops an unrelated listener. To reset only the saved
