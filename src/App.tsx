@@ -4067,11 +4067,12 @@ function AgentIntegrationSetupDialog({
         <div className="agent-setup-options">
           {components.map((component) => {
             const checked =
-              component.id === "mcpServer"
+              component.state === "installed" ||
+              (component.id === "mcpServer"
                 ? mcpServer
                 : component.id === "agentInstructions"
                   ? agentInstructions
-                  : skill;
+                  : skill);
             const unavailable =
               component.state === "installed" || component.state === "modified";
             return (

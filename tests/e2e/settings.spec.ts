@@ -167,7 +167,23 @@ test("first-run setup sends conflicting MCP registration to manual review", asyn
   await expect(
     dialog.getByRole("checkbox", { name: /Actionables MCP server/ }),
   ).toBeDisabled();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables MCP server/ }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables agent instructions/ }),
+  ).toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables agent instructions/ }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables workflow skill/ }),
+  ).toBeChecked();
+  await expect(
+    dialog.getByRole("checkbox", { name: /Actionables workflow skill/ }),
+  ).toBeDisabled();
   await expect(dialog.getByText("Manual review required")).toBeVisible();
+  await expect(dialog.getByText("Installed", { exact: true })).toHaveCount(2);
   await expect(
     dialog.getByRole("button", { name: "Install selected" }),
   ).toBeDisabled();
