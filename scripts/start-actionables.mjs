@@ -75,7 +75,13 @@ export async function startActionables(
   }
 
   output.log(
-    `Actionables selected web/API ports ${selection.pair.webPort}/${selection.pair.apiPort} (${selection.source}); saved to ${selection.statePath}.`,
+    [
+      `Actionables selected web/API ports ${selection.pair.webPort}/${selection.pair.apiPort} (${selection.source}); saved to ${selection.statePath}.`,
+      `Web: ${selection.runtimeConfig.webOrigin}`,
+      `API: ${selection.runtimeConfig.apiOrigin}`,
+      `Health: ${selection.runtimeConfig.healthEndpoint}`,
+      `MCP: ${selection.runtimeConfig.mcpEndpoint}`,
+    ].join("\n"),
   );
 
   try {

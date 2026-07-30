@@ -35,93 +35,127 @@ function fakeChild() {
   return child;
 }
 
-it("propagates an unavailable saved API port and reconciles its managed Codex endpoint", async () => {
-  const directory = await mkdtemp(
-    join(tmpdir(), "actionables-startup-reconciliation-"),
-  );
-  const home = join(directory, "home");
-  const statePath = join(directory, "runtime-ports.json");
-  const configPath = join(home, ".codex", "config.toml");
-  const occupiedApi = await listen();
-  const savedApiPort = occupiedApi.address().port;
-  const savedWebProbe = await listen();
-  const savedWebPort = savedWebProbe.address().port;
-  await close(savedWebProbe);
-  const originalConfig = [
-    "# Preserve this prefix and its line endings",
-    "[mcp_servers.actionables]",
-    `url = "http://127.0.0.1:${savedApiPort}/mcp"`,
-    'bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"',
-    "enabled = true",
-    "required = false",
-    "",
-    "[features]",
-    "web_search = true",
-    "",
-  ].join("\r\n");
-  let running;
-
-  try {
-    await mkdir(join(home, ".codex"), { recursive: true });
-    await writeFile(configPath, originalConfig, "utf8");
-    await writeFile(
-      statePath,
-      `${JSON.stringify({
-        version: 1,
-        webPort: savedWebPort,
-        apiPort: savedApiPort,
-      })}\n`,
-      "utf8",
+it.each(["development", "production"])(
+  "propagates an unavailable saved API port and reconciles its managed Codex endpoint in %s mode",
+  async (mode) => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "actionables-startup-reconciliation-"),
     );
-    let childEnvironment;
+    const home = join(directory, "home");
+    const statePath = join(directory, "runtime-ports.json");
+    const configPath = join(home, ".codex", "config.toml");
+    const occupiedApi = await listen();
+    const savedApiPort = occupiedApi.address().port;
+    const savedWebProbe = await listen();
+    const savedWebPort = savedWebProbe.address().port;
+    await close(savedWebProbe);
+    const sensitiveValue = ["startup", "credential", "fixture"].join("-");
+    const originalConfig = [
+      "# Preserve this prefix and its line endings",
+      "[mcp_servers.actionables]",
+      `url = "http://127.0.0.1:${savedApiPort}/mcp"`,
+      'bearer_token_env_var = "ACTIONABLES_MCP_TOKEN"',
+      "enabled = true",
+      "required = false",
+      "",
+      "[features]",
+      "web_search = true",
+      "",
+    ].join("\r\n");
+    const childEnvironments = [];
+    const outputMessages = [];
+    let running;
 
-    running = await startActionables("development", {
-      environment: {
-        ...process.env,
-        ACTIONABLES_AGENT_HOME: home,
-        ACTIONABLES_PREVIOUS_API_PORT: "1",
-        ACTIONABLES_RUNTIME_PORT_STATE_PATH: statePath,
-        API_PORT: undefined,
-        WEB_PORT: undefined,
-      },
-      output: {
-        error() {},
-        log() {},
-        warn() {},
-      },
-      spawnProcess(_executable, _args, options) {
-        childEnvironment = options.env;
-        return fakeChild();
-      },
-    });
+    try {
+      await mkdir(join(home, ".codex"), { recursive: true });
+      await writeFile(configPath, originalConfig, "utf8");
+      await writeFile(
+        statePath,
+        `${JSON.stringify({
+          version: 1,
+          webPort: savedWebPort,
+          apiPort: savedApiPort,
+        })}\n`,
+        "utf8",
+      );
 
-    expect(childEnvironment.ACTIONABLES_PREVIOUS_API_PORT).toBe(
-      String(savedApiPort),
-    );
-    expect(childEnvironment.API_PORT).not.toBe(String(savedApiPort));
+      running = await startActionables(mode, {
+        environment: {
+          ...process.env,
+          ACTIONABLES_AGENT_HOME: home,
+          ACTIONABLES_MCP_TOKEN: sensitiveValue,
+          ACTIONABLES_PREVIOUS_API_PORT: "1",
+          ACTIONABLES_RUNTIME_PORT_STATE_PATH: statePath,
+          API_PORT: undefined,
+          WEB_PORT: undefined,
+        },
+        output: {
+          error(message) {
+            outputMessages.push(message);
+          },
+          log(message) {
+            outputMessages.push(message);
+          },
+          warn(message) {
+            outputMessages.push(message);
+          },
+        },
+        spawnProcess(_executable, _args, options) {
+          childEnvironments.push(options.env);
+          return fakeChild();
+        },
+      });
 
-    const reconciliation = await reconcileCodexMcpConfigAtStartup({
-      environment: childEnvironment,
-      homeDirectory: home,
-      runtimeConfig: running.runtimeConfig,
-    });
+      expect(childEnvironments).toHaveLength(mode === "development" ? 1 : 2);
+      for (const childEnvironment of childEnvironments) {
+        expect(childEnvironment.ACTIONABLES_PREVIOUS_API_PORT).toBe(
+          String(savedApiPort),
+        );
+        expect(childEnvironment.API_PORT).not.toBe(String(savedApiPort));
+        expect(childEnvironment.WEB_PORT).toBe(
+          String(running.runtimeConfig.webPort),
+        );
+        expect(childEnvironment.API_PORT).toBe(
+          String(running.runtimeConfig.apiPort),
+        );
+      }
+      expect(outputMessages.join("\n")).toContain(
+        running.runtimeConfig.webOrigin,
+      );
+      expect(outputMessages.join("\n")).toContain(
+        running.runtimeConfig.apiOrigin,
+      );
+      expect(outputMessages.join("\n")).toContain(
+        running.runtimeConfig.healthEndpoint,
+      );
+      expect(outputMessages.join("\n")).toContain(
+        running.runtimeConfig.mcpEndpoint,
+      );
+      expect(outputMessages.join("\n")).not.toContain(sensitiveValue);
 
-    expect(reconciliation).toMatchObject({
-      outcome: "updated",
-      message: expect.stringContaining("Restart Codex"),
-    });
-    await expect(readFile(configPath, "utf8")).resolves.toBe(
-      originalConfig.replace(
-        `"http://127.0.0.1:${savedApiPort}/mcp"`,
-        JSON.stringify(running.runtimeConfig.mcpEndpoint),
-      ),
-    );
-  } finally {
-    if (running) await running.stop();
-    await close(occupiedApi);
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+      const reconciliation = await reconcileCodexMcpConfigAtStartup({
+        environment: childEnvironments[0],
+        homeDirectory: home,
+        runtimeConfig: running.runtimeConfig,
+      });
+
+      expect(reconciliation).toMatchObject({
+        outcome: "updated",
+        message: expect.stringContaining("Restart Codex"),
+      });
+      await expect(readFile(configPath, "utf8")).resolves.toBe(
+        originalConfig.replace(
+          `"http://127.0.0.1:${savedApiPort}/mcp"`,
+          JSON.stringify(running.runtimeConfig.mcpEndpoint),
+        ),
+      );
+    } finally {
+      if (running) await running.stop();
+      await close(occupiedApi);
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 it("removes a stale previous-port handoff when startup has no saved endpoint", async () => {
   const directory = await mkdtemp(

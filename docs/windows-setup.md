@@ -247,7 +247,9 @@ Portable JSON is the supported backup and restore mechanism. Follow [backup and 
 
 ### Browser does not start
 
-Open `http://127.0.0.1:4173` manually in a supported browser and verify `/api/health`. For Playwright:
+Open the web URL reported by startup in a supported browser and verify
+`/api/health`. On the default pair this is `http://127.0.0.1:4173`; persisted or
+explicit ports use their reported web URL. For Playwright:
 
 ```powershell
 pnpm exec playwright install chromium

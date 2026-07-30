@@ -179,30 +179,43 @@ describe("runtime port selection and persistence", () => {
     });
   });
 
-  it("falls back deterministically when either default is occupied", async () => {
-    const [webPort, apiPort, fallbackWebPort, fallbackApiPort] =
-      await freeSequence();
-    const statePath = await temporaryStatePath();
-    const occupyingListener = await trackedListener(apiPort);
+  it.each(["web", "api", "both"])(
+    "falls back deterministically when the %s default is occupied",
+    async (occupiedRole) => {
+      const [webPort, apiPort, fallbackWebPort, fallbackApiPort] =
+        await freeSequence();
+      const statePath = await temporaryStatePath();
+      const occupyingListeners = [];
+      if (occupiedRole === "web" || occupiedRole === "both") {
+        occupyingListeners.push(await trackedListener(webPort));
+      }
+      if (occupiedRole === "api" || occupiedRole === "both") {
+        occupyingListeners.push(await trackedListener(apiPort));
+      }
 
-    const selection = await select({
-      statePath,
-      fallbackWebPort: webPort,
-      fallbackApiPort: apiPort,
-    });
+      const selection = await select({
+        statePath,
+        fallbackWebPort: webPort,
+        fallbackApiPort: apiPort,
+      });
 
-    expect(selection).toMatchObject({
-      source: "fallback",
-      pair: {
-        webPort: fallbackWebPort,
-        apiPort: fallbackApiPort,
-      },
-    });
-    expect(occupyingListener.listening).toBe(true);
+      expect(selection).toMatchObject({
+        source: "fallback",
+        pair: {
+          webPort: fallbackWebPort,
+          apiPort: fallbackApiPort,
+        },
+      });
+      expect(occupyingListeners.every((server) => server.listening)).toBe(true);
 
-    const releasedDefaultWeb = await trackedListener(webPort);
-    expect(releasedDefaultWeb.listening).toBe(true);
-  });
+      if (occupiedRole === "api") {
+        expect((await trackedListener(webPort)).listening).toBe(true);
+      }
+      if (occupiedRole === "web") {
+        expect((await trackedListener(apiPort)).listening).toBe(true);
+      }
+    },
+  );
 
   it("replaces an unavailable saved pair without altering its listener", async () => {
     const [savedWebPort, savedApiPort, webPort, apiPort] = await freeSequence();
@@ -264,9 +277,10 @@ describe("runtime port selection and persistence", () => {
   });
 
   it("fails clearly for occupied or duplicate explicit ports", async () => {
-    const [webPort, apiPort] = await freeSequence(2);
+    const [webPort, apiPort, secondWebPort, secondApiPort] =
+      await freeSequence();
     const statePath = await temporaryStatePath();
-    const occupyingListener = await trackedListener(webPort);
+    const occupyingWeb = await trackedListener(webPort);
 
     await expect(
       selectAndPersistRuntimePorts({
@@ -276,7 +290,21 @@ describe("runtime port selection and persistence", () => {
         warn: vi.fn(),
       }),
     ).rejects.toThrow(`WEB_PORT ${webPort} is already in use on 127.0.0.1`);
-    expect(occupyingListener.listening).toBe(true);
+    expect(occupyingWeb.listening).toBe(true);
+
+    const occupyingApi = await trackedListener(secondApiPort);
+    await expect(
+      selectAndPersistRuntimePorts({
+        statePath,
+        webPort: String(secondWebPort),
+        apiPort: String(secondApiPort),
+        warn: vi.fn(),
+      }),
+    ).rejects.toThrow(
+      `API_PORT ${secondApiPort} is already in use on 127.0.0.1`,
+    );
+    expect(occupyingApi.listening).toBe(true);
+    expect((await trackedListener(secondWebPort)).listening).toBe(true);
 
     await expect(
       selectAndPersistRuntimePorts({
