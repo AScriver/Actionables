@@ -163,6 +163,14 @@ describe("portable import and export", () => {
       safeUpdates: 0,
       conflicts: 0,
     });
+    const legacyWithoutResolution = structuredClone(document);
+    delete (
+      legacyWithoutResolution.actionables[0] as {
+        resolution?: string;
+      }
+    ).resolution;
+    const legacyPreview = await service.preview(legacyWithoutResolution);
+    expect(legacyPreview.totalsByRecordType.actionable.noOps).toBe(32);
 
     const reordered = structuredClone(document);
     reordered.actionables.reverse();
@@ -180,6 +188,7 @@ describe("portable import and export", () => {
       title: document.actionables[0]!.title,
       finding: document.actionables[0]!.finding,
       description: document.actionables[0]!.description,
+      resolution: "",
       importProvider: "CODEX",
       sourceThread: document.actionables[0]!.importedEvidence.threadUrl,
     });
@@ -609,6 +618,8 @@ describe("portable import and export", () => {
         completionOverrideMd: "Accepted after documented review.",
         finding: "User-authored **Markdown** remains exact.",
         description: "Restore every supported field.",
+        resolution:
+          "Completed the portable round trip and preserved field ownership.",
         researchJson: ["Research note"],
         validationJson: ["Run the integration suite"],
         filesJson: [{ path: "src/user.ts", lines: "1-5", symbol: "userWork" }],

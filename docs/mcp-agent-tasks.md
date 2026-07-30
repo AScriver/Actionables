@@ -72,7 +72,7 @@ The server instructions direct agents to use this sequence:
 10. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient.
 11. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
 12. Mutate with the latest version and secret claim token.
-13. If research is the entire requested outcome, advance the task through the permitted lifecycle, record actual validation, and move it to `Done`.
+13. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
 14. Never claim completion while an owned task remains `Researching`.
 15. Release a nonterminal claim when abandoning or handing off work.
 16. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
@@ -157,6 +157,8 @@ the compact task response.
 The enforced implementation path is `Inbox → Researching → Ready → In progress`.
 `Inbox → Ready` is rejected, active work cannot become `Ready` without a
 non-empty Research note, and `In progress` is reachable only from `Ready`.
+Every transition to `Done` also requires non-empty Resolution content in
+addition to the existing qualifying-validation or completion-override policy.
 Rejections include machine-readable recovery guidance such as
 `appendResearch`. `Dismissed` remains an intentional terminal escape hatch.
 

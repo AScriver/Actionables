@@ -116,7 +116,12 @@ import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
 type InspectorTab =
-  "finding" | "research" | "validation" | "relationships" | "activity";
+  | "finding"
+  | "research"
+  | "resolution"
+  | "validation"
+  | "relationships"
+  | "activity";
 type PriorityFilter = "All" | Priority;
 
 const inspectorWidthStorageKey = "actionables-inspector-width";
@@ -2054,6 +2059,7 @@ function Inspector({
           [
             ["finding", "Finding"],
             ["research", "Research notes"],
+            ["resolution", "Resolution"],
             ["validation", "Validation"],
             ["relationships", "Relationships"],
             ["activity", "Activity"],
@@ -2171,6 +2177,22 @@ function Inspector({
           </>
         )}
 
+        {activeTab === "resolution" && (
+          <section className="inspector-section tab-lead">
+            <h3>Resolution</h3>
+            <p className="section-help">
+              Describe the completed changes and important implementation
+              decisions. Resolution content is required before this actionable
+              can be marked Done.
+            </p>
+            {selected.resolution ? (
+              <Markdown>{selected.resolution}</Markdown>
+            ) : (
+              <p>No resolution has been recorded yet.</p>
+            )}
+          </section>
+        )}
+
         {activeTab === "validation" && (
           <>
             <section className="inspector-section tab-lead">
@@ -2230,6 +2252,7 @@ type ActionableDraft = {
   worktreeId: string;
   finding: string;
   description: string;
+  resolution: string;
   researchText: string;
   validationText: string;
   tagsText: string;
@@ -2256,6 +2279,7 @@ function draftFromItem(item: ActionableDetail): ActionableDraft {
     worktreeId: item.scope.worktreeId,
     finding: item.finding,
     description: item.description,
+    resolution: item.resolution,
     researchText: item.research.join("\n"),
     validationText: item.validation.join("\n"),
     tagsText: item.tags.join(", "),
@@ -2298,6 +2322,7 @@ function emptyDraft(
     worktreeId: worktree?.id ?? "",
     finding: "",
     description: "",
+    resolution: "",
     researchText: "",
     validationText: "",
     tagsText: "",
@@ -2433,6 +2458,7 @@ function ActionableForm({
       worktreeId: draft.worktreeId,
       finding: draft.finding,
       description: draft.description,
+      resolution: draft.resolution,
       research: lines(draft.researchText),
       validation: lines(draft.validationText),
       tags: draft.tagsText
@@ -2802,6 +2828,24 @@ function ActionableForm({
                   }
                 />
                 {fieldError(errors, "description")}
+              </label>
+
+              <label
+                className="form-field form-field-wide"
+                htmlFor="resolution"
+              >
+                <span>Resolution</span>
+                <small>
+                  Completed changes and important implementation decisions.
+                  Required before Done.
+                </small>
+                <textarea
+                  id="resolution"
+                  rows={5}
+                  value={draft.resolution}
+                  onChange={(event) => update("resolution", event.target.value)}
+                />
+                {fieldError(errors, "resolution")}
               </label>
 
               <label className="form-field form-field-wide" htmlFor="research">

@@ -45,6 +45,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Renew explicitly during long periods without mutations. Successful claimed mutations may renew the lease automatically.
 - Follow permitted lifecycle transitions instead of forcing a status.
 - Do not edit implementation files until the claimed task is In progress. Inbox is untriaged, Researching is investigation, and Ready means implementation may begin after the explicit transition.
+- Before transitioning a task to Done, populate its Resolution with the completed changes and important implementation decisions.
 - Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem writes outside the MCP. A hard write gate requires orchestration support and is outside this workflow unless separately authorized.
 
 ## Lifecycle accountability
@@ -54,7 +55,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - A claimed Actionable may remain Researching between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, remaining questions, and the next research step. Do not force a status transition merely because a turn ended.
 - Move an Actionable to Ready only after at least one independent investigative action, such as inspecting relevant code, reproducing the behavior, or consulting authoritative documentation. Record the action and its observed result; an unverified research note is insufficient.
 - Before reporting completion, reconcile every lifecycle-owned Actionable:
-  - Completed work: record actual validation and move it to Done.
+  - Completed work: record Resolution content and actual validation, then move it to Done.
   - Research complete but implementation remains: move it from Researching to Ready.
   - Invalid, accidental, or disposable work: without explicit user authorization, document the issue, leave its status unchanged, release any claim, and provide an explicit handoff.
   - Unfinished work: update its status, release any claim, and provide an explicit handoff.
@@ -68,12 +69,12 @@ Use lifecycle states consistently:
 - Ready: research and the planned validation are sufficient for implementation.
 - In progress: implementation or active execution has begun.
 - Blocked: progress cannot continue; include the concrete blocker and needed resolution.
-- Done: the requested outcome is complete and qualifying validation evidence has been recorded.
+- Done: the requested outcome is complete, Resolution content is populated, and qualifying validation evidence has been recorded.
 - Dismissed: work is intentionally declined or obsolete; include the reason.
 
 ## Finish or hand off
 
-1. Record actual validation with commands, results, or other evidence before transitioning to Done.
+1. Record Resolution content plus actual validation with commands, results, or other evidence before transitioning to Done.
 2. Transition to Done only when the existing completion rules pass. A terminal transition releases the claim.
 3. Release a nonterminal claim when abandoning the work or handing it to another agent.
 4. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.

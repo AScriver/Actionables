@@ -79,6 +79,8 @@ describe("T-004 lifecycle authority", () => {
     ...scope,
     finding: "A concrete finding.",
     description: "A bounded intended result.",
+    resolution:
+      "Completed the bounded change and retained the existing lifecycle policy.",
     research: ["Research with `inline code`."],
     validation: ["Run the focused validation."],
     tags: ["lifecycle"],
@@ -292,6 +294,55 @@ describe("T-004 lifecycle authority", () => {
     expect(completed.json().item.activity.at(-1)).toMatchObject({
       type: "completion-validated",
       summary: "Completed with qualifying validation",
+    });
+  });
+
+  it("requires Resolution before Done even when a completion override is supplied", async () => {
+    const created = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: {
+        ...createBody("Resolution completion guard"),
+        resolution: "",
+      },
+    });
+    let item = created.json().item;
+    item = (await move(item, "Researching")).json().item;
+    item = (await move(item, "Ready")).json().item;
+    item = (await move(item, "In progress")).json().item;
+
+    const rejected = await move(
+      item,
+      "Done",
+      {
+        completionOverrideReason:
+          "The override must not bypass the Resolution requirement.",
+      },
+      422,
+    );
+    expect(rejected.json()).toMatchObject({
+      code: "RESOLUTION_REQUIRED",
+      errors: {
+        resolution: expect.any(Array),
+        status: expect.any(Array),
+      },
+    });
+
+    await prisma!.actionable.update({
+      where: { sourceOrdinal: item.id },
+      data: {
+        resolution:
+          "Completed the guard and documented the central policy decision.",
+      },
+    });
+    const completed = await move(item, "Done", {
+      completionOverrideReason:
+        "The focused lifecycle test intentionally exercises the override path.",
+    });
+    expect(completed.json().item).toMatchObject({
+      status: "Done",
+      resolution:
+        "Completed the guard and documented the central policy decision.",
     });
   });
 

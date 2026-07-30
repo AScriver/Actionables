@@ -1196,6 +1196,7 @@ async function updateClaimedAgentTaskResult(
         status: row.status,
         finding: request.finding ?? row.finding,
         description: request.description ?? row.description,
+        resolution: request.resolution ?? row.resolution,
         research: request.research ?? researchAppend?.values ?? currentResearch,
         validation:
           request.plannedValidation ??
@@ -1220,6 +1221,7 @@ async function updateClaimedAgentTaskResult(
         "evidenceState",
         "finding",
         "description",
+        "resolution",
         "research",
         "appendResearch",
         "plannedValidation",
@@ -1465,6 +1467,7 @@ export async function handoffClaimedAgentTask(
           status: row.status,
           finding: request.finding ?? row.finding,
           description: row.description,
+          resolution: row.resolution,
           research,
           validation: plannedValidation,
           tags: persistedStringArray(row.tagsJson),

@@ -57,6 +57,7 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   await page
     .locator("#description")
     .fill("Use a code block:\n\n```powershell\npnpm test\n```");
+  await page.locator("#resolution").fill("Initial browser resolution fixture.");
   await page.locator("#research").fill("Research **renders** safely.");
   await page.locator("#validation").fill("Run `pnpm test`");
   await page.getByRole("button", { name: "Add source reference" }).click();
@@ -164,6 +165,37 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
     inspector.getByText("Qualifying", { exact: true }),
   ).toBeVisible();
 
+  await inspector.getByRole("button", { name: "Edit actionable" }).click();
+  await page.locator("#resolution").fill("");
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  await inspector.getByRole("button", { name: "Done", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Done" }).click();
+  await expect(inspector.getByRole("alert")).toContainText(
+    "Done requires Resolution content",
+  );
+  await inspector.getByRole("button", { name: "Cancel" }).click();
+  consoleErrors.length = 0;
+
+  await inspector.getByRole("button", { name: "Edit actionable" }).click();
+  await page
+    .locator("#resolution")
+    .fill(
+      "Completed the browser lifecycle and kept the existing validation policy.",
+    );
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await inspector.getByRole("tab", { name: "Resolution" }).click();
+  await expect(
+    inspector.getByText(
+      "Describe the completed changes and important implementation decisions.",
+    ),
+  ).toBeVisible();
+  await expect(
+    inspector.getByText(
+      "Completed the browser lifecycle and kept the existing validation policy.",
+    ),
+  ).toBeVisible();
+
   await inspector.getByRole("button", { name: "Done", exact: true }).click();
   await inspector.getByRole("button", { name: "Confirm Done" }).click();
   await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
@@ -188,6 +220,12 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   await page.reload();
   await expect(page).toHaveURL(deepLink);
   await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
+  await inspector.getByRole("tab", { name: "Resolution" }).click();
+  await expect(
+    inspector.getByText(
+      "Completed the browser lifecycle and kept the existing validation policy.",
+    ),
+  ).toBeVisible();
   await inspector.getByRole("button", { name: "Ready", exact: true }).click();
   await inspector
     .getByLabel("Reopening reason")

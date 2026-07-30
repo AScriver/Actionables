@@ -97,6 +97,8 @@ const body = (title: string, selectedScope = scope) => ({
   ...selectedScope,
   finding: "A bounded finding",
   description: "A bounded result",
+  resolution:
+    "Completed the relationship scenario and preserved its lifecycle rules.",
   research: ["The relationship lifecycle was reviewed."],
   validation: ["Verify it"],
   tags: [],

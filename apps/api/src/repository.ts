@@ -340,6 +340,7 @@ function toDetail(row: ActionableRow): ActionableDetail {
         }
       : null,
     description: row.description,
+    resolution: row.resolution,
     research: stringArray(row.researchJson),
     validation: stringArray(row.validationJson),
     userSources: row.userSources.map((source) => ({
@@ -1435,6 +1436,7 @@ export async function createActionable(
         updatedLabel: "just now",
         finding: input.finding,
         description: input.description,
+        resolution: input.resolution ?? "",
         researchJson: inputJson(input.research),
         validationJson: inputJson(input.validation),
         filesJson: inputJson([]),
@@ -1533,6 +1535,7 @@ function validateTransition(
   readiness: {
     finding: string;
     description: string;
+    resolution: string;
     research: string[];
     validation: string[];
   },
@@ -1649,6 +1652,19 @@ function validateTransition(
         ),
       },
       "Complete or dismiss every direct subtask before completing this parent.",
+    );
+  }
+
+  if (!readiness.resolution.trim()) {
+    throw new DomainValidationError(
+      "RESOLUTION_REQUIRED",
+      {
+        resolution: [
+          "Describe the completed changes and important implementation decisions before marking this actionable Done.",
+        ],
+        status: ["Done requires Resolution content."],
+      },
+      "Add a Resolution before completing this actionable.",
     );
   }
 
@@ -1777,6 +1793,7 @@ export async function updateActionable(
             {
               finding: input.finding,
               description: input.description,
+              resolution: input.resolution ?? current.resolution,
               research: input.research,
               validation: input.validation,
             },
@@ -1794,6 +1811,7 @@ export async function updateActionable(
         updatedLabel: "just now",
         finding: input.finding,
         description: input.description,
+        resolution: input.resolution ?? current.resolution,
         researchJson: inputJson(input.research),
         validationJson: inputJson(input.validation),
         tagsJson: inputJson(input.tags),
@@ -1858,6 +1876,7 @@ export async function transitionActionable(
       {
         finding: current.finding,
         description: current.description,
+        resolution: current.resolution,
         research: stringArray(current.researchJson),
         validation: stringArray(current.validationJson),
       },

@@ -1117,8 +1117,25 @@ describe("Actionables MCP", () => {
       );
       expect(inProgress.status).toBe("In progress");
 
+      const missingResolution = errorOutput(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: inProgress.version,
+            status: "Done",
+          },
+        }),
+      );
+      expect(missingResolution).toMatchObject({
+        code: "RESOLUTION_REQUIRED",
+        retryable: true,
+        nextAction: expect.stringContaining("update_task"),
+      });
+
       const updated = output<{
         finding: string;
+        resolution: string;
         research: string[];
         version: number;
       }>(
@@ -1128,10 +1145,13 @@ describe("Actionables MCP", () => {
             ...credentials,
             version: inProgress.version,
             finding: "The official MCP client completed a real request.",
+            resolution:
+              "Completed the MCP request path and retained the existing claim lifecycle.",
           },
         }),
       );
       expect(updated.finding).toContain("official MCP client");
+      expect(updated.resolution).toContain("existing claim lifecycle");
 
       const validated = output<{
         validationRecords: Array<{
@@ -1541,6 +1561,7 @@ describe("Actionables MCP", () => {
       data: {
         finding: "f".repeat(100_000),
         description: "d".repeat(100_000),
+        resolution: "x".repeat(100_000),
         researchJson: json(Array.from({ length: 12 }, () => "r".repeat(1_000))),
         validationJson: json(
           Array.from({ length: 12 }, () => "p".repeat(1_000)),
@@ -1629,6 +1650,7 @@ describe("Actionables MCP", () => {
         expect.arrayContaining([
           "finding",
           "description",
+          "resolution",
           "research",
           "plannedValidation",
           "files",

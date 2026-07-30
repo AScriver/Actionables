@@ -242,6 +242,7 @@ function fieldObject(item: PortableActionable): Record<string, unknown> {
     evidenceState: item.evidenceState,
     finding: item.finding,
     description: item.description,
+    resolution: item.resolution,
     research: item.research,
     validation: item.validation,
     files: item.files,
@@ -285,6 +286,7 @@ function legacySeedBaseline(
     evidenceState: "Unclassified",
     finding: item.finding,
     description: item.description,
+    resolution: incoming.resolution,
     research: item.research,
     validation: item.validation,
     files: item.files,
@@ -1482,6 +1484,7 @@ function safeData(
   if (requested.has("evidenceState")) data.evidenceState = item.evidenceState;
   if (requested.has("finding")) data.finding = item.finding;
   if (requested.has("description")) data.description = item.description;
+  if (requested.has("resolution")) data.resolution = item.resolution;
   if (requested.has("research")) data.researchJson = json(item.research);
   if (requested.has("validation")) data.validationJson = json(item.validation);
   if (requested.has("files")) data.filesJson = json(item.files);
@@ -2016,6 +2019,7 @@ export class DataImportService {
               completionOverrideMd: item.completionOverride,
               finding: item.finding,
               description: item.description,
+              resolution: item.resolution,
               researchJson: json(item.research),
               validationJson: json(item.validation),
               filesJson: json(item.files),

@@ -40,6 +40,7 @@ async function createTask(
     creatorThreadId?: string;
     finding?: string;
     description?: string;
+    resolution?: string;
     research?: string[];
     validation?: string[];
   } = {},
@@ -59,6 +60,7 @@ async function createTask(
       updatedLabel: "fixture",
       finding: overrides.finding ?? "",
       description: overrides.description ?? "",
+      resolution: overrides.resolution ?? "",
       researchJson: json(overrides.research ?? []),
       validationJson: json(overrides.validation ?? []),
       filesJson: json([]),
@@ -1522,7 +1524,11 @@ describe("agent task claims", () => {
   });
 
   it("preserves lifecycle and validation rules, agent origins, renewal, and terminal release", async () => {
-    const task = await createTask({ status: "Ready" });
+    const task = await createTask({
+      status: "Ready",
+      resolution:
+        "The fixture begins resolved so validation requirements remain independently covered.",
+    });
     const claimed = await claimAgentTask(
       prisma,
       task.sourceOrdinal,
@@ -1612,12 +1618,46 @@ describe("agent task claims", () => {
         })
       ).leaseExpiresAt.toISOString(),
     ).toBe("2026-07-25T12:38:00.000Z");
-    const completed = await transitionClaimedAgentTask(
+    const unresolved = await updateClaimedAgentTask(
       prisma,
       task.sourceOrdinal,
       {
         claimToken: claimed.claim.claimToken,
         version: validated.version,
+        resolution: "",
+      },
+      new Date("2026-07-25T12:08:05.000Z"),
+    );
+    await expect(
+      transitionClaimedAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        {
+          claimToken: claimed.claim.claimToken,
+          version: unresolved.version,
+          status: "Done",
+        },
+        new Date("2026-07-25T12:08:15.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "RESOLUTION_REQUIRED" });
+    const resolved = await updateClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: unresolved.version,
+        resolution:
+          "Completed the claimed lifecycle path and retained terminal claim release.",
+      },
+      new Date("2026-07-25T12:08:30.000Z"),
+    );
+    expect(resolved.resolution).toContain("terminal claim release");
+    const completed = await transitionClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: resolved.version,
         status: "Done",
       },
       new Date("2026-07-25T12:09:00.000Z"),

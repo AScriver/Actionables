@@ -90,6 +90,7 @@ model Actionable {
   completionOverrideMd   String?
   finding                String
   description            String
+  resolution             String     @default("")
   researchJson           Json
   validationJson         Json
   filesJson              Json

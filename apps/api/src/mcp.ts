@@ -135,6 +135,7 @@ const compactReferenceSchema = z
 const compactTruncatedFieldSchema = z.enum([
   "finding",
   "description",
+  "resolution",
   "research",
   "plannedValidation",
   "files",
@@ -180,6 +181,7 @@ const compactTaskSchema = z
     updatedAt: z.string().datetime(),
     finding: z.string().max(1_500),
     description: z.string().max(2_500),
+    resolution: z.string().max(2_500),
     research: z.array(z.string().max(400)).max(6),
     plannedValidation: z.array(z.string().max(400)).max(6),
     tags: z.array(z.string().max(60)).max(10),
@@ -328,6 +330,7 @@ function compactTask(
     updatedAt: task.updatedAt,
     finding: compactText(task.finding, 1_500, "finding"),
     description: compactText(task.description, 2_500, "description"),
+    resolution: compactText(task.resolution, 2_500, "resolution"),
     research: task.research
       .slice(0, 6)
       .map((item) => compactText(item, 400, "research")),
@@ -465,6 +468,12 @@ function recovery(code: string) {
         retryable: true,
         nextAction:
           "Call actionables.update_task with appendResearch, then retry Ready using the returned version.",
+      };
+    case "RESOLUTION_REQUIRED":
+      return {
+        retryable: true,
+        nextAction:
+          "Call actionables.update_task with non-empty Resolution content, then retry Done using the returned version.",
       };
     case "NOT_FOUND":
     case "ARCHIVED":
@@ -736,7 +745,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Update claimed Actionable",
       description:
-        "Update only supplied user-authored task fields using the claim token and latest version. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts; newly persisted research on a Researching task also returns conditional lifecycle guidance.",
+        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts; newly persisted research on a Researching task also returns conditional lifecycle guidance.",
       inputSchema: updateTaskSchema,
       outputSchema: updateTaskOutputSchema,
       annotations: { ...mutation, destructiveHint: true },
@@ -772,7 +781,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Transition claimed Actionable",
       description:
-        "Move a claimed task through Inbox to Researching to Ready to In progress. Keep Researching while investigation remains; use Ready when research is sufficient but implementation remains. Ready requires a non-empty Research note, and implementation changes must wait until In progress. Done requires qualifying validation and releases the claim.",
+        "Move a claimed task through Inbox to Researching to Ready to In progress. Keep Researching while investigation remains; use Ready when research is sufficient but implementation remains. Ready requires a non-empty Research note, and implementation changes must wait until In progress. Done requires non-empty Resolution content plus qualifying validation and releases the claim.",
       inputSchema: transitionTaskSchema,
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, destructiveHint: true },

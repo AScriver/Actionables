@@ -1511,6 +1511,7 @@ describe("Actionables API", () => {
       version: 1,
       statusProvenance: { kind: "user-authored" },
       immutableSourceEvidence: { imported: false },
+      resolution: "",
     });
     expect(payload.item.statusHistory[0]).toMatchObject({
       previousStatus: null,
@@ -1568,6 +1569,8 @@ describe("Actionables API", () => {
         ...scope,
         finding: "A user-authored finding.",
         description: "A bounded intended result.",
+        resolution:
+          "Completed the API edit path and preserved the existing lifecycle.",
         research: ["Research note one", "Research note two"],
         validation: ["Run the focused check"],
         tags: ["api", "triage"],
@@ -1590,6 +1593,8 @@ describe("Actionables API", () => {
       evidenceState: "Investigation",
       finding: "A user-authored finding.",
       description: "A bounded intended result.",
+      resolution:
+        "Completed the API edit path and preserved the existing lifecycle.",
       research: ["Research note one", "Research note two"],
       validation: ["Run the focused check"],
       tags: ["api", "triage"],

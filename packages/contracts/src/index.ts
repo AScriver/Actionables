@@ -346,6 +346,7 @@ export const actionableDetailSchema = actionableSummarySchema.extend({
     .strict()
     .nullable(),
   description: z.string(),
+  resolution: z.string(),
   research: z.array(z.string()),
   validation: z.array(z.string()),
   userSources: z.array(userSourceReferenceSchema),
@@ -778,6 +779,7 @@ export const createActionableRequestSchema = z
     worktreeId: z.string().min(1, "Choose a worktree."),
     finding: markdownField,
     description: markdownField,
+    resolution: markdownField.optional(),
     research: notesSchema.default([]),
     validation: notesSchema.default([]),
     tags: tagsSchema.default([]),
@@ -1063,6 +1065,11 @@ export const updateClaimedAgentTaskRequestSchema = z
     description: markdownField
       .optional()
       .describe("Replace the intended-result Markdown."),
+    resolution: markdownField
+      .optional()
+      .describe(
+        "Replace the Resolution Markdown describing completed changes and important implementation decisions.",
+      ),
     research: notesSchema
       .optional()
       .describe(
@@ -1123,6 +1130,7 @@ export const updateClaimedAgentTaskRequestSchema = z
         "evidenceState",
         "finding",
         "description",
+        "resolution",
         "research",
         "appendResearch",
         "plannedValidation",
@@ -1583,6 +1591,7 @@ const portableActionableSchema = z
     evidenceState: evidenceStateSchema,
     finding: z.string().max(100_000),
     description: z.string().max(100_000),
+    resolution: z.string().max(100_000).default(""),
     research: notesSchema,
     validation: notesSchema,
     files: z.array(sourceFileSchema).max(500),
