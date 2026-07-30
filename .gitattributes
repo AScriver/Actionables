@@ -1,0 +1,2 @@
+# Keep text files LF across platforms so Prettier checks match clean Git checkouts.
+* text=auto eol=lf
