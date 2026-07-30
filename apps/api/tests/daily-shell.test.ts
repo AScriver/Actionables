@@ -361,6 +361,7 @@ describe("daily-use shell queries and archive policy", () => {
     expect(active.json().result).toMatchObject({
       matched: 9,
       scopeTotal: 10,
+      openScopeTotal: 9,
       normalizedQuery: {},
     });
     expect(
@@ -371,6 +372,7 @@ describe("daily-use shell queries and archive policy", () => {
       method: "GET",
       url: "/api/actionables?status=Done",
     });
+    expect(done.json().result.openScopeTotal).toBe(9);
     expect(done.json().items.map((item: { id: number }) => item.id)).toEqual([
       8,
     ]);
@@ -381,7 +383,17 @@ describe("daily-use shell queries and archive policy", () => {
     });
     expect(all.json().result).toMatchObject({
       matched: 10,
+      openScopeTotal: 9,
       normalizedQuery: { status: "all" },
+    });
+
+    const archived = await app.inject({
+      method: "GET",
+      url: "/api/actionables?archived=archived&status=all",
+    });
+    expect(archived.json().result).toMatchObject({
+      matched: 1,
+      openScopeTotal: 9,
     });
 
     await prisma.actionable.update({
@@ -398,11 +410,13 @@ describe("daily-use shell queries and archive policy", () => {
           .json()
           .items.map((item: { status: string }) => item.status),
       ).not.toContain("Dismissed");
+      expect(dismissedDefault.json().result.openScopeTotal).toBe(9);
 
       const dismissed = await app.inject({
         method: "GET",
         url: "/api/actionables?status=Dismissed",
       });
+      expect(dismissed.json().result.openScopeTotal).toBe(9);
       expect(
         dismissed.json().items.map((item: { id: number }) => item.id),
       ).toEqual([8]);

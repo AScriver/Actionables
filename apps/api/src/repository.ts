@@ -660,6 +660,7 @@ export async function listActionablesWithQuery(
       result: {
         matched: 0,
         scopeTotal: 0,
+        openScopeTotal: 0,
         topLevel: 0,
         nested: 0,
         normalizedQuery: actionableQueryRecord(query),
@@ -679,6 +680,16 @@ export async function listActionablesWithQuery(
     status: "all",
   });
   const scopeTotal = rows.filter((row) => matchesQuery(row, scopeQuery)).length;
+  const openScopeQuery = actionableQuerySchema.parse({
+    project: query.project,
+    repository: query.repository,
+    worktree: query.worktree,
+    archived: "active",
+    status: "active",
+  });
+  const openScopeTotal = rows.filter((row) =>
+    matchesQuery(row, openScopeQuery),
+  ).length;
   return actionablesListResponseSchema.parse({
     project: { name: first.project.name },
     repository: { name: first.repository.name },
@@ -690,6 +701,7 @@ export async function listActionablesWithQuery(
     result: {
       matched: matchedRows.length,
       scopeTotal,
+      openScopeTotal,
       topLevel: resultTopLevel,
       nested: matchedRows.length - resultTopLevel,
       normalizedQuery: actionableQueryRecord(query),

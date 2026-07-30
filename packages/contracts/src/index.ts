@@ -386,6 +386,7 @@ export const actionablesListResponseSchema = z.object({
   result: z.object({
     matched: z.number().int().nonnegative(),
     scopeTotal: z.number().int().nonnegative(),
+    openScopeTotal: z.number().int().nonnegative(),
     topLevel: z.number().int().nonnegative(),
     nested: z.number().int().nonnegative(),
     normalizedQuery: z.record(z.string(), z.string()),

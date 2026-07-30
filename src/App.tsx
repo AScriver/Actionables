@@ -6514,7 +6514,7 @@ export default function App() {
                             project.id === activeProject?.id &&
                             repository.id === activeRepository?.id &&
                             worktree.id === activeWorktree?.id
-                              ? listQuery.data?.result.scopeTotal
+                              ? listQuery.data?.result.openScopeTotal
                               : undefined
                           }
                           selected={query.worktree === worktree.id}
