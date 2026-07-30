@@ -63,3 +63,63 @@ test("adds an additional repository and makes it immediately selectable", async 
     duplicateDialog.getByText(/path is already tracked/i),
   ).toBeVisible();
 });
+
+test("hides archived projects from the sidebar after refresh", async ({
+  page,
+}) => {
+  const scopesResponse = await page.request.get("/api/scopes");
+  expect(scopesResponse.ok()).toBeTruthy();
+  const scopes = await scopesResponse.json();
+  const project = scopes.projects.find(
+    (candidate: { archivedAt: string | null }) => !candidate.archivedAt,
+  );
+  expect(project).toBeTruthy();
+  if (!project) return;
+
+  const sidebar = page.locator("aside.sidebar");
+
+  try {
+    await page.goto("/");
+    await sidebar
+      .getByRole("button", { name: `Archive project ${project.name}` })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: `Archive ${project.name}?`,
+    });
+    await dialog
+      .getByRole("button", { name: `Archive ${project.name}` })
+      .click();
+
+    await expect(
+      sidebar.getByRole("button", { name: project.name, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("button", {
+        name: `Restore project ${project.name}`,
+      }),
+    ).toHaveCount(0);
+
+    await page.reload();
+
+    await expect(
+      sidebar.getByRole("button", { name: project.name, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("button", {
+        name: `Restore project ${project.name}`,
+      }),
+    ).toHaveCount(0);
+  } finally {
+    const currentScopes = await (await page.request.get("/api/scopes")).json();
+    const currentProject = currentScopes.projects.find(
+      (candidate: { id: string }) => candidate.id === project.id,
+    );
+    if (currentProject?.archivedAt) {
+      const restored = await page.request.post(
+        `/api/scopes/project/${project.id}/restore`,
+        { data: { version: currentProject.version } },
+      );
+      expect(restored.ok()).toBeTruthy();
+    }
+  }
+});

@@ -5806,6 +5806,7 @@ export default function App() {
   const actionables = listQuery.data?.items ?? [];
   const selected = detailQuery.data;
   const scopes = scopesQuery.data?.projects ?? [];
+  const sidebarProjects = scopes.filter((project) => !project.archivedAt);
   const activeProject = query.project
     ? scopes.find((item) => item.id === query.project)
     : undefined;
@@ -6413,7 +6414,7 @@ export default function App() {
         </nav>
         <div className="project-tree">
           <div className="tree-label">Projects</div>
-          {scopes.map((project) => (
+          {sidebarProjects.map((project) => (
             <div className="project-group" key={project.id}>
               <div className="scope-action-row">
                 <div className="project-row">
