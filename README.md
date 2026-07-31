@@ -23,8 +23,8 @@ built-in Codex handoff._
   `Done`—with blocked and dismissed states.
 - Ownership claims, dependencies, validation requirements, handoff context, and
   an auditable activity history.
-- Dashboard queues, stale-work alerts, search, and filters for deciding what
-  should be handed to Codex next.
+- Dashboard queues, stale-work alerts, search, and include/exclude filters for
+  deciding what should be handed to Codex next.
 - Archive completed scopes and restore them later.
 - Preview and reconcile portable JSON imports before saving, and export the
   complete local state for backup.

@@ -456,10 +456,58 @@ describe("daily-use shell queries and archive policy", () => {
     expect(pathSearch.json().items[0].id).toBe(3);
   });
 
+  it("reuses existing filters as exclusions and combines both modes", async () => {
+    const excludePriority = await app.inject({
+      method: "GET",
+      url: "/api/actionables?priority=High&exclude=priority",
+    });
+    expect(
+      excludePriority.json().items.map((item: { id: number }) => item.id),
+    ).toEqual([3, 2, 4, 6, 10]);
+    expect(excludePriority.json().result).toMatchObject({
+      matched: 5,
+      scopeTotal: 10,
+      openScopeTotal: 9,
+      normalizedQuery: { priority: "High", exclude: "priority" },
+    });
+
+    const multipleExclusions = await app.inject({
+      method: "GET",
+      url: "/api/actionables?priority=High&effort=M&exclude=effort,priority",
+    });
+    expect(
+      multipleExclusions.json().items.map((item: { id: number }) => item.id),
+    ).toEqual([2, 4, 6, 10]);
+    expect(multipleExclusions.json().result.normalizedQuery).toEqual({
+      priority: "High",
+      effort: "M",
+      exclude: "priority,effort",
+    });
+
+    const mixedModes = await app.inject({
+      method: "GET",
+      url: "/api/actionables?priority=High&effort=S&exclude=priority",
+    });
+    expect(
+      mixedModes.json().items.map((item: { id: number }) => item.id),
+    ).toEqual([2, 4, 6, 10]);
+
+    const canonicalExclusions = await app.inject({
+      method: "GET",
+      url: "/api/actionables?priority=High&tag=daily&exclude=tag,priority,tag",
+    });
+    expect(
+      canonicalExclusions.json().items.map((item: { id: number }) => item.id),
+    ).toEqual([3]);
+    expect(canonicalExclusions.json().result.normalizedQuery.exclude).toBe(
+      "priority,tag",
+    );
+  });
+
   it("safely removes malformed query values from normalized canonical state", async () => {
     const response = await app.inject({
       method: "GET",
-      url: "/api/actionables?priority=urgent&sort=random&archived=maybe&q=parser",
+      url: "/api/actionables?priority=urgent&sort=random&archived=maybe&exclude=unknown,priority,effort&q=parser",
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().result.normalizedQuery).toEqual({ q: "parser" });

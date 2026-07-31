@@ -4372,11 +4372,40 @@ button {
   padding: 12px;
 }
 
-.advanced-filters label {
+.advanced-filters .filter-field {
   display: grid;
   gap: 4px;
+}
+
+.filter-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.filter-field-heading label {
   color: var(--text-muted);
   font-size: 10px;
+}
+
+.advanced-filters .filter-mode {
+  width: auto;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.advanced-filters .filter-mode.is-exclude {
+  border-color: var(--blocked-text);
+  color: var(--blocked-text);
+}
+
+.advanced-filters .filter-mode:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .advanced-filters select,
@@ -4392,7 +4421,7 @@ button {
   font-size: 11px;
 }
 
-.advanced-filters label:nth-last-of-type(1),
+.advanced-filters > .filter-field:last-of-type,
 .advanced-filters > button {
   grid-column: 1 / -1;
 }

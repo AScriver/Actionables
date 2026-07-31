@@ -185,6 +185,7 @@ function normalizeActionableQuery(raw: unknown): ActionableQuery {
     "parent",
     "validation",
     "reopened",
+    "exclude",
     "q",
     "sort",
   ];

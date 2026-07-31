@@ -466,6 +466,30 @@ export const booleanFilterSchema = z.enum(["all", "yes", "no"]);
 export const actionableStatusFilterSchema = statusSchema.or(
   z.enum(["active", "all"]),
 );
+export const actionableExcludeFilterKeys = [
+  "status",
+  "manualBlocked",
+  "dependencyBlocked",
+  "priority",
+  "effort",
+  "evidence",
+  "tag",
+  "parent",
+  "validation",
+  "reopened",
+] as const;
+export type ActionableExcludeFilterKey =
+  (typeof actionableExcludeFilterKeys)[number];
+
+export function parseActionableExcludeFilterKeys(value?: string) {
+  const requested = new Set(
+    (value ?? "")
+      .split(",")
+      .map((key) => key.trim())
+      .filter(Boolean),
+  );
+  return actionableExcludeFilterKeys.filter((key) => requested.has(key));
+}
 
 export const actionableQuerySchema = z.object({
   project: z.string().default(""),
@@ -482,9 +506,44 @@ export const actionableQuerySchema = z.object({
   parent: parentFilterSchema.default("all"),
   validation: booleanFilterSchema.default("all"),
   reopened: booleanFilterSchema.default("all"),
+  exclude: z
+    .string()
+    .default("")
+    .transform((value) => parseActionableExcludeFilterKeys(value).join(",")),
   q: z.string().trim().max(500).default(""),
   sort: actionableSortSchema.default("priority"),
 });
+
+type ActionableExcludeFilterQuery = Partial<
+  Record<ActionableExcludeFilterKey | "exclude", string>
+>;
+
+export function isActionableExcludeFilterActive(
+  query: ActionableExcludeFilterQuery,
+  key: ActionableExcludeFilterKey,
+) {
+  if (key === "status") return (query.status ?? "active") !== "all";
+  if (key === "manualBlocked")
+    return Boolean(query.manualBlocked && query.manualBlocked !== "all");
+  if (key === "dependencyBlocked")
+    return Boolean(
+      query.dependencyBlocked && query.dependencyBlocked !== "all",
+    );
+  if (key === "parent") return Boolean(query.parent && query.parent !== "all");
+  if (key === "validation")
+    return Boolean(query.validation && query.validation !== "all");
+  if (key === "reopened")
+    return Boolean(query.reopened && query.reopened !== "all");
+  return Boolean(query[key]);
+}
+
+export function activeActionableExcludeFilterKeys(
+  query: ActionableExcludeFilterQuery,
+) {
+  return parseActionableExcludeFilterKeys(query.exclude).filter((key) =>
+    isActionableExcludeFilterActive(query, key),
+  );
+}
 
 export const dashboardQueueKeySchema = z.enum([
   "inbox",

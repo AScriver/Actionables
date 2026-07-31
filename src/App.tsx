@@ -34,14 +34,18 @@ import {
   X,
 } from "lucide-react";
 import {
+  actionableExcludeFilterKeys,
+  activeActionableExcludeFilterKeys,
   assistantReasoningEfforts,
   defaultLocalCodexTimeoutSeconds,
+  isActionableExcludeFilterActive,
   maximumLocalCodexTimeoutSeconds,
   minimumLocalCodexTimeoutSeconds,
   noteGroomerModels,
   type CreateActionableRequest,
   type CreateRepositoryResponse,
   type ActionableDetail,
+  type ActionableExcludeFilterKey,
   type ActionableQuery,
   type ActionableSummary,
   type AgentIntegrationComponent,
@@ -72,6 +76,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type RefObject,
 } from "react";
 import {
@@ -316,6 +321,45 @@ const evidenceStates: EvidenceState[] = [
   "Proposed",
   "Investigation",
 ];
+
+function AdvancedFilterField({
+  children,
+  excluded,
+  id,
+  label,
+  modeDisabled,
+  onModeChange,
+}: {
+  children: ReactNode;
+  excluded: boolean;
+  id: string;
+  label: string;
+  modeDisabled: boolean;
+  onModeChange: () => void;
+}) {
+  const labelId = `${id}-label`;
+  return (
+    <div className="filter-field">
+      <div className="filter-field-heading">
+        <label id={labelId} htmlFor={id}>
+          {label}
+        </label>
+        <button
+          type="button"
+          className={`filter-mode ${excluded ? "is-exclude" : ""}`}
+          aria-pressed={excluded}
+          aria-describedby={labelId}
+          disabled={modeDisabled}
+          onClick={onModeChange}
+          title="Toggle include or exclude mode"
+        >
+          {excluded ? "Exclude" : "Include"}
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function Badge({
   children,
@@ -3669,9 +3713,18 @@ const queryKeys: Array<keyof ActionableQuery> = [
   "parent",
   "validation",
   "reopened",
+  "exclude",
   "q",
   "sort",
 ];
+
+function isExcludeFilterKey(
+  key: keyof ActionableQuery,
+): key is ActionableExcludeFilterKey {
+  return actionableExcludeFilterKeys.includes(
+    key as ActionableExcludeFilterKey,
+  );
+}
 
 function viewFromLocation(): ViewMode {
   if (window.location.pathname === "/dashboard") {
@@ -5834,6 +5887,9 @@ export default function App() {
         next[key as keyof ActionableQuery] = value;
       }
     });
+    const excluded = activeActionableExcludeFilterKeys(next);
+    if (excluded.length > 0) next.exclude = excluded.join(",");
+    else delete next.exclude;
     if (nextView === "archive") next.archived = "archived";
     replaceLocation(nextView, null, next);
   };
@@ -6262,12 +6318,45 @@ export default function App() {
     replaceLocation(view, null, preserved);
   };
 
+  const excludedFilters = new Set(activeActionableExcludeFilterKeys(query));
   const activeFilters = queryKeys.filter(
     (key) =>
-      Boolean(query[key]) &&
+      key !== "exclude" &&
+      (Boolean(query[key]) ||
+        (isExcludeFilterKey(key) && excludedFilters.has(key))) &&
       !["project", "repository", "worktree"].includes(key) &&
       !(key === "archived" && view === "archive"),
   );
+  const setFilterExcluded = (
+    key: ActionableExcludeFilterKey,
+    excluded: boolean,
+  ) => {
+    const next = new Set(excludedFilters);
+    if (excluded) next.add(key);
+    else next.delete(key);
+    patchQuery({
+      exclude: actionableExcludeFilterKeys
+        .filter((candidate) => next.has(candidate))
+        .join(","),
+    });
+  };
+  const clearFilter = (key: keyof ActionableQuery) => {
+    const patch: QueryState = { [key]: "" };
+    if (isExcludeFilterKey(key) && excludedFilters.has(key)) {
+      patch.exclude = actionableExcludeFilterKeys
+        .filter(
+          (candidate) => candidate !== key && excludedFilters.has(candidate),
+        )
+        .join(",");
+    }
+    if (key === "q") setSearchInput("");
+    patchQuery(patch);
+  };
+  const filterMode = (key: ActionableExcludeFilterKey) => ({
+    excluded: excludedFilters.has(key),
+    modeDisabled: !isActionableExcludeFilterActive(query, key),
+    onModeChange: () => setFilterExcluded(key, !excludedFilters.has(key)),
+  });
   const projectName = activeProject?.name ?? "All projects";
   const worktreeName =
     activeWorktree?.name ??
@@ -6897,9 +6986,13 @@ export default function App() {
               </button>
               {filterOpen && (
                 <div className="filter-popover advanced-filters">
-                  <label>
-                    Status
+                  <AdvancedFilterField
+                    id="filter-status"
+                    label="Status"
+                    {...filterMode("status")}
+                  >
                     <select
+                      id="filter-status"
                       value={query.status ?? "active"}
                       onChange={(event) =>
                         patchQuery({ status: event.target.value })
@@ -6919,10 +7012,14 @@ export default function App() {
                         <option key={value}>{value}</option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    Manual blocking
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-manual-blocking"
+                    label="Manual blocking"
+                    {...filterMode("manualBlocked")}
+                  >
                     <select
+                      id="filter-manual-blocking"
                       value={query.manualBlocked ?? ""}
                       onChange={(event) =>
                         patchQuery({ manualBlocked: event.target.value })
@@ -6932,10 +7029,14 @@ export default function App() {
                       <option value="yes">Blocked</option>
                       <option value="no">Not manually blocked</option>
                     </select>
-                  </label>
-                  <label>
-                    Dependency blocking
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-dependency-blocking"
+                    label="Dependency blocking"
+                    {...filterMode("dependencyBlocked")}
+                  >
                     <select
+                      id="filter-dependency-blocking"
                       value={query.dependencyBlocked ?? ""}
                       onChange={(event) =>
                         patchQuery({ dependencyBlocked: event.target.value })
@@ -6945,10 +7046,14 @@ export default function App() {
                       <option value="yes">Blocked</option>
                       <option value="no">Unblocked</option>
                     </select>
-                  </label>
-                  <label>
-                    Priority
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-priority"
+                    label="Priority"
+                    {...filterMode("priority")}
+                  >
                     <select
+                      id="filter-priority"
                       value={query.priority ?? ""}
                       onChange={(event) =>
                         patchQuery({ priority: event.target.value })
@@ -6959,10 +7064,14 @@ export default function App() {
                         <option key={value}>{value}</option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    Effort
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-effort"
+                    label="Effort"
+                    {...filterMode("effort")}
+                  >
                     <select
+                      id="filter-effort"
                       value={query.effort ?? ""}
                       onChange={(event) =>
                         patchQuery({ effort: event.target.value })
@@ -6973,10 +7082,14 @@ export default function App() {
                         <option key={value}>{value}</option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    Evidence
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-evidence"
+                    label="Evidence"
+                    {...filterMode("evidence")}
+                  >
                     <select
+                      id="filter-evidence"
                       value={query.evidence ?? ""}
                       onChange={(event) =>
                         patchQuery({ evidence: event.target.value })
@@ -6987,10 +7100,14 @@ export default function App() {
                         <option key={value}>{value}</option>
                       ))}
                     </select>
-                  </label>
-                  <label>
-                    Hierarchy
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-hierarchy"
+                    label="Hierarchy"
+                    {...filterMode("parent")}
+                  >
                     <select
+                      id="filter-hierarchy"
                       value={query.parent ?? ""}
                       onChange={(event) =>
                         patchQuery({ parent: event.target.value })
@@ -7000,10 +7117,14 @@ export default function App() {
                       <option value="top-level">Top-level</option>
                       <option value="subtasks">Subtasks</option>
                     </select>
-                  </label>
-                  <label>
-                    Validation
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-validation"
+                    label="Validation"
+                    {...filterMode("validation")}
+                  >
                     <select
+                      id="filter-validation"
                       value={query.validation ?? ""}
                       onChange={(event) =>
                         patchQuery({ validation: event.target.value })
@@ -7013,17 +7134,21 @@ export default function App() {
                       <option value="yes">Qualifying</option>
                       <option value="no">Awaiting</option>
                     </select>
-                  </label>
-                  <label>
-                    Tag
+                  </AdvancedFilterField>
+                  <AdvancedFilterField
+                    id="filter-tag"
+                    label="Tag"
+                    {...filterMode("tag")}
+                  >
                     <input
+                      id="filter-tag"
                       value={query.tag ?? ""}
                       onChange={(event) =>
                         patchQuery({ tag: event.target.value })
                       }
                       placeholder="Exact tag"
                     />
-                  </label>
+                  </AdvancedFilterField>
                   <button type="button" onClick={clearFilters}>
                     Clear all
                   </button>
@@ -7088,12 +7213,13 @@ export default function App() {
                   type="button"
                   className="active-filter"
                   key={key}
-                  onClick={() => {
-                    if (key === "q") setSearchInput("");
-                    patchQuery({ [key]: "" });
-                  }}
+                  onClick={() => clearFilter(key)}
                 >
-                  {key}: {query[key]} <X />
+                  {isExcludeFilterKey(key) && excludedFilters.has(key)
+                    ? "Exclude "
+                    : ""}
+                  {key}: {query[key] ?? (key === "status" ? "active" : "")}{" "}
+                  <X />
                 </button>
               ))}
               {activeFilters.length > 1 && (

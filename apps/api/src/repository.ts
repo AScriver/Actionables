@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  activeActionableExcludeFilterKeys,
   actionableQuerySchema,
   actionableDetailSchema,
   actionableSummarySchema,
@@ -8,6 +9,7 @@ import {
   createRepositoryResponseSchema,
   dashboardResponseSchema,
   scopeOptionsResponseSchema,
+  type ActionableExcludeFilterKey,
   type ActionableQuery,
   type ActionableDetail,
   type ActionableSummary,
@@ -518,6 +520,15 @@ function boolMatch(filter: "all" | "yes" | "no", value: boolean) {
   return filter === "all" || (filter === "yes" ? value : !value);
 }
 
+function filterAllows(
+  excluded: ReadonlySet<ActionableExcludeFilterKey>,
+  key: ActionableExcludeFilterKey,
+  active: boolean,
+  matches: boolean,
+) {
+  return !active || (excluded.has(key) ? !matches : matches);
+}
+
 function searchText(row: ActionableRow) {
   return [
     row.title,
@@ -547,38 +558,94 @@ function searchText(row: ActionableRow) {
 function matchesQuery(row: ActionableRow, query: ActionableQuery) {
   const summary = toSummary(row);
   const isTopLevel = row.hierarchyAsChild.length === 0;
+  const excluded = new Set(activeActionableExcludeFilterKeys(query));
   if (query.project && row.project.id !== query.project) return false;
   if (query.repository && row.repository.id !== query.repository) return false;
   if (query.worktree && row.worktree.id !== query.worktree) return false;
-  if (query.status === "active") {
-    if (isTerminalStatus(summary.status)) return false;
-  } else if (query.status !== "all" && summary.status !== query.status) {
+  const statusMatches =
+    query.status === "active"
+      ? !isTerminalStatus(summary.status)
+      : query.status === "all" || summary.status === query.status;
+  if (!filterAllows(excluded, "status", query.status !== "all", statusMatches))
     return false;
-  }
-  if (!boolMatch(query.manualBlocked, summary.status === "Blocked"))
-    return false;
-  if (!boolMatch(query.dependencyBlocked, summary.isDependencyBlocked))
-    return false;
-  if (query.priority && summary.priority !== query.priority) return false;
-  if (query.effort && summary.effort !== query.effort) return false;
-  if (query.evidence && summary.evidenceState !== query.evidence) return false;
   if (
-    query.tag &&
-    !summary.tags.some(
-      (tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase(),
+    !filterAllows(
+      excluded,
+      "manualBlocked",
+      query.manualBlocked !== "all",
+      boolMatch(query.manualBlocked, summary.status === "Blocked"),
     )
   )
+    return false;
+  if (
+    !filterAllows(
+      excluded,
+      "dependencyBlocked",
+      query.dependencyBlocked !== "all",
+      boolMatch(query.dependencyBlocked, summary.isDependencyBlocked),
+    )
+  )
+    return false;
+  if (
+    !filterAllows(
+      excluded,
+      "priority",
+      Boolean(query.priority),
+      summary.priority === query.priority,
+    )
+  )
+    return false;
+  if (
+    !filterAllows(
+      excluded,
+      "effort",
+      Boolean(query.effort),
+      summary.effort === query.effort,
+    )
+  )
+    return false;
+  if (
+    !filterAllows(
+      excluded,
+      "evidence",
+      Boolean(query.evidence),
+      summary.evidenceState === query.evidence,
+    )
+  )
+    return false;
+  const tagMatches = summary.tags.some(
+    (tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase(),
+  );
+  if (!filterAllows(excluded, "tag", Boolean(query.tag), tagMatches))
     return false;
   if (
     query.archived !== "all" &&
     (query.archived === "archived") !== summary.archiveState.isArchived
   )
     return false;
-  if (query.parent === "top-level" && !isTopLevel) return false;
-  if (query.parent === "subtasks" && isTopLevel) return false;
-  if (!boolMatch(query.validation, summary.hasQualifyingValidation))
+  const parentMatches =
+    query.parent === "all" ||
+    (query.parent === "top-level" ? isTopLevel : !isTopLevel);
+  if (!filterAllows(excluded, "parent", query.parent !== "all", parentMatches))
     return false;
-  if (!boolMatch(query.reopened, summary.wasReopened)) return false;
+  if (
+    !filterAllows(
+      excluded,
+      "validation",
+      query.validation !== "all",
+      boolMatch(query.validation, summary.hasQualifyingValidation),
+    )
+  )
+    return false;
+  if (
+    !filterAllows(
+      excluded,
+      "reopened",
+      query.reopened !== "all",
+      boolMatch(query.reopened, summary.wasReopened),
+    )
+  )
+    return false;
   if (query.q && !searchText(row).includes(query.q.toLocaleLowerCase()))
     return false;
   return true;
@@ -629,6 +696,8 @@ export function actionableQueryRecord(query: ActionableQuery) {
   if (query.parent !== "all") values.parent = query.parent;
   if (query.validation !== "all") values.validation = query.validation;
   if (query.reopened !== "all") values.reopened = query.reopened;
+  const excluded = activeActionableExcludeFilterKeys(query);
+  if (excluded.length > 0) values.exclude = excluded.join(",");
   if (query.q) values.q = query.q;
   if (query.sort !== "priority") values.sort = query.sort;
   return values;

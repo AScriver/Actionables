@@ -194,6 +194,43 @@ test("filters, search, sort, selection, refresh, and history are URL-backed", as
   await page.getByLabel("Priority").selectOption("Critical");
   await expect(page).toHaveURL(/priority=Critical/);
 
+  const priorityFilter = page.locator(".filter-field").filter({
+    has: page.getByText("Priority", { exact: true }),
+  });
+  const priorityMode = priorityFilter.getByRole("button", {
+    name: "Include",
+  });
+  await priorityMode.click();
+  await expect(page).toHaveURL(/exclude=priority/);
+  await expect(
+    page.getByRole("button", { name: /Exclude priority: Critical/ }),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await expect(
+    page.getByRole("row", {
+      name: /Require authentication for private file downloads/,
+    }),
+  ).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).not.toHaveURL(/exclude=/);
+  await expect(
+    page.getByRole("row", {
+      name: /Require authentication for private file downloads/,
+    }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(/exclude=priority/);
+  await page.reload();
+  await expect(page).toHaveURL(/exclude=priority/);
+  await page.getByRole("button", { name: /Filters/ }).click();
+  await page
+    .locator(".filter-field")
+    .filter({ has: page.getByText("Priority", { exact: true }) })
+    .getByRole("button", { name: "Exclude" })
+    .click();
+  await expect(page).not.toHaveURL(/exclude=/);
+
   const row = page.getByRole("row", {
     name: /Require authentication for private file downloads/,
   });
