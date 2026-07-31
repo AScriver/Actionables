@@ -1468,46 +1468,48 @@ button {
 }
 
 .agent-start-prompt {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
   padding-top: 9px;
   border-top: 1px solid var(--border);
 }
 
-.agent-start-prompt > div {
+.agent-start-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
 }
 
 .agent-start-prompt span {
+  flex: 0 0 auto;
   color: var(--text-faint);
   font-size: 9px;
+  line-height: 26px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.agent-start-prompt code {
-  display: block;
-  margin-top: 4px;
-  overflow-wrap: anywhere;
-  color: var(--text);
-  font-size: 10px;
-  line-height: 1.45;
-  white-space: normal;
-}
-
 .agent-start-prompt .toolbar-button {
   flex: 0 0 auto;
-  min-height: 30px;
+  height: 26px;
+  padding: 0 7px;
+  gap: 5px;
+  font-size: 10px;
   text-decoration: none;
+}
+
+.agent-start-prompt .toolbar-button svg {
+  width: 12px;
+  height: 12px;
 }
 
 .agent-start-actions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   flex-wrap: wrap;
-  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+  margin-left: auto;
+  gap: 6px;
 }
 
 .agent-start-guidance {
@@ -3786,19 +3788,6 @@ button {
 
   .agent-claim-panel {
     margin: 12px 15px;
-  }
-
-  .agent-start-prompt {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .agent-start-prompt .toolbar-button {
-    align-self: flex-start;
-  }
-
-  .agent-start-actions {
-    align-self: flex-start;
   }
 
   .inspector-header {

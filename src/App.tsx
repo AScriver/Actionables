@@ -1728,27 +1728,25 @@ function AgentClaimPanel({
       )}
       {startPrompt && (
         <div className="agent-start-prompt">
-          <div>
+          <div className="agent-start-heading">
             <span>Start with Codex</span>
-            <code id={`agent-start-prompt-${selected.id}`}>{startPrompt}</code>
-          </div>
-          <div className="agent-start-actions">
-            {preparedChatUrl && (
-              <a className="toolbar-button" href={preparedChatUrl}>
-                <ExternalLink aria-hidden="true" />
-                Open in Codex
-              </a>
-            )}
-            <button
-              type="button"
-              className="toolbar-button"
-              onClick={copyStartPrompt}
-              aria-label="Copy Codex start-task prompt"
-              aria-describedby={`agent-start-prompt-${selected.id}`}
-            >
-              <Copy aria-hidden="true" />
-              Copy prompt
-            </button>
+            <div className="agent-start-actions">
+              {preparedChatUrl && (
+                <a className="toolbar-button" href={preparedChatUrl}>
+                  <ExternalLink aria-hidden="true" />
+                  Open in Codex
+                </a>
+              )}
+              <button
+                type="button"
+                className="toolbar-button"
+                onClick={copyStartPrompt}
+                aria-label="Copy Codex start-task prompt"
+              >
+                <Copy aria-hidden="true" />
+                Copy prompt
+              </button>
+            </div>
           </div>
         </div>
       )}
