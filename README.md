@@ -95,7 +95,10 @@ Restart Codex after changing its configuration. On first use, or later under
 Codex coordination instructions and workflow skill. Both components are
 optional, unchecked by default, and installed without replacing unrelated
 instructions. Known unmodified older skill copies can be updated explicitly;
-customized files are never overwritten.
+customized files are never overwritten. After installing the workflow skill,
+choose **Open Skills in Codex** to inspect it in the documented Skills view.
+This does not replace the required Codex restart after MCP configuration
+changes.
 
 If a saved API port later becomes unavailable, startup selects and persists a
 new endpoint. When `%USERPROFILE%\.codex\config.toml` contains the previously

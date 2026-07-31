@@ -117,7 +117,11 @@ import {
   activityEventCategory,
   groupActivityByAgentSession,
 } from "./activity-timeline";
-import { buildCodexNewChatUrl, codexThreadUrlFromAgentId } from "./codex-links";
+import {
+  buildCodexNewChatUrl,
+  codexSkillsUrl,
+  codexThreadUrlFromAgentId,
+} from "./codex-links";
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
@@ -4037,6 +4041,15 @@ function AgentIntegrationSettingsSection() {
                 configuration. Reconcile it manually, then retry.
               </small>
             )}
+            {component.id === "skill" && component.state === "installed" && (
+              <a
+                className="toolbar-button codex-skills-link"
+                href={codexSkillsUrl}
+              >
+                Open Skills in Codex
+                <ExternalLink aria-hidden="true" />
+              </a>
+            )}
           </article>
         ))}
       </div>
@@ -4071,6 +4084,9 @@ function AgentIntegrationSetupDialog({
   const [installing, setInstalling] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [skillInstalled, setSkillInstalled] = useState(
+    settings.skill.state === "installed",
+  );
   useModalIsolation(dialogRef);
 
   const install = async () => {
@@ -4087,6 +4103,7 @@ function AgentIntegrationSetupDialog({
         ["agent-integration-settings"],
         response.settings,
       );
+      setSkillInstalled(response.settings.skill.state === "installed");
       setNotice(response.results.map((result) => result.message).join(" "));
     } catch (caught) {
       setError(agentIntegrationError(caught));
@@ -4168,8 +4185,17 @@ function AgentIntegrationSetupDialog({
           </div>
         )}
         {notice && (
-          <div className="agent-setup-notice" role="status">
-            {notice}
+          <div className="agent-setup-notice">
+            <span role="status">{notice}</span>
+            {skillInstalled && (
+              <a
+                className="toolbar-button codex-skills-link"
+                href={codexSkillsUrl}
+              >
+                Open Skills in Codex
+                <ExternalLink aria-hidden="true" />
+              </a>
+            )}
           </div>
         )}
         <footer>

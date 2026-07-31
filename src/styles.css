@@ -2185,6 +2185,11 @@ button {
   justify-self: start;
 }
 
+.codex-skills-link {
+  justify-self: start;
+  text-decoration: none;
+}
+
 .settings-integration > .inline-error {
   margin-top: 12px;
 }
@@ -4657,6 +4662,9 @@ button {
 }
 
 .agent-setup-notice {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
   color: var(--accent);
   font-size: 11px;
   line-height: 1.45;

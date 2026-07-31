@@ -237,6 +237,10 @@ test("first-run setup installs only the selected component", async ({
   await expect(dialog.getByRole("status")).toContainText(
     "workflow skill was installed",
   );
+  await expect(
+    dialog.getByRole("link", { name: "Open Skills in Codex" }),
+  ).toHaveAttribute("href", "codex://skills");
+  await expect(page.locator('a[href^="codex://settings"]')).toHaveCount(0);
   expect(payload).toEqual({
     mcpServer: false,
     agentInstructions: false,
@@ -317,6 +321,13 @@ test("settings can install all missing components later", async ({ page }) => {
   await expect(integration.getByRole("status")).toContainText(
     "Agent instructions were appended",
   );
+  await expect(
+    integration.getByRole("link", { name: "Open Skills in Codex" }),
+  ).toHaveAttribute("href", "codex://skills");
+  await expect(
+    integration.getByText(/Restart Codex after registering/),
+  ).toBeVisible();
+  await expect(page.locator('a[href^="codex://settings"]')).toHaveCount(0);
 });
 
 test("edits and persists helper agent settings on the settings page", async ({
