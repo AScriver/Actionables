@@ -117,7 +117,7 @@ import {
   activityEventCategory,
   groupActivityByAgentSession,
 } from "./activity-timeline";
-import { codexThreadUrlFromAgentId } from "./codex-links";
+import { buildCodexNewChatUrl, codexThreadUrlFromAgentId } from "./codex-links";
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
@@ -1642,6 +1642,10 @@ function AgentClaimPanel({
       ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
       : null;
   const startPrompt = readyPrompt ?? researchPrompt;
+  const preparedChatUrl =
+    startPrompt && !claim
+      ? buildCodexNewChatUrl(startPrompt, selected.workspacePath)
+      : null;
   const unavailableGuidance = selected.archiveState.isArchived
     ? "Restore this Actionable before starting agent work."
     : isTerminal
@@ -1713,16 +1717,24 @@ function AgentClaimPanel({
             <span>Start with Codex</span>
             <code id={`agent-start-prompt-${selected.id}`}>{startPrompt}</code>
           </div>
-          <button
-            type="button"
-            className="toolbar-button"
-            onClick={copyStartPrompt}
-            aria-label="Copy Codex start-task prompt"
-            aria-describedby={`agent-start-prompt-${selected.id}`}
-          >
-            <Copy aria-hidden="true" />
-            Copy prompt
-          </button>
+          <div className="agent-start-actions">
+            {preparedChatUrl && (
+              <a className="toolbar-button" href={preparedChatUrl}>
+                <ExternalLink aria-hidden="true" />
+                Open in Codex
+              </a>
+            )}
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={copyStartPrompt}
+              aria-label="Copy Codex start-task prompt"
+              aria-describedby={`agent-start-prompt-${selected.id}`}
+            >
+              <Copy aria-hidden="true" />
+              Copy prompt
+            </button>
+          </div>
         </div>
       )}
       {unavailableGuidance && (

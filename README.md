@@ -117,16 +117,19 @@ security details, and troubleshooting.
 1. Capture a top-level feature or bug in `Inbox` with its intended outcome,
    evidence, sources, relevant files, and planned validation. Add direct
    subtasks when the work needs independent execution units.
-2. Open an unclaimed Actionable and use **Start with Codex → Copy prompt**. For
-   example, a generated prompt begins:
+2. Open an unclaimed Actionable and choose **Open in Codex** to prepare a local
+   chat with the displayed prompt and, when valid, the tracked workspace. Codex
+   leaves the prompt in the composer for review rather than sending it. **Copy
+   prompt** remains available when the desktop link or workspace cannot be used.
+   For example, a generated prompt begins:
 
    ```text
    Use Actionables work item #42. Claim task #47 — Fix stale cache invalidation — and begin the Researching phase.
    ```
 
-3. Paste the generated prompt into Codex. It names the governing work item and
-   task, tells Codex to treat the Actionable as authoritative, and keeps
-   discovery inside that feature or bug.
+3. Review and send the prepared prompt, or paste the copied prompt into Codex.
+   It names the governing work item and task, tells Codex to treat the
+   Actionable as authoritative, and keeps discovery inside that feature or bug.
 4. Codex claims the task, records research, and moves it through `Ready` and
    `In progress` before editing. It records actual validation before marking the
    work `Done`, or saves handoff context when another task must continue.

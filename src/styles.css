@@ -1500,6 +1500,14 @@ button {
 .agent-start-prompt .toolbar-button {
   flex: 0 0 auto;
   min-height: 30px;
+  text-decoration: none;
+}
+
+.agent-start-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .agent-start-guidance {
@@ -3767,6 +3775,10 @@ button {
   }
 
   .agent-start-prompt .toolbar-button {
+    align-self: flex-start;
+  }
+
+  .agent-start-actions {
     align-self: flex-start;
   }
 

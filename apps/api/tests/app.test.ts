@@ -181,6 +181,55 @@ describe("Actionables API", () => {
       lines: "41–78",
       symbol: "registerDownloadRoutes",
     });
+    expect(payload.item.workspacePath).toBeNull();
+  });
+
+  it("prefers the selected worktree path and falls back to its repository", async () => {
+    const repository = await prisma!.repository.findUniqueOrThrow({
+      where: { id: scope.repositoryId },
+    });
+    const worktree = await prisma!.worktree.findUniqueOrThrow({
+      where: { id: scope.worktreeId },
+    });
+    try {
+      await prisma!.repository.update({
+        where: { id: repository.id },
+        data: { localPath: "C:\\repos\\sample" },
+      });
+      await prisma!.worktree.update({
+        where: { id: worktree.id },
+        data: { localPath: "C:\\repos\\sample\\worktree" },
+      });
+
+      const selectedWorktree = await app!.inject({
+        method: "GET",
+        url: "/api/actionables/1",
+      });
+      expect(selectedWorktree.json().item.workspacePath).toBe(
+        "C:\\repos\\sample\\worktree",
+      );
+
+      await prisma!.worktree.update({
+        where: { id: worktree.id },
+        data: { localPath: null },
+      });
+      const repositoryFallback = await app!.inject({
+        method: "GET",
+        url: "/api/actionables/1",
+      });
+      expect(repositoryFallback.json().item.workspacePath).toBe(
+        "C:\\repos\\sample",
+      );
+    } finally {
+      await prisma!.repository.update({
+        where: { id: repository.id },
+        data: { localPath: repository.localPath },
+      });
+      await prisma!.worktree.update({
+        where: { id: worktree.id },
+        data: { localPath: worktree.localPath },
+      });
+    }
   });
 
   it("persists versioned helper settings and scopes runtime overrides independently", async () => {

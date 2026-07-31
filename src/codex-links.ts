@@ -2,6 +2,11 @@ const codexThreadsUrl = "codex://threads/";
 
 export const codexSkillsUrl = "codex://skills";
 
+function safeWorkspacePath(value?: string | null) {
+  const path = value?.trim();
+  return path && /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(path) ? path : null;
+}
+
 function canonicalThreadId(value: string) {
   const threadId = value.trim();
   if (
@@ -19,7 +24,8 @@ function canonicalThreadId(value: string) {
 export function buildCodexNewChatUrl(prompt: string, path?: string | null) {
   const url = new URL(`${codexThreadsUrl}new`);
   url.searchParams.set("prompt", prompt);
-  if (path) url.searchParams.set("path", path);
+  const workspacePath = safeWorkspacePath(path);
+  if (workspacePath) url.searchParams.set("path", workspacePath);
   return url.href;
 }
 

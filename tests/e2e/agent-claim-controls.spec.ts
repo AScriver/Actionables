@@ -79,7 +79,11 @@ test("top-level and direct-subtask prompts copy the exact displayed suggestion",
     origin: new URL(baseURL).origin,
   });
   const original = await detailFixture(page);
-  const fixture = await routeDetail(page, original, "unclaimed");
+  const fixture = await routeDetail(
+    page,
+    { ...original, workspacePath: "relative/path" },
+    "unclaimed",
+  );
   await page.goto(`/actionables/${ACTIONABLE_ID}`);
 
   const researchInstructions =
@@ -88,6 +92,10 @@ test("top-level and direct-subtask prompts copy the exact displayed suggestion",
   await expect(page.locator(".agent-start-prompt code")).toHaveText(
     topLevelPrompt,
   );
+  const openInCodex = page.getByRole("link", { name: "Open in Codex" });
+  const topLevelHref = new URL((await openInCodex.getAttribute("href"))!);
+  expect(topLevelHref.searchParams.get("prompt")).toBe(topLevelPrompt);
+  expect(topLevelHref.searchParams.has("path")).toBe(false);
   await page
     .getByRole("button", { name: "Copy Codex start-task prompt" })
     .click();
@@ -124,12 +132,29 @@ test("Ready unclaimed tasks recommend claiming and continuing implementation", a
     origin: new URL(baseURL).origin,
   });
   const original = await detailFixture(page);
-  await routeDetail(page, { ...original, status: "Ready" }, "unclaimed");
+  await routeDetail(
+    page,
+    {
+      ...original,
+      status: "Ready",
+      workspacePath: "C:\\Code\\Actionables & More",
+    },
+    "unclaimed",
+  );
   await page.goto(`/actionables/${ACTIONABLE_ID}`);
 
   const readyPrompt = `Use Actionables work item #${original.id}. Claim task #${original.id} — ${original.title} — and continue from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`;
   await expect(page.locator(".agent-start-prompt code")).toHaveText(
     readyPrompt,
+  );
+  const preparedHref = new URL(
+    (await page
+      .getByRole("link", { name: "Open in Codex" })
+      .getAttribute("href"))!,
+  );
+  expect(preparedHref.searchParams.get("prompt")).toBe(readyPrompt);
+  expect(preparedHref.searchParams.get("path")).toBe(
+    "C:\\Code\\Actionables & More",
   );
   await page
     .getByRole("button", { name: "Copy Codex start-task prompt" })
@@ -167,6 +192,9 @@ test("Ready claimed tasks recommend continuing without reclaiming", async ({
   const readyPrompt = `Use Actionables work item #${original.id}. Continue task #${original.id} — ${original.title} — from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`;
   await expect(page.locator(".agent-start-prompt code")).toHaveText(
     readyPrompt,
+  );
+  await expect(page.getByRole("link", { name: "Open in Codex" })).toHaveCount(
+    0,
   );
   await page
     .getByRole("button", { name: "Copy Codex start-task prompt" })

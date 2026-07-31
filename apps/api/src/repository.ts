@@ -330,6 +330,7 @@ function toDetail(row: ActionableRow): ActionableDetail {
   const now = new Date();
   return actionableDetailSchema.parse({
     ...toSummary(row),
+    workspacePath: row.worktree.localPath ?? row.repository.localPath,
     agentClaim: row.agentTaskClaim
       ? {
           agentId: row.agentTaskClaim.agentId,

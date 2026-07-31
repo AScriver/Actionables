@@ -334,6 +334,7 @@ export const actionableSummarySchema = z.object({
 });
 
 export const actionableDetailSchema = actionableSummarySchema.extend({
+  workspacePath: z.string().max(4_096).nullable(),
   agentClaim: z
     .object({
       agentId: z.string().min(1).max(120),

@@ -24,6 +24,22 @@ describe("Codex desktop links", () => {
     );
   });
 
+  it.each([undefined, null, "", "relative/path", "/posix/path"])(
+    "omits unsupported workspace path %s",
+    (path) => {
+      const parsed = new URL(buildCodexNewChatUrl("Review the task", path));
+      expect(parsed.searchParams.get("prompt")).toBe("Review the task");
+      expect(parsed.searchParams.has("path")).toBe(false);
+    },
+  );
+
+  it("accepts an absolute UNC workspace path", () => {
+    const parsed = new URL(
+      buildCodexNewChatUrl("Review the task", "\\\\server\\share\\repo"),
+    );
+    expect(parsed.searchParams.get("path")).toBe("\\\\server\\share\\repo");
+  });
+
   it("constructs canonical existing-thread links without assuming UUIDs", () => {
     expect(buildCodexThreadUrl("thread.with-symbols_123")).toBe(
       "codex://threads/thread.with-symbols_123",
