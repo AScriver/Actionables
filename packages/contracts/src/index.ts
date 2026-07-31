@@ -1337,6 +1337,7 @@ export const createAgentTaskRequestSchema = z
     plannedValidation: notesSchema
       .default([])
       .describe("Optional checks planned for this task."),
+    tags: tagsSchema.default([]).describe("Optional grouping tags."),
   })
   .strict()
   .superRefine((input, context) => {

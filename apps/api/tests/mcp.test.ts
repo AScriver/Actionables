@@ -430,6 +430,7 @@ describe("Actionables MCP", () => {
         description: "Created through the single MCP task operation.",
         effort: "S",
         plannedValidation: ["Verify top-level creation."],
+        tags: ["planning", "backend"],
       };
       const topLevel = output<{
         id: number;
@@ -439,6 +440,7 @@ describe("Actionables MCP", () => {
         description: string;
         effort: string;
         plannedValidation: string[];
+        tags: string[];
         version: number;
         parent: null;
         scope: typeof scope;
@@ -454,6 +456,7 @@ describe("Actionables MCP", () => {
         description: topLevelArguments.description,
         effort: "S",
         plannedValidation: topLevelArguments.plannedValidation,
+        tags: topLevelArguments.tags,
         parent: null,
         scope,
       });
@@ -479,12 +482,14 @@ describe("Actionables MCP", () => {
         description: "Must inherit the parent scope.",
         effort: "M",
         plannedValidation: ["Verify direct hierarchy placement."],
+        tags: ["planning", "frontend"],
       };
       const child = output<{
         id: number;
         title: string;
         parent: { id: number };
         scope: typeof scope;
+        tags: string[];
         version: number;
       }>(
         await client.callTool({
@@ -496,6 +501,7 @@ describe("Actionables MCP", () => {
         title: childArguments.title,
         parent: { id: topLevel.id },
         scope,
+        tags: childArguments.tags,
       });
       const childRetry = output<{ id: number; version: number }>(
         await client.callTool({

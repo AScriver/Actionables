@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 test("invalid capture preserves entered values and exposes accessible field errors", async ({
@@ -172,4 +173,71 @@ test("triage to Ready persists the required fields and server-approved status", 
     page.getByText("The browser flow research is complete."),
   ).toBeVisible();
   await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
+});
+
+test("tags stay visible in the list and filter related work without opening it", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const group = `group-${suffix}`;
+  const taggedTitle = `Tagged actionable ${suffix}`;
+  const unlabeledTitle = `Unlabeled actionable ${suffix}`;
+
+  await page.goto("/");
+  await expect(
+    page
+      .getByRole("table", { name: "Actionable findings" })
+      .getByRole("columnheader"),
+  ).toHaveCount(5);
+  await expect(
+    page.getByRole("columnheader", { name: "Worktree", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "New actionable" }).click();
+  await page.getByLabel("Title").fill(taggedTitle);
+  await page.locator("#tags").fill(`${group}, initial, overflow`);
+  await page.getByRole("button", { name: "Create actionable" }).click();
+  await expect(page).toHaveURL(/\/actionables\/\d+$/);
+  const taggedId = Number(page.url().match(/\/actionables\/(\d+)$/)?.[1]);
+  expect(taggedId).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "Edit actionable" }).click();
+  await page.locator("#tags").fill(`${group}, edited, overflow`);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  const taggedRow = page.locator(`[data-actionable-id="${taggedId}"]`);
+  const groupTag = taggedRow.getByRole("button", {
+    name: `Filter by tag ${group}`,
+  });
+  await expect(groupTag).toBeVisible();
+  expect((await groupTag.boundingBox())?.width).toBeGreaterThan(80);
+  await expect(
+    taggedRow.getByRole("button", { name: "Filter by tag edited" }),
+  ).toBeVisible();
+  await expect(taggedRow.getByText("+1", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "New actionable" }).click();
+  await page.getByLabel("Title").fill(unlabeledTitle);
+  await page.getByRole("button", { name: "Create actionable" }).click();
+  await expect(
+    page.getByRole("heading", { name: unlabeledTitle }),
+  ).toBeVisible();
+  const unlabeledId = Number(page.url().match(/\/actionables\/(\d+)$/)?.[1]);
+  expect(unlabeledId).toBeGreaterThan(0);
+
+  await page.goto("/");
+  const unlabeledRow = page.locator(`[data-actionable-id="${unlabeledId}"]`);
+  await expect(unlabeledRow).toBeVisible();
+  await expect(unlabeledRow.locator(".row-tag")).toHaveCount(0);
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .include('[aria-label="Actionable findings"]')
+        .analyze()
+    ).violations,
+  ).toEqual([]);
+
+  await groupTag.click();
+  await expect(page).toHaveURL(new RegExp(`tag=${group}`));
+  await expect(page).not.toHaveURL(/\/actionables\/\d+/);
+  await expect(taggedRow).toBeVisible();
+  await expect(unlabeledRow).toHaveCount(0);
 });

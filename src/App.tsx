@@ -3440,11 +3440,6 @@ function LegacyApp() {
             </div>
             <div role="columnheader">
               <button type="button">
-                Worktree <ChevronDown aria-hidden="true" />
-              </button>
-            </div>
-            <div role="columnheader">
-              <button type="button">
                 Effort <ChevronDown aria-hidden="true" />
               </button>
             </div>
@@ -3531,15 +3526,6 @@ function LegacyApp() {
                     >
                       {item.status}
                     </Badge>
-                  </div>
-                  <div
-                    role="cell"
-                    className="mono worktree-cell truncate-reveal"
-                    title={item.worktree}
-                    data-full-text={item.worktree}
-                    tabIndex={0}
-                  >
-                    {item.worktree}
                   </div>
                   <div role="cell" className="effort-cell">
                     {item.effort}
@@ -7189,7 +7175,6 @@ export default function App() {
                   )}
                 </button>
               </div>
-              <div role="columnheader">Worktree</div>
               <div
                 role="columnheader"
                 aria-sort={activeSort === "effort" ? "ascending" : undefined}
@@ -7296,6 +7281,35 @@ export default function App() {
                       >
                         {item.title}
                       </span>
+                      {item.tags.length > 0 && (
+                        <span className="row-tags">
+                          {item.tags.slice(0, 2).map((tag, index) => (
+                            <button
+                              type="button"
+                              className="row-tag"
+                              key={`${tag}-${index}`}
+                              title={`Filter by tag “${tag}”`}
+                              aria-label={`Filter by tag ${tag}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                patchQuery({ tag });
+                              }}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                          {item.tags.length > 2 && (
+                            <span
+                              className="tag-overflow"
+                              title={`More tags: ${item.tags.slice(2).join(", ")}`}
+                              aria-label={`${item.tags.length - 2} more tags: ${item.tags.slice(2).join(", ")}`}
+                            >
+                              +{item.tags.length - 2}
+                            </span>
+                          )}
+                        </span>
+                      )}
                       {item.childCompletion && (
                         <span className="child-count">
                           {item.childCompletion.terminal}/
@@ -7324,9 +7338,6 @@ export default function App() {
                       >
                         {item.status}
                       </Badge>
-                    </div>
-                    <div role="cell" className="mono worktree-cell">
-                      {item.worktree}
                     </div>
                     <div role="cell" className="effort-cell">
                       {item.effort}

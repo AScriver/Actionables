@@ -704,6 +704,7 @@ function agentTaskCreateFingerprint(request: CreateAgentTaskRequest) {
       description: request.description,
       effort: request.effort,
       plannedValidation: request.plannedValidation,
+      ...(request.tags.length ? { tags: request.tags } : {}),
     }),
   );
 }
@@ -1013,7 +1014,7 @@ export async function createAgentTask(
         description: request.description,
         research: [],
         validation: request.plannedValidation,
-        tags: [],
+        tags: request.tags,
         userSources: [],
       };
       const options = {
@@ -1087,6 +1088,7 @@ export async function createAgentTask(
           description: request.description,
           effort: request.effort,
           validation: request.plannedValidation,
+          tags: request.tags,
           statusProvenance:
             "Created by an agent as a subtask with neutral Inbox status.",
           rawFragment: {

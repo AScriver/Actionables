@@ -1233,6 +1233,7 @@ describe("agent task claims", () => {
         version: claimed.task.version,
         title: "Updated title",
         research: ["New research"],
+        tags: ["grouped", "agent"],
       },
       new Date("2026-07-25T12:10:00.000Z"),
     );
@@ -1243,7 +1244,7 @@ describe("agent task claims", () => {
       description: "Original description",
       research: ["New research"],
       validation: ["Original validation"],
-      tags: ["original"],
+      tags: ["grouped", "agent"],
       status: "Ready",
       scope: {
         projectId: scope.projectId,
@@ -1276,7 +1277,7 @@ describe("agent task claims", () => {
       summary: "Updated by agent codex:partial",
       metadataJson: {
         origin: "agent:codex:partial",
-        fields: "title,research",
+        fields: "title,research,tags",
       },
     });
 
@@ -1305,6 +1306,7 @@ describe("agent task claims", () => {
     expect(updatedPlanAndSources.validation).toEqual([
       "Run the replacement focused check.",
     ]);
+    expect(updatedPlanAndSources.tags).toEqual(["grouped", "agent"]);
     expect(updatedPlanAndSources.userSources).toHaveLength(2);
 
     const appended = await updateClaimedAgentTask(

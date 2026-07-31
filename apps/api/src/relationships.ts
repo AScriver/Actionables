@@ -27,6 +27,7 @@ type CreateSubtaskOptions = {
   description?: string;
   effort?: Effort;
   validation?: string[];
+  tags?: string[];
   rawFragment?: Prisma.InputJsonValue;
   statusProvenance?: string;
 };
@@ -254,7 +255,7 @@ async function createSubtaskRecord(
       researchJson: json([]),
       validationJson: json(options.validation ?? []),
       filesJson: json([]),
-      tagsJson: json([]),
+      tagsJson: json(options.tags ?? []),
       userSourcesJson: json([]),
       blockedByOrdinalsJson: json([]),
       blocksOrdinalsJson: json([]),

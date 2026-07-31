@@ -61,7 +61,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields. Reuse the UUID only for an exact retry.
+2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID and any user-requested grouping tags. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
 5. Start from the compact task detail returned by claim; fetch again only when reconciling newer state.
