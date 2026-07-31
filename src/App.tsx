@@ -1545,6 +1545,17 @@ function ValidationRecords({
 function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
   const groups = groupActivityByAgentSession(selected.activity);
 
+  const agentSessionId = (agentId: string) => {
+    const threadUrl = codexThreadUrlFromAgentId(agentId);
+    return threadUrl ? (
+      <strong className="mono activity-session-agent">
+        <a href={threadUrl}>{agentId}</a>
+      </strong>
+    ) : (
+      <strong className="mono">{agentId}</strong>
+    );
+  };
+
   const eventRow = (event: ActionableDetail["activity"][number]) => {
     const category = activityEventCategory(event);
     return (
@@ -1579,7 +1590,7 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
             <header>
               <div>
                 <span>Agent session</span>
-                <strong className="mono">{group.agentId}</strong>
+                {agentSessionId(group.agentId)}
               </div>
               <span
                 className={`activity-session-state is-${group.state

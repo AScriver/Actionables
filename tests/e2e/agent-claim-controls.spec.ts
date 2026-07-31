@@ -234,6 +234,116 @@ test("Codex claimants link to their thread while other claimants remain plain te
   await expect(panel.getByRole("link")).toHaveCount(0);
 });
 
+test("historical Codex claim sessions link to their originating threads", async ({
+  page,
+}) => {
+  const original = await detailFixture(page);
+  const releasedId = "codex:019fa5bb-765c-7011-9e41-164278c014c3";
+  const handedOffId = "codex:019fa5bb-765c-7011-9e41-164278c014c4";
+  const expiredId = "codex:019fa5bb-765c-7011-9e41-164278c014c5";
+  const malformedId = "codex:../../settings";
+  const legacyId = "agent:legacy";
+  const activity = [
+    {
+      id: "released-claim",
+      type: "agent-claimed",
+      summary: "Claimed",
+      context: { agentId: releasedId },
+      occurredAt: "2026-07-31T12:00:00.000Z",
+    },
+    {
+      id: "released",
+      type: "agent-released",
+      summary: "Released",
+      context: { agentId: releasedId },
+      occurredAt: "2026-07-31T12:01:00.000Z",
+    },
+    {
+      id: "handoff-claim",
+      type: "agent-claimed",
+      summary: "Claimed",
+      context: { agentId: handedOffId },
+      occurredAt: "2026-07-31T12:02:00.000Z",
+    },
+    {
+      id: "handed-off",
+      type: "agent-released",
+      summary: "Handed off",
+      context: { agentId: handedOffId, operation: "handoff" },
+      occurredAt: "2026-07-31T12:03:00.000Z",
+    },
+    {
+      id: "expired-claim",
+      type: "agent-claimed",
+      summary: "Claimed",
+      context: { agentId: expiredId },
+      occurredAt: "2026-07-31T12:04:00.000Z",
+    },
+    {
+      id: "expired",
+      type: "agent-claim-expired",
+      summary: "Expired",
+      context: { agentId: expiredId },
+      occurredAt: "2026-07-31T12:05:00.000Z",
+    },
+    {
+      id: "malformed-claim",
+      type: "agent-claimed",
+      summary: "Claimed",
+      context: { agentId: malformedId },
+      occurredAt: "2026-07-31T12:06:00.000Z",
+    },
+    {
+      id: "malformed-release",
+      type: "agent-released",
+      summary: "Released",
+      context: { agentId: malformedId },
+      occurredAt: "2026-07-31T12:07:00.000Z",
+    },
+    {
+      id: "legacy-claim",
+      type: "agent-claimed",
+      summary: "Claimed",
+      context: { agentId: legacyId },
+      occurredAt: "2026-07-31T12:08:00.000Z",
+    },
+    {
+      id: "legacy-release",
+      type: "agent-released",
+      summary: "Released",
+      context: { agentId: legacyId },
+      occurredAt: "2026-07-31T12:09:00.000Z",
+    },
+  ];
+  await routeDetail(page, { ...original, activity }, "unclaimed");
+  await page.goto(`/actionables/${ACTIONABLE_ID}`);
+  await page.getByRole("tab", { name: "Activity" }).click();
+
+  await expect(page.locator(".activity-session-state")).toHaveText([
+    "Released",
+    "Handed off",
+    "Expired",
+    "Released",
+    "Released",
+  ]);
+  for (const agentId of [releasedId, handedOffId, expiredId]) {
+    const link = page.getByRole("link", { name: agentId });
+    await expect(link).toHaveAttribute(
+      "href",
+      `codex://threads/${agentId.slice("codex:".length)}`,
+    );
+  }
+
+  for (const agentId of [malformedId, legacyId]) {
+    const session = page.locator(".activity-session").filter({
+      hasText: agentId,
+    });
+    await expect(session.getByText(agentId, { exact: true })).toBeVisible();
+    await expect(session.getByRole("link")).toHaveCount(0);
+  }
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
 test("claim panel covers unclaimed, active, expired, force release, conflict, error, desktop, and mobile states", async ({
   page,
 }, testInfo) => {
