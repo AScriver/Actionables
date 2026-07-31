@@ -197,6 +197,13 @@ test("Codex claimants link to their thread while other claimants remain plain te
   const panel = page.locator(".agent-claim-panel");
   await expect(panel.getByText("agent:legacy", { exact: true })).toBeVisible();
   await expect(panel.getByRole("link")).toHaveCount(0);
+
+  fixture.setAgentId("codex:../../settings");
+  await page.reload();
+  await expect(
+    panel.getByText("codex:../../settings", { exact: true }),
+  ).toBeVisible();
+  await expect(panel.getByRole("link")).toHaveCount(0);
 });
 
 test("claim panel covers unclaimed, active, expired, force release, conflict, error, desktop, and mobile states", async ({

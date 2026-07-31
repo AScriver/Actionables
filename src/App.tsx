@@ -117,6 +117,7 @@ import {
   activityEventCategory,
   groupActivityByAgentSession,
 } from "./activity-timeline";
+import { codexThreadUrlFromAgentId } from "./codex-links";
 import { Markdown } from "./Markdown";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
@@ -1626,11 +1627,7 @@ function AgentClaimPanel({
   onReleaseClaim: () => void;
 }) {
   const claim = selected.agentClaim;
-  const claimantUrl =
-    claim?.agentId.startsWith("codex:") &&
-    claim.agentId.length > "codex:".length
-      ? `codex://threads/${claim.agentId.slice("codex:".length)}`
-      : null;
+  const claimantUrl = claim ? codexThreadUrlFromAgentId(claim.agentId) : null;
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
   const canRecommendPrompt = !selected.archiveState.isArchived && !isTerminal;

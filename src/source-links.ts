@@ -1,4 +1,5 @@
 import type { UserSourceReference } from "@actionables/contracts";
+import { safeCodexThreadUrl } from "./codex-links";
 
 export function safeSourceUrl(
   source: Pick<UserSourceReference, "type" | "locator">,
@@ -12,12 +13,10 @@ export function safeSourceUrl(
     ) {
       return value;
     }
-    if (source.type === "Codex thread" && parsed.protocol === "codex:") {
-      return value;
-    }
   } catch {
     return null;
   }
+  if (source.type === "Codex thread") return safeCodexThreadUrl(value);
   return null;
 }
 
