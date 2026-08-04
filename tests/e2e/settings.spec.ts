@@ -339,6 +339,9 @@ test("edits and persists helper agent settings on the settings page", async ({
     page.getByRole("button", { name: "Settings", exact: true }),
   ).toHaveClass(/is-selected/);
 
+  const inboxSettings = page.getByRole("region", {
+    name: "Triage Inbox with local Codex",
+  });
   const noteSettings = page.getByRole("region", {
     name: "Groom notes with local Codex",
   });
@@ -363,6 +366,8 @@ test("edits and persists helper agent settings on the settings page", async ({
   const resetTimeout = localCodexSettings.getByRole("button", {
     name: "Reset to default",
   });
+  const triageBatchSize = inboxSettings.getByLabel("Tasks per run");
+  const inboxPrompt = inboxSettings.getByLabel("Prompt instructions");
   const notePrompt = noteSettings.getByLabel("Prompt instructions");
   const relationshipPrompt = relationshipSettings.getByLabel(
     "Prompt instructions",
@@ -378,6 +383,11 @@ test("edits and persists helper agent settings on the settings page", async ({
     "Reasoning level",
     { exact: true },
   );
+  const inboxModel = inboxSettings.getByLabel("Model", { exact: true });
+  const inboxReasoning = inboxSettings.getByLabel("Reasoning level", {
+    exact: true,
+  });
+  await expect(inboxPrompt).not.toHaveValue("");
   await expect(notePrompt).not.toHaveValue("");
   await expect(relationshipPrompt).not.toHaveValue("");
   await expect(leaseMinutes).toHaveValue("30");
@@ -385,10 +395,13 @@ test("edits and persists helper agent settings on the settings page", async ({
   await expect(timeoutSeconds).toHaveValue("");
   await expect(timeoutSeconds).toHaveAttribute("placeholder", "120");
   await expect(resetTimeout).toBeDisabled();
+  await expect(triageBatchSize).toHaveValue("5");
   await expect(
     localCodexSettings.getByText(/Effective timeout:/),
   ).toContainText("120 seconds (default)");
   await expect(noteModel).toHaveValue("");
+  await expect(inboxModel).toHaveValue("");
+  await expect(inboxReasoning).toHaveValue("");
   await expect(noteReasoning).toHaveValue("");
   await expect(relationshipModel).toHaveValue("");
   await expect(relationshipReasoning).toHaveValue("");
@@ -398,6 +411,9 @@ test("edits and persists helper agent settings on the settings page", async ({
   await expect(
     relationshipSettings.getByText(/Effective model:/),
   ).toContainText("gpt-5.6-terra");
+  await expect(inboxSettings.getByText(/Effective model:/)).toContainText(
+    "gpt-5.6-terra",
+  );
   await expect(noteSettings.getByText(/Effective reasoning:/)).toContainText(
     "selected model default",
   );
@@ -405,8 +421,10 @@ test("edits and persists helper agent settings on the settings page", async ({
     relationshipSettings.getByText(/Effective reasoning:/),
   ).toContainText("selected model default");
   const originalNotePrompt = await notePrompt.inputValue();
+  const originalInboxPrompt = await inboxPrompt.inputValue();
   const originalRelationshipPrompt = await relationshipPrompt.inputValue();
   const savedNotePrompt = `${originalNotePrompt}\n\nKeep section headings concise.`;
+  const savedInboxPrompt = `${originalInboxPrompt}\n\nKeep triage conservative.`;
   const savedRelationshipPrompt = `${originalRelationshipPrompt}\n\nPrefer recommendations with direct ID evidence.`;
 
   try {
@@ -434,10 +452,25 @@ test("edits and persists helper agent settings on the settings page", async ({
     );
 
     await timeoutSeconds.fill("300");
+    await triageBatchSize.fill("0");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(triageBatchSize).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#inboxTriagerBatchSize-error")).toHaveText(
+      "Enter a whole number from 1 through 50.",
+    );
+    await expect(page.getByRole("alert")).toContainText(
+      "Check the Inbox triage settings.",
+    );
+
+    await timeoutSeconds.fill("300");
+    await triageBatchSize.fill("3");
+    await inboxModel.selectOption("gpt-5.6-terra");
+    await inboxReasoning.selectOption("medium");
     await noteModel.selectOption("gpt-5.6-sol");
     await noteReasoning.selectOption("high");
     await relationshipModel.selectOption("gpt-5.6-luna");
     await relationshipReasoning.selectOption("xhigh");
+    await inboxPrompt.fill(savedInboxPrompt);
     await notePrompt.fill(savedNotePrompt);
     await relationshipPrompt.fill(savedRelationshipPrompt);
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -449,6 +482,9 @@ test("edits and persists helper agent settings on the settings page", async ({
     await expect(leaseMinutes).toHaveValue("45");
     await expect(warningMinutes).toHaveValue("12");
     await expect(timeoutSeconds).toHaveValue("300");
+    await expect(triageBatchSize).toHaveValue("3");
+    await expect(inboxModel).toHaveValue("gpt-5.6-terra");
+    await expect(inboxReasoning).toHaveValue("medium");
     await expect(
       localCodexSettings.getByText(/Effective timeout:/),
     ).toContainText("300 seconds (override)");
@@ -459,6 +495,9 @@ test("edits and persists helper agent settings on the settings page", async ({
     await expect(noteSettings.getByText(/Effective model:/)).toContainText(
       "gpt-5.6-sol",
     );
+    await expect(inboxSettings.getByText(/Effective model:/)).toContainText(
+      "gpt-5.6-terra",
+    );
     await expect(
       relationshipSettings.getByText(/Effective model:/),
     ).toContainText("gpt-5.6-luna");
@@ -468,6 +507,7 @@ test("edits and persists helper agent settings on the settings page", async ({
     await expect(
       relationshipSettings.getByText(/Effective reasoning:/),
     ).toContainText("xhigh");
+    await expect(inboxPrompt).toHaveValue(savedInboxPrompt);
     await expect(notePrompt).toHaveValue(savedNotePrompt);
     await expect(relationshipPrompt).toHaveValue(savedRelationshipPrompt);
 
@@ -497,10 +537,14 @@ test("edits and persists helper agent settings on the settings page", async ({
     await leaseMinutes.fill("30");
     await warningMinutes.fill("10");
     await timeoutSeconds.fill("");
+    await triageBatchSize.fill("5");
+    await inboxModel.selectOption("");
+    await inboxReasoning.selectOption("");
     await noteModel.selectOption("");
     await noteReasoning.selectOption("");
     await relationshipModel.selectOption("");
     await relationshipReasoning.selectOption("");
+    await inboxPrompt.fill(originalInboxPrompt);
     await notePrompt.fill(originalNotePrompt);
     await relationshipPrompt.fill(originalRelationshipPrompt);
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -510,6 +554,9 @@ test("edits and persists helper agent settings on the settings page", async ({
     await page.reload();
     await expect(leaseMinutes).toHaveValue("30");
     await expect(warningMinutes).toHaveValue("10");
+    await expect(triageBatchSize).toHaveValue("5");
+    await expect(inboxModel).toHaveValue("");
+    await expect(inboxReasoning).toHaveValue("");
     await expect(noteModel).toHaveValue("");
     await expect(noteReasoning).toHaveValue("");
     await expect(relationshipModel).toHaveValue("");
@@ -527,20 +574,33 @@ test("disables helper actions independently and allows re-enabling", async ({
   page,
 }) => {
   await page.goto("/settings");
+  const inboxToggle = page.getByRole("checkbox", {
+    name: "Enable Triage Inbox with local Codex",
+  });
   const noteToggle = page.getByRole("checkbox", {
     name: "Enable Groom notes with local Codex",
   });
   const relationshipToggle = page.getByRole("checkbox", {
     name: "Enable Relationship auditor",
   });
-  const notePrompt = page.getByLabel("Prompt instructions").first();
-  const relationshipPrompt = page.getByLabel("Prompt instructions").last();
+  const inboxPrompt = page
+    .getByRole("region", { name: "Triage Inbox with local Codex" })
+    .getByLabel("Prompt instructions");
+  const notePrompt = page
+    .getByRole("region", { name: "Groom notes with local Codex" })
+    .getByLabel("Prompt instructions");
+  const relationshipPrompt = page
+    .getByRole("region", { name: "Relationship auditor" })
+    .getByLabel("Prompt instructions");
+  await expect(inboxPrompt).not.toHaveValue("");
   await expect(notePrompt).not.toHaveValue("");
   await expect(relationshipPrompt).not.toHaveValue("");
   const originalNotePrompt = await notePrompt.inputValue();
+  const originalInboxPrompt = await inboxPrompt.inputValue();
   const originalRelationshipPrompt = await relationshipPrompt.inputValue();
 
   try {
+    await inboxToggle.uncheck();
     await noteToggle.uncheck();
     await page.getByRole("button", { name: "Save settings" }).click();
     await expect(
@@ -548,10 +608,17 @@ test("disables helper actions independently and allows re-enabling", async ({
     ).toContainText("Helper agent settings saved.");
 
     await page.reload();
+    await expect(inboxToggle).not.toBeChecked();
     await expect(noteToggle).not.toBeChecked();
     await expect(relationshipToggle).toBeChecked();
+    await expect(inboxPrompt).toHaveValue(originalInboxPrompt);
     await expect(notePrompt).toHaveValue(originalNotePrompt);
     await expect(relationshipPrompt).toHaveValue(originalRelationshipPrompt);
+
+    await page.goto("/dashboard");
+    await expect(
+      page.getByRole("button", { name: /Triage up to/ }),
+    ).toHaveCount(0);
 
     await page.goto("/actionables/1");
     const inspector = page.getByRole("complementary", {
@@ -569,6 +636,7 @@ test("disables helper actions independently and allows re-enabling", async ({
     ).toBeVisible();
 
     await page.goto("/settings");
+    await inboxToggle.check();
     await noteToggle.check();
     await relationshipToggle.uncheck();
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -577,6 +645,7 @@ test("disables helper actions independently and allows re-enabling", async ({
     ).toContainText("Helper agent settings saved.");
 
     await page.reload();
+    await expect(inboxToggle).toBeChecked();
     await expect(noteToggle).toBeChecked();
     await expect(relationshipToggle).not.toBeChecked();
     await expect(notePrompt).toHaveValue(originalNotePrompt);
@@ -596,9 +665,11 @@ test("disables helper actions independently and allows re-enabling", async ({
   } finally {
     await page.goto("/settings");
     const needsRestore =
+      !(await inboxToggle.isChecked()) ||
       !(await noteToggle.isChecked()) ||
       !(await relationshipToggle.isChecked());
     if (needsRestore) {
+      await inboxToggle.check();
       await noteToggle.check();
       await relationshipToggle.check();
       await page.getByRole("button", { name: "Save settings" }).click();

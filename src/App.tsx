@@ -30,6 +30,7 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Upload,
   X,
 } from "lucide-react";
@@ -37,10 +38,13 @@ import {
   actionableExcludeFilterKeys,
   activeActionableExcludeFilterKeys,
   assistantReasoningEfforts,
+  defaultInboxTriageBatchSize,
   defaultLocalCodexTimeoutSeconds,
   isActionableExcludeFilterActive,
   maximumLocalCodexTimeoutSeconds,
+  maximumInboxTriageBatchSize,
   minimumLocalCodexTimeoutSeconds,
+  minimumInboxTriageBatchSize,
   noteGroomerModels,
   type CreateActionableRequest,
   type CreateRepositoryResponse,
@@ -56,6 +60,7 @@ import {
   type EvidenceState,
   type GroomActionableNotesProposal,
   type HelperAgentSettings,
+  type InboxTriageBatchResponse,
   type AssistantReasoningEffort,
   type NoteGroomerModel,
   type RelationshipAuditResponse,
@@ -108,6 +113,7 @@ import {
   setActionableArchived,
   setScopeArchived,
   transitionActionable,
+  triageInboxQueue,
   installAgentIntegration,
   updateActionable,
   updateHelperAgentSettings,
@@ -162,13 +168,12 @@ function defaultInspectorWidth() {
 }
 
 function availableInspectorWidth(sidebarCollapsed: boolean) {
-  const sidebarWidth = sidebarCollapsed
-    ? 0
-    : Number.parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue(
-          "--sidebar-width",
-        ),
-      ) || 0;
+  const sidebarWidth =
+    Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        sidebarCollapsed ? "--sidebar-collapsed-width" : "--sidebar-width",
+      ),
+    ) || 0;
 
   return clamp(
     window.innerWidth - sidebarWidth - findingsMinWidth,
@@ -393,12 +398,14 @@ function IconButton({
   children,
   onClick,
   pressed,
+  expanded,
   className = "",
 }: {
   label: string;
   children: React.ReactNode;
   onClick?: () => void;
   pressed?: boolean;
+  expanded?: boolean;
   className?: string;
 }) {
   return (
@@ -408,6 +415,7 @@ function IconButton({
       aria-label={label}
       title={label}
       aria-pressed={pressed}
+      aria-expanded={expanded}
       onClick={onClick}
     >
       {children}
@@ -1654,7 +1662,7 @@ function AgentClaimPanel({
       : null;
   const researchPrompt =
     canRecommendPrompt && !claim && selected.status !== "Ready"
-      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} — ${selected.title} — and begin the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. If research establishes that this task contains multiple independently implementable outcomes, you are authorized to split it into the minimum necessary direct tasks within the same work item. Make each task a narrow, complete, independently verifiable vertical slice through only the relevant layers; do not divide work merely by technical layer or create adjacent cleanup. Narrow the current task to one non-overlapping slice and record the split, rationale, dependencies, and validation boundaries before moving it to Ready. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
       : null;
   const startPrompt = readyPrompt ?? researchPrompt;
   const preparedChatUrl =
@@ -4243,6 +4251,7 @@ function DashboardPanel({
   onRetry,
   onOpenQueue,
   onOpenItem,
+  onTriaged,
 }: {
   data: Awaited<ReturnType<typeof fetchDashboard>> | undefined;
   pending: boolean;
@@ -4250,7 +4259,42 @@ function DashboardPanel({
   onRetry: () => void;
   onOpenQueue: (query: Record<string, string>) => void;
   onOpenItem: (item: ActionableSummary) => void;
+  onTriaged: (result: InboxTriageBatchResponse) => Promise<void>;
 }) {
+  const helperSettingsQuery = useQuery({
+    queryKey: ["helper-agent-settings"],
+    queryFn: fetchHelperAgentSettings,
+  });
+  const [triageRunning, setTriageRunning] = useState(false);
+  const [triageError, setTriageError] = useState("");
+  const [triageResult, setTriageResult] =
+    useState<InboxTriageBatchResponse | null>(null);
+
+  const runInboxTriage = async (query: Record<string, string>) => {
+    setTriageRunning(true);
+    setTriageError("");
+    setTriageResult(null);
+    try {
+      const result = await triageInboxQueue({
+        project: query.project,
+        repository: query.repository,
+        worktree: query.worktree,
+      });
+      setTriageResult(result);
+      await onTriaged(result);
+    } catch (caught) {
+      setTriageError(
+        caught instanceof ApiProblem
+          ? [caught.problem.title, caught.problem.detail]
+              .filter(Boolean)
+              .join(" ")
+          : "The Inbox triage batch could not be completed.",
+      );
+    } finally {
+      setTriageRunning(false);
+    }
+  };
+
   if (pending) {
     return (
       <div className="dashboard-state" role="status">
@@ -4373,7 +4417,72 @@ function DashboardPanel({
               <strong>{queue.count}</strong>
               <ChevronRight aria-hidden="true" />
             </button>
-            <p>{queue.description}</p>
+            <div className="queue-description-row">
+              <p>{queue.description}</p>
+              {queue.key === "inbox" &&
+                helperSettingsQuery.data?.inboxTriagerEnabled === true && (
+                  <button
+                    type="button"
+                    className="icon-button queue-triage-button"
+                    disabled={triageRunning}
+                    onClick={() => void runInboxTriage(queue.query)}
+                    aria-label={
+                      triageRunning
+                        ? "Triaging Inbox"
+                        : `Triage up to ${helperSettingsQuery.data.inboxTriagerBatchSize}`
+                    }
+                    title={
+                      triageRunning
+                        ? "Triaging Inbox"
+                        : `Triage up to ${helperSettingsQuery.data.inboxTriagerBatchSize} Inbox tasks`
+                    }
+                  >
+                    {triageRunning ? (
+                      <RefreshCw className="spin" aria-hidden="true" />
+                    ) : (
+                      <Sparkles aria-hidden="true" />
+                    )}
+                  </button>
+                )}
+            </div>
+            {queue.key === "inbox" && triageError && (
+              <p className="relationship-error" role="alert">
+                {triageError}
+              </p>
+            )}
+            {queue.key === "inbox" && triageResult && (
+              <div
+                className="integration-notice"
+                role={
+                  triageResult.outcome === "completed" ||
+                  triageResult.outcome === "empty"
+                    ? "status"
+                    : "alert"
+                }
+              >
+                <strong>
+                  {triageResult.outcome === "completed"
+                    ? `Triaged ${triageResult.triagedCount} task${triageResult.triagedCount === 1 ? "" : "s"}.`
+                    : triageResult.outcome === "empty"
+                      ? "No Inbox tasks require triage in this scope."
+                      : triageResult.outcome === "partial"
+                        ? `Partial triage: ${triageResult.triagedCount} of ${triageResult.selectedCount} tasks completed.`
+                        : "Inbox triage failed for every selected task."}
+                </strong>
+                {triageResult.results.length > 0 && (
+                  <ul>
+                    {triageResult.results.map((result) => (
+                      <li key={result.id}>
+                        <strong>
+                          #{result.id} · {result.title}
+                        </strong>{" "}
+                        — {result.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {queue.items.length ? (
               <ol>
                 {queue.items.map((item) => (
@@ -4780,6 +4889,15 @@ function SettingsPanel() {
   const [agentClaimExpiryWarningMinutes, setAgentClaimExpiryWarningMinutes] =
     useState("10");
   const [localCodexTimeoutSeconds, setLocalCodexTimeoutSeconds] = useState("");
+  const [inboxTriagerBatchSize, setInboxTriagerBatchSize] = useState(
+    String(defaultInboxTriageBatchSize),
+  );
+  const [inboxTriagerEnabled, setInboxTriagerEnabled] = useState(true);
+  const [inboxTriagerModel, setInboxTriagerModel] =
+    useState<NoteGroomerModel | null>(null);
+  const [inboxTriagerReasoningEffort, setInboxTriagerReasoningEffort] =
+    useState<AssistantReasoningEffort | null>(null);
+  const [inboxTriagerPrompt, setInboxTriagerPrompt] = useState("");
   const [noteGroomerEnabled, setNoteGroomerEnabled] = useState(true);
   const [noteGroomerModel, setNoteGroomerModel] =
     useState<NoteGroomerModel | null>(null);
@@ -4811,6 +4929,11 @@ function SettingsPanel() {
         ? ""
         : String(settings.localCodexTimeoutSeconds),
     );
+    setInboxTriagerBatchSize(String(settings.inboxTriagerBatchSize));
+    setInboxTriagerEnabled(settings.inboxTriagerEnabled);
+    setInboxTriagerModel(settings.inboxTriagerModel);
+    setInboxTriagerReasoningEffort(settings.inboxTriagerReasoningEffort);
+    setInboxTriagerPrompt(settings.inboxTriagerPrompt);
     setNoteGroomerEnabled(settings.noteGroomerEnabled);
     setNoteGroomerModel(settings.noteGroomerModel);
     setNoteGroomerReasoningEffort(settings.noteGroomerReasoningEffort);
@@ -4837,6 +4960,13 @@ function SettingsPanel() {
         (settingsQuery.data.localCodexTimeoutSeconds === null
           ? ""
           : String(settingsQuery.data.localCodexTimeoutSeconds)) ||
+      inboxTriagerBatchSize !==
+        String(settingsQuery.data.inboxTriagerBatchSize) ||
+      inboxTriagerEnabled !== settingsQuery.data.inboxTriagerEnabled ||
+      inboxTriagerModel !== settingsQuery.data.inboxTriagerModel ||
+      inboxTriagerReasoningEffort !==
+        settingsQuery.data.inboxTriagerReasoningEffort ||
+      inboxTriagerPrompt !== settingsQuery.data.inboxTriagerPrompt ||
       noteGroomerEnabled !== settingsQuery.data.noteGroomerEnabled ||
       noteGroomerModel !== settingsQuery.data.noteGroomerModel ||
       noteGroomerReasoningEffort !==
@@ -4870,6 +5000,7 @@ function SettingsPanel() {
     const warningMinutes = Number(agentClaimExpiryWarningMinutes);
     const timeoutSeconds =
       localCodexTimeoutSeconds === "" ? null : Number(localCodexTimeoutSeconds);
+    const triageBatchSize = Number(inboxTriagerBatchSize);
     const validationErrors: Record<string, string[]> = {};
     if (
       !Number.isInteger(leaseMinutes) ||
@@ -4906,12 +5037,23 @@ function SettingsPanel() {
         `Enter a whole number from ${minimumLocalCodexTimeoutSeconds} through ${maximumLocalCodexTimeoutSeconds}, or reset to the default.`,
       ];
     }
+    if (
+      !Number.isInteger(triageBatchSize) ||
+      triageBatchSize < minimumInboxTriageBatchSize ||
+      triageBatchSize > maximumInboxTriageBatchSize
+    ) {
+      validationErrors.inboxTriagerBatchSize = [
+        `Enter a whole number from ${minimumInboxTriageBatchSize} through ${maximumInboxTriageBatchSize}.`,
+      ];
+    }
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       setError(
         validationErrors.localCodexTimeoutSeconds
           ? "Check the Local Codex runtime settings."
-          : "Check the agent coordination settings.",
+          : validationErrors.inboxTriagerBatchSize
+            ? "Check the Inbox triage settings."
+            : "Check the agent coordination settings.",
       );
       setNotice("");
       return;
@@ -4926,6 +5068,11 @@ function SettingsPanel() {
         agentClaimLeaseMinutes: leaseMinutes,
         agentClaimExpiryWarningMinutes: warningMinutes,
         localCodexTimeoutSeconds: timeoutSeconds,
+        inboxTriagerBatchSize: triageBatchSize,
+        inboxTriagerEnabled,
+        inboxTriagerModel,
+        inboxTriagerReasoningEffort,
+        inboxTriagerPrompt,
         noteGroomerEnabled,
         noteGroomerModel,
         noteGroomerReasoningEffort,
@@ -5142,6 +5289,152 @@ function SettingsPanel() {
               </small>
             </div>
           </div>
+        </section>
+        <section aria-labelledby="inbox-triager-prompt-title">
+          <div>
+            <h2 id="inbox-triager-prompt-title">
+              Triage Inbox with local Codex
+            </h2>
+            <p>
+              Controls how a batch from the Inbox requiring triage queue is
+              clarified before moving to Researching.
+            </p>
+          </div>
+          <label className="form-field" htmlFor="inbox-triager-batch-size">
+            <span>Tasks per run</span>
+            <input
+              id="inbox-triager-batch-size"
+              type="number"
+              min={minimumInboxTriageBatchSize}
+              max={maximumInboxTriageBatchSize}
+              step={1}
+              value={inboxTriagerBatchSize}
+              disabled={saving}
+              aria-invalid={Boolean(errors.inboxTriagerBatchSize)}
+              aria-describedby={
+                errors.inboxTriagerBatchSize
+                  ? "inboxTriagerBatchSize-error"
+                  : undefined
+              }
+              onChange={(event) => {
+                setInboxTriagerBatchSize(event.target.value);
+                clearFieldError("inboxTriagerBatchSize");
+              }}
+            />
+            {errors.inboxTriagerBatchSize && (
+              <small id="inboxTriagerBatchSize-error" className="field-error">
+                {errors.inboxTriagerBatchSize.join(" ")}
+              </small>
+            )}
+            <small>
+              Each run selects up to this many tasks from the current dashboard
+              scope, in queue order.
+            </small>
+          </label>
+          <div className="helper-action-toggle">
+            <label htmlFor="inbox-triager-enabled">
+              <input
+                id="inbox-triager-enabled"
+                type="checkbox"
+                checked={inboxTriagerEnabled}
+                disabled={saving}
+                onChange={(event) => {
+                  setInboxTriagerEnabled(event.target.checked);
+                  setNotice("");
+                }}
+              />
+              <span>Enable Triage Inbox with local Codex</span>
+            </label>
+            <small>
+              Show the bulk action on the Inbox dashboard queue and allow direct
+              API requests.
+            </small>
+          </div>
+          <div className="helper-runtime-grid">
+            <div className="form-field">
+              <label htmlFor="inbox-triager-model">Model</label>
+              <select
+                id="inbox-triager-model"
+                value={inboxTriagerModel ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setInboxTriagerModel(
+                    noteGroomerModels.find(
+                      (model) => model === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use environment/default model</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+              </select>
+              <small>
+                Effective model:{" "}
+                <code>
+                  {inboxTriagerModel ??
+                    settingsQuery.data.inboxTriagerEffectiveModel}
+                </code>
+                {inboxTriagerModel
+                  ? " (saved override)"
+                  : " (environment/default)"}
+              </small>
+            </div>
+            <div className="form-field">
+              <label htmlFor="inbox-triager-reasoning-effort">
+                Reasoning level
+              </label>
+              <select
+                id="inbox-triager-reasoning-effort"
+                value={inboxTriagerReasoningEffort ?? ""}
+                disabled={saving}
+                onChange={(event) => {
+                  setInboxTriagerReasoningEffort(
+                    assistantReasoningEfforts.find(
+                      (effort) => effort === event.target.value,
+                    ) ?? null,
+                  );
+                  setNotice("");
+                }}
+              >
+                <option value="">Use selected model default</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+              </select>
+              <small>
+                Effective reasoning:{" "}
+                <code>
+                  {inboxTriagerReasoningEffort ?? "selected model default"}
+                </code>
+                {inboxTriagerReasoningEffort ? " (saved override)" : ""}
+              </small>
+            </div>
+          </div>
+          <label className="form-field" htmlFor="inbox-triager-prompt">
+            <span>Prompt instructions</span>
+            <textarea
+              id="inbox-triager-prompt"
+              value={inboxTriagerPrompt}
+              onChange={(event) => {
+                setInboxTriagerPrompt(event.target.value);
+                setNotice("");
+              }}
+              rows={13}
+              maxLength={20_000}
+              required
+              disabled={saving}
+            />
+            <small>
+              Queue selection, task data, output schema instructions, lifecycle
+              rules, and prompt-injection boundaries remain
+              application-controlled.
+            </small>
+          </label>
         </section>
         <section aria-labelledby="note-groomer-prompt-title">
           <div>
@@ -6462,10 +6755,13 @@ export default function App() {
         <div className="product-bar">
           <span>Actionables</span>
           <IconButton
-            label="Close project navigation"
-            onClick={() => setSidebarCollapsed(true)}
+            label={
+              sidebarCollapsed ? "Expand left sidebar" : "Collapse left sidebar"
+            }
+            expanded={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed((value) => !value)}
           >
-            <PanelLeftClose />
+            {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
           </IconButton>
         </div>
         <nav className="primary-navigation" aria-label="Primary">
@@ -6480,7 +6776,12 @@ export default function App() {
               })
             }
           >
-            <LayoutDashboard /> Dashboard
+            <LayoutDashboard aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Dashboard
+            </span>
           </button>
           <button
             type="button"
@@ -6495,7 +6796,12 @@ export default function App() {
                 : replaceLocation("actionables", null, query)
             }
           >
-            <List /> Actionables
+            <List aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Actionables
+            </span>
           </button>
           <button
             type="button"
@@ -6506,7 +6812,12 @@ export default function App() {
             }
             onClick={() => patchQuery({ status: "Done" }, "actionables")}
           >
-            <CheckCircle2 /> Done
+            <CheckCircle2 aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Done
+            </span>
           </button>
           <button
             type="button"
@@ -6515,21 +6826,36 @@ export default function App() {
               replaceLocation("archive", null, { archived: "archived" })
             }
           >
-            <Archive /> Archive
+            <Archive aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Archive
+            </span>
           </button>
           <button
             type="button"
             className={view === "data" ? "is-selected" : ""}
             onClick={() => replaceLocation("data", null, query)}
           >
-            <Database /> Data
+            <Database aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Data
+            </span>
           </button>
           <button
             type="button"
             className={view === "settings" ? "is-selected" : ""}
             onClick={() => replaceLocation("settings", null, query)}
           >
-            <Settings /> Settings
+            <Settings aria-hidden="true" />
+            <span
+              className={`primary-navigation-label ${sidebarCollapsed ? "sr-only" : ""}`}
+            >
+              Settings
+            </span>
           </button>
         </nav>
         <div className="project-tree">
@@ -6711,7 +7037,7 @@ export default function App() {
                 : "Close project navigation"
             }
             onClick={() => setSidebarCollapsed((value) => !value)}
-            pressed={!sidebarCollapsed}
+            expanded={!sidebarCollapsed}
             className="nav-toggle"
           >
             {sidebarCollapsed ? <PanelLeftOpen /> : <Menu />}
@@ -7238,6 +7564,18 @@ export default function App() {
               replaceLocation("actionables", null, queue as QueryState);
             }}
             onOpenItem={selectRow}
+            onTriaged={async (result) => {
+              await invalidateDailyUse();
+              setNotice(
+                result.outcome === "completed"
+                  ? `Inbox triage completed for ${result.triagedCount} task${result.triagedCount === 1 ? "" : "s"}.`
+                  : result.outcome === "empty"
+                    ? "No Inbox tasks require triage in this scope."
+                    : result.outcome === "partial"
+                      ? `Inbox triage was partial: ${result.triagedCount} triaged, ${result.failedCount} failed, ${result.skippedCount} skipped.`
+                      : "Inbox triage did not complete any selected tasks.",
+              );
+            }}
           />
         </main>
       ) : (
@@ -7451,6 +7789,12 @@ export default function App() {
                       >
                         {item.title}
                       </span>
+                      {item.childCompletion && (
+                        <span className="child-count">
+                          {item.childCompletion.terminal}/
+                          {item.childCompletion.total}
+                        </span>
+                      )}
                       {item.tags.length > 0 && (
                         <span className="row-tags">
                           {item.tags.slice(0, 2).map((tag, index) => (
@@ -7478,12 +7822,6 @@ export default function App() {
                               +{item.tags.length - 2}
                             </span>
                           )}
-                        </span>
-                      )}
-                      {item.childCompletion && (
-                        <span className="child-count">
-                          {item.childCompletion.terminal}/
-                          {item.childCompletion.total}
                         </span>
                       )}
                       {item.unresolvedDependencyCount > 0 && (
@@ -7658,16 +7996,6 @@ export default function App() {
         </aside>
       ) : null}
 
-      {sidebarCollapsed && (
-        <button
-          type="button"
-          className="collapsed-brand"
-          onClick={() => setSidebarCollapsed(false)}
-          aria-label="Open project navigation"
-        >
-          A
-        </button>
-      )}
       <div className="sr-only" aria-live="polite">
         {notice}
         {listQuery.isFetching ? " Results updating." : ""}

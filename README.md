@@ -148,11 +148,16 @@ visible.
 
 ## Optional local Codex helpers
 
-Note grooming and relationship auditing can use a signed-in local Codex CLI to
-propose improvements to an Actionable. They run only when requested, use a
-read-only sandbox, and always require review before changes are applied. See
+Inbox triage, note grooming, and relationship auditing can use a signed-in local
+Codex CLI. From the Dashboard, **Triage up to N** processes the configured
+number of active tasks from the current **Inbox requiring triage** queue,
+updates each task's triage fields without changing Research notes, and moves
+successful tasks to `Researching`. Per-task failures are reported without
+rolling back other successful tasks or falsely reporting the batch as complete.
+The other helpers remain review-only proposals. All helpers run only when
+requested and use a read-only Codex sandbox. See
 [Windows setup and local operation](docs/windows-setup.md#optional-codex-instructions-and-workflow-skill)
-for installation paths and conflict-safe behavior.
+for configuration, invocation, and troubleshooting.
 
 ## Data and backups
 

@@ -53,6 +53,199 @@ test("dashboard queues open the equivalent URL-backed actionable list", async ({
   expect(consoleErrors).toEqual([]);
 });
 
+test("desktop sidebar collapses to an accessible navigation rail without losing scope", async ({
+  page,
+}) => {
+  const scopes = await (await page.request.get("/api/scopes")).json();
+  const project = scopes.projects.find(
+    (candidate: {
+      archivedAt: string | null;
+      repositories: Array<{
+        archivedAt: string | null;
+        worktrees: Array<{ archivedAt: string | null }>;
+      }>;
+    }) =>
+      !candidate.archivedAt &&
+      candidate.repositories.some(
+        (repository) =>
+          !repository.archivedAt &&
+          repository.worktrees.some((worktree) => !worktree.archivedAt),
+      ),
+  );
+  const repository = project?.repositories.find(
+    (candidate: {
+      archivedAt: string | null;
+      worktrees: Array<{ archivedAt: string | null }>;
+    }) =>
+      !candidate.archivedAt &&
+      candidate.worktrees.some((worktree) => !worktree.archivedAt),
+  );
+  const worktree = repository?.worktrees.find(
+    (candidate: { archivedAt: string | null }) => !candidate.archivedAt,
+  );
+  expect(project).toBeTruthy();
+  expect(repository).toBeTruthy();
+  expect(worktree).toBeTruthy();
+  if (!project || !repository || !worktree) return;
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(
+    `/?project=${project.id}&repository=${repository.id}&worktree=${worktree.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: /^Actionables \d+$/ }),
+  ).toBeVisible();
+
+  const shell = page.locator(".app-shell");
+  const sidebar = page.getByRole("complementary", {
+    name: "Projects and worktrees",
+  });
+  const primaryNavigation = sidebar.getByRole("navigation", {
+    name: "Primary",
+  });
+  const projectTree = sidebar.locator(".project-tree");
+  const selectedWorktree = projectTree.locator(".worktree-row.is-selected");
+  const navigationNames = [
+    "Dashboard",
+    "Actionables",
+    "Done",
+    "Archive",
+    "Data",
+    "Settings",
+  ];
+
+  await expect(selectedWorktree).toHaveClass(/is-selected/);
+  await expect(selectedWorktree).toContainText(worktree.name);
+  const collapse = sidebar.getByRole("button", {
+    name: "Collapse left sidebar",
+  });
+  await expect(collapse).toBeVisible();
+  await expect(collapse).toHaveAttribute("aria-expanded", "true");
+  await collapse.press("Enter");
+
+  await expect(shell).toHaveClass(/sidebar-collapsed/);
+  const expand = sidebar.getByRole("button", {
+    name: "Expand left sidebar",
+  });
+  await expect(expand).toBeVisible();
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expect(projectTree).toBeHidden();
+  await expect(sidebar.locator(".sidebar-status")).toBeHidden();
+  await expect(selectedWorktree).toHaveClass(/is-selected/);
+
+  const collapsedGeometry = await shell.evaluate((element) => {
+    const sidebar = element.querySelector<HTMLElement>(".sidebar")!;
+    return {
+      columns: getComputedStyle(element).gridTemplateColumns,
+      sidebarWidth: sidebar.getBoundingClientRect().width,
+    };
+  });
+  expect(collapsedGeometry.sidebarWidth).toBe(52);
+  expect(collapsedGeometry.columns.startsWith("52px ")).toBe(true);
+
+  for (const name of navigationNames) {
+    const button = primaryNavigation.getByRole("button", {
+      name,
+      exact: true,
+    });
+    await expect(button).toBeVisible();
+    await expect(button.locator(".primary-navigation-label")).toHaveClass(
+      /sr-only/,
+    );
+  }
+
+  const assertScopePreserved = () => {
+    const current = new URL(page.url());
+    expect(current.searchParams.get("project")).toBe(project.id);
+    expect(current.searchParams.get("repository")).toBe(repository.id);
+    expect(current.searchParams.get("worktree")).toBe(worktree.id);
+  };
+  assertScopePreserved();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await primaryNavigation
+    .getByRole("button", { name: "Dashboard", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/dashboard\?/);
+  assertScopePreserved();
+
+  await expand.press("Space");
+  await expect(shell).not.toHaveClass(/sidebar-collapsed/);
+  await expect(projectTree).toBeVisible();
+  await expect(selectedWorktree).toBeVisible();
+  await expect(selectedWorktree).toHaveClass(/is-selected/);
+  for (const name of navigationNames) {
+    await expect(
+      primaryNavigation
+        .getByRole("button", { name, exact: true })
+        .locator(".primary-navigation-label"),
+    ).not.toHaveClass(/sr-only/);
+  }
+
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.goto("/");
+  const mobileOpen = page
+    .getByRole("banner")
+    .getByRole("button", { name: "Open project navigation" });
+  await expect(mobileOpen).toBeVisible();
+  const responsiveGeometry = await shell.evaluate((element) => ({
+    columns: getComputedStyle(element).gridTemplateColumns,
+    sidebarOpacity: getComputedStyle(
+      element.querySelector<HTMLElement>(".sidebar")!,
+    ).opacity,
+  }));
+  expect(responsiveGeometry.columns.startsWith("0px ")).toBe(true);
+  expect(responsiveGeometry.sidebarOpacity).toBe("0");
+
+  await mobileOpen.click();
+  await expect(primaryNavigation).toBeVisible();
+  await expect(projectTree).toBeVisible();
+});
+
+test("bulk Inbox triage surfaces partial outcomes without reporting success", async ({
+  page,
+}) => {
+  let requestPayload: unknown;
+  await page.route("**/api/assistant/inbox-triage", async (route) => {
+    requestPayload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        outcome: "partial",
+        requestedLimit: 5,
+        selectedCount: 2,
+        triagedCount: 1,
+        skippedCount: 0,
+        failedCount: 1,
+        results: [
+          {
+            id: 1,
+            title: "Triaged task",
+            outcome: "triaged",
+            message: "Moved to Researching with gpt-5.6-terra.",
+          },
+          {
+            id: 2,
+            title: "Failed task",
+            outcome: "failed",
+            message: "Local Codex failed while triaging this task.",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/dashboard");
+  await page.getByRole("button", { name: "Triage up to 5" }).click();
+  const result = page.getByRole("alert");
+  await expect(result).toContainText("Partial triage: 1 of 2 tasks completed.");
+  await expect(result).toContainText("#1 · Triaged task");
+  await expect(result).toContainText("#2 · Failed task");
+  expect(requestPayload).toEqual({});
+  await expect(page.getByText(/Inbox triage was partial:/)).toBeVisible();
+});
+
 test("Done navigation separates completed work and preserves other filters", async ({
   page,
 }) => {

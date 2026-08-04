@@ -7,6 +7,7 @@ import {
 import type { AppPrismaClient } from "./database.js";
 import type { Prisma } from "./generated/prisma/client.js";
 import {
+  defaultInboxTriagerPrompt,
   defaultNoteGroomerPrompt,
   defaultRelationshipAuditorPrompt,
 } from "./assistant-prompts.js";
@@ -19,6 +20,11 @@ function toContract(
     agentClaimLeaseMinutes: number;
     agentClaimExpiryWarningMinutes: number;
     localCodexTimeoutSeconds: number | null;
+    inboxTriagerBatchSize: number;
+    inboxTriagerEnabled: boolean;
+    inboxTriagerModel: string | null;
+    inboxTriagerReasoningEffort: string | null;
+    inboxTriagerPrompt: string;
     noteGroomerEnabled: boolean;
     noteGroomerModel: string | null;
     noteGroomerReasoningEffort: string | null;
@@ -38,6 +44,12 @@ function toContract(
     localCodexTimeoutSeconds: settings.localCodexTimeoutSeconds,
     localCodexEffectiveTimeoutSeconds:
       settings.localCodexTimeoutSeconds ?? defaultLocalCodexTimeoutSeconds,
+    inboxTriagerBatchSize: settings.inboxTriagerBatchSize,
+    inboxTriagerEnabled: settings.inboxTriagerEnabled,
+    inboxTriagerModel: settings.inboxTriagerModel,
+    inboxTriagerReasoningEffort: settings.inboxTriagerReasoningEffort,
+    inboxTriagerEffectiveModel: settings.inboxTriagerModel ?? defaultModel,
+    inboxTriagerPrompt: settings.inboxTriagerPrompt,
     noteGroomerEnabled: settings.noteGroomerEnabled,
     noteGroomerModel: settings.noteGroomerModel,
     noteGroomerReasoningEffort: settings.noteGroomerReasoningEffort,
@@ -67,6 +79,7 @@ function getHelperAgentSettingsRow(prisma: SettingsClient) {
     update: {},
     create: {
       id: settingsId,
+      inboxTriagerPrompt: defaultInboxTriagerPrompt,
       noteGroomerPrompt: defaultNoteGroomerPrompt,
       relationshipAuditorPrompt: defaultRelationshipAuditorPrompt,
     },
@@ -101,6 +114,11 @@ export async function updateHelperAgentSettings(
       agentClaimLeaseMinutes: input.agentClaimLeaseMinutes,
       agentClaimExpiryWarningMinutes: input.agentClaimExpiryWarningMinutes,
       localCodexTimeoutSeconds: input.localCodexTimeoutSeconds,
+      inboxTriagerBatchSize: input.inboxTriagerBatchSize,
+      inboxTriagerEnabled: input.inboxTriagerEnabled,
+      inboxTriagerModel: input.inboxTriagerModel,
+      inboxTriagerReasoningEffort: input.inboxTriagerReasoningEffort,
+      inboxTriagerPrompt: input.inboxTriagerPrompt,
       noteGroomerEnabled: input.noteGroomerEnabled,
       noteGroomerModel: input.noteGroomerModel,
       noteGroomerReasoningEffort: input.noteGroomerReasoningEffort,

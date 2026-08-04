@@ -26,37 +26,49 @@ Installation is idempotent. Existing unrelated content in `AGENTS.md` is preserv
 
 Set `ACTIONABLES_AGENT_HOME` before starting the API only when Actionables should use a profile root other than the current Windows user's home directory. This override is primarily intended for isolated validation.
 
-The optional note groomer and relationship auditor require the local Codex CLI
-to be installed and signed in. Verify it from the same Windows user account that
-runs Actionables:
+The optional Inbox triager, note groomer, and relationship auditor require the
+local Codex CLI to be installed and signed in. Verify it from the same Windows
+user account that runs Actionables:
 
 ```powershell
 codex --version
 ```
 
-Actionables invokes Codex with an explicit model, a read-only sandbox, an
-ephemeral session, an isolated temporary working directory, and a required JSON
-output schema. The default model is `gpt-5.6-terra`. To select another available
-lower-tier model, set `ACTIONABLES_ASSISTANT_MODEL` before starting the app:
+Actionables invokes Codex once per helper task with an explicit model, a
+read-only sandbox, an ephemeral session, an isolated temporary working
+directory, and a required JSON output schema. The default model is
+`gpt-5.6-terra`. To select another available lower-tier model, set
+`ACTIONABLES_ASSISTANT_MODEL` before starting the app:
 
 ```powershell
 $env:ACTIONABLES_ASSISTANT_MODEL = 'gpt-5.6-terra'
 ```
 
 If `codex` is not on `PATH`, set `ACTIONABLES_CODEX_PATH` to the absolute
-`codex.exe` path. Restart Actionables after changing either setting. Model
-generation never saves an Actionable directly: review and explicitly apply a
-note proposal in the Research notes tab. Relationship-audit recommendations are
-limited to one top-level work item and its direct subtasks, and the audit UI has
-no relationship mutation controls. No `OPENAI_API_KEY` is required for this
-local-CLI integration.
+`codex.exe` path. Restart Actionables after changing either setting.
 
-Settings can override the model and reasoning level for **Groom notes with local
-Codex** only. Choosing the environment/default model keeps using
-`ACTIONABLES_ASSISTANT_MODEL` (or the built-in fallback), and choosing the
+Configure **Settings → Triage Inbox with local Codex**, including **Tasks per
+run**, then open the Dashboard and choose **Triage up to N** on **Inbox requiring
+triage**. Each run selects at most that many active, unarchived Inbox tasks from
+the current dashboard scope in queue order. A valid result updates only that
+task's finding, description, priority, effort, evidence state, tags, and planned
+validation; Research notes are never changed. The application applies each task
+atomically and moves it from `Inbox` to `Researching`. One task failure does not
+undo other successful triage, and the Dashboard reports completed, empty,
+partial, and failed batches separately.
+
+Note generation never saves an Actionable directly: review and explicitly apply
+a note proposal in the Research notes tab. Relationship-audit recommendations
+are limited to one top-level work item and its direct subtasks, and the audit UI
+has no relationship mutation controls. No `OPENAI_API_KEY` is required for
+these local-CLI integrations.
+
+Settings can independently override the model, reasoning level, enabled state,
+and prompt for all three helpers. Choosing the environment/default model keeps
+using `ACTIONABLES_ASSISTANT_MODEL` (or the built-in fallback), and choosing the
 selected-model reasoning default leaves Codex's model-specific reasoning level
-unchanged. The relationship auditor always keeps the environment/default runner
-configuration.
+unchanged. The shared local Codex timeout applies to each task in a bulk Inbox
+triage run.
 
 ## Clean setup
 

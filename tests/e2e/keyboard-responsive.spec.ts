@@ -170,6 +170,109 @@ test("finding title reveal ignores row whitespace and remains stable", async ({
   await expect(taggedTitle).toHaveCSS("text-overflow", "clip");
 });
 
+test("tags share the finding-cell right edge with and without a subtask count", async ({
+  page,
+}) => {
+  const scopes = await (await page.request.get("/api/scopes")).json();
+  const project = scopes.projects[0];
+  const repository = project.repositories[0];
+  const worktree = repository.worktrees[0];
+  const suffix = Date.now();
+  const create = async (title: string) => {
+    const response = await page.request.post("/api/actionables", {
+      data: {
+        title,
+        priority: "Low",
+        effort: "XS",
+        evidenceState: "Confirmed",
+        projectId: project.id,
+        repositoryId: repository.id,
+        worktreeId: worktree.id,
+        finding: "Tags should share the finding-cell right edge.",
+        description: "Exercise tag alignment with and without a subtask count.",
+        research: [],
+        validation: [],
+        tags: [`alignment-${suffix}`],
+        userSources: [],
+      },
+    });
+    expect(response.status()).toBe(201);
+    return (await response.json()).item;
+  };
+  const parent = await create(`T-320 count ${suffix}`);
+  const peer = await create(`T-320 plain ${suffix}`);
+  const subtaskResponse = await page.request.post(
+    `/api/actionables/${parent.id}/subtasks`,
+    {
+      data: {
+        version: parent.version,
+        title: `T-320 child ${suffix}`,
+      },
+    },
+  );
+  expect(subtaskResponse.status()).toBe(200);
+
+  const inspect = async (width: number, height: number) => {
+    await page.setViewportSize({ width, height });
+    await page.goto(`/?q=${encodeURIComponent(String(suffix))}`);
+    const parentRow = page.locator(`[data-actionable-id="${parent.id}"]`);
+    const peerRow = page.locator(`[data-actionable-id="${peer.id}"]`);
+    const parentCount = parentRow.locator(".child-count");
+    await expect(parentRow.locator(".row-tags")).toBeVisible();
+    await expect(peerRow.locator(".row-tags")).toBeVisible();
+
+    const geometry = await Promise.all(
+      [parentRow, peerRow].map((row) =>
+        row.locator(".finding-cell").evaluate((cell) => {
+          const cellRect = cell.getBoundingClientRect();
+          const tagsRect = cell
+            .querySelector<HTMLElement>(".row-tags")!
+            .getBoundingClientRect();
+          const countRect = cell
+            .querySelector<HTMLElement>(".child-count")
+            ?.getBoundingClientRect();
+          return {
+            cellRight: cellRect.right,
+            countRight: countRect?.right ?? null,
+            rightPadding: Number.parseFloat(
+              getComputedStyle(cell).paddingRight,
+            ),
+            tagsLeft: tagsRect.left,
+            tagsRight: tagsRect.right,
+          };
+        }),
+      ),
+    );
+
+    expect(
+      Math.abs(geometry[0].tagsRight - geometry[1].tagsRight),
+    ).toBeLessThanOrEqual(1);
+    for (const row of geometry) {
+      expect(
+        Math.abs(row.cellRight - row.tagsRight - row.rightPadding),
+      ).toBeLessThanOrEqual(1);
+    }
+    return { geometry, parentCount };
+  };
+
+  for (const viewport of [
+    { width: 1586, height: 990 },
+    { width: 900, height: 800 },
+  ]) {
+    const { geometry, parentCount } = await inspect(
+      viewport.width,
+      viewport.height,
+    );
+    await expect(parentCount).toBeVisible();
+    await expect(parentCount).toHaveText("0/1");
+    expect(geometry[0].countRight).not.toBeNull();
+    expect(geometry[0].tagsLeft - geometry[0].countRight!).toBeGreaterThan(0);
+  }
+
+  const mobile = await inspect(390, 844);
+  await expect(mobile.parentCount).toBeHidden();
+});
+
 test("supported viewports and 200 percent equivalent reflow have no page overflow or obscured primary controls", async ({
   page,
 }) => {

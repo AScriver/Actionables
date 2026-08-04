@@ -941,6 +941,25 @@ export async function getActionable(
   return row ? toDetail(row) : null;
 }
 
+export async function listInboxTriageCandidates(
+  prisma: AppPrismaClient,
+  scope: Partial<Pick<ActionableQuery, "project" | "repository" | "worktree">>,
+  limit: number,
+): Promise<ActionableDetail[]> {
+  return (await allActionableRows(prisma))
+    .filter(
+      (row) =>
+        (!scope.project || row.projectId === scope.project) &&
+        (!scope.repository || row.repositoryId === scope.repository) &&
+        (!scope.worktree || row.worktreeId === scope.worktree) &&
+        !archiveState(row).isArchived &&
+        row.status === "Inbox",
+    )
+    .sort((left, right) => left.sourceOrdinal - right.sourceOrdinal)
+    .slice(0, limit)
+    .map(toDetail);
+}
+
 export async function getDashboard(
   prisma: AppPrismaClient,
   scope: Pick<ActionableQuery, "project" | "repository" | "worktree">,

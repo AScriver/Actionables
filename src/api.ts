@@ -11,6 +11,7 @@ import {
   scopeOptionsResponseSchema,
   importCommitResponseSchema,
   importPreviewResponseSchema,
+  inboxTriageBatchResponseSchema,
   prepareImportCommitResponseSchema,
   type ActionableDetail,
   type ActionableQuery,
@@ -29,6 +30,7 @@ import {
   type GroomActionableNotesRequest,
   type GroomActionableNotesResponse,
   type HelperAgentSettings,
+  type InboxTriageBatchResponse,
   type ProblemDetails,
   type DependencyActionRequest,
   type DetachParentRequest,
@@ -49,6 +51,7 @@ import {
   relationshipAuditResponseSchema,
   type AuditActionableRelationshipsRequest,
   type RelationshipAuditResponse,
+  type TriageInboxQueueRequest,
   type UpdateHelperAgentSettingsRequest,
 } from "@actionables/contracts";
 
@@ -251,6 +254,17 @@ export async function groomActionableNotes(
 ): Promise<GroomActionableNotesResponse> {
   return groomActionableNotesResponseSchema.parse(
     await requestJson(`/api/actionables/${id}/assistant/note-grooming`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function triageInboxQueue(
+  input: TriageInboxQueueRequest,
+): Promise<InboxTriageBatchResponse> {
+  return inboxTriageBatchResponseSchema.parse(
+    await requestJson("/api/assistant/inbox-triage", {
       method: "POST",
       body: JSON.stringify(input),
     }),

@@ -20,6 +20,7 @@ import {
   dashboardResponseSchema,
   groomActionableNotesRequestSchema,
   groomActionableNotesResponseSchema,
+  inboxTriageBatchResponseSchema,
   helperAgentSettingsSchema,
   agentIntegrationSettingsSchema,
   agentIntegrationInstallResponseSchema,
@@ -37,6 +38,7 @@ import {
   prepareImportCommitResponseSchema,
   forceReleaseAgentClaimRequestSchema,
   relationshipAuditResponseSchema,
+  triageInboxQueueRequestSchema,
   type ActionableQuery,
   type ApiRuntimeConfig,
 } from "@actionables/contracts";
@@ -88,6 +90,7 @@ import {
   type AssistantRunner,
 } from "./assistant-runner.js";
 import { groomActionableNotes } from "./note-groomer.js";
+import { triageInboxQueue } from "./inbox-triager.js";
 import { auditWorkItemRelationships } from "./relationship-auditor.js";
 import {
   getHelperAgentSettings,
@@ -419,8 +422,22 @@ export function buildApp({
   });
 
   app.patch("/api/settings/helper-agents", async (request, reply) => {
+    const currentSettings = await getHelperAgentSettings(
+      prisma,
+      assistantDefaultModel,
+    );
     const parsed = updateHelperAgentSettingsRequestSchema.safeParse(
-      request.body,
+      request.body && typeof request.body === "object"
+        ? {
+            inboxTriagerBatchSize: currentSettings.inboxTriagerBatchSize,
+            inboxTriagerEnabled: currentSettings.inboxTriagerEnabled,
+            inboxTriagerModel: currentSettings.inboxTriagerModel,
+            inboxTriagerReasoningEffort:
+              currentSettings.inboxTriagerReasoningEffort,
+            inboxTriagerPrompt: currentSettings.inboxTriagerPrompt,
+            ...request.body,
+          }
+        : request.body,
     );
     if (!parsed.success) {
       return problem(
@@ -617,6 +634,51 @@ export function buildApp({
       return actionableDetailResponseSchema.parse({ item });
     },
   );
+
+  app.post("/api/assistant/inbox-triage", async (request, reply) => {
+    const parsed = triageInboxQueueRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return problem(
+        request,
+        reply,
+        422,
+        "VALIDATION_ERROR",
+        "Check the Inbox-triage request.",
+        { errors: fieldErrors(parsed.error) },
+      );
+    }
+    const settings = await getHelperAgentSettings(
+      prisma,
+      assistantDefaultModel,
+    );
+    if (!settings.inboxTriagerEnabled) {
+      return problem(
+        request,
+        reply,
+        409,
+        "ASSISTANT_ACTION_DISABLED",
+        "Inbox triage is disabled.",
+        {
+          detail:
+            "Enable Triage Inbox with local Codex in Settings before retrying.",
+        },
+      );
+    }
+    return inboxTriageBatchResponseSchema.parse(
+      await triageInboxQueue(
+        prisma,
+        assistantRunner,
+        parsed.data,
+        settings.inboxTriagerBatchSize,
+        settings.inboxTriagerPrompt,
+        {
+          model: settings.inboxTriagerModel ?? undefined,
+          reasoningEffort: settings.inboxTriagerReasoningEffort ?? undefined,
+          timeoutMs: settings.localCodexEffectiveTimeoutSeconds * 1_000,
+        },
+      ),
+    );
+  });
 
   app.post<{ Params: { id: string } }>(
     "/api/actionables/:id/assistant/note-grooming",

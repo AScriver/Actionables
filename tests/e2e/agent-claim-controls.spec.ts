@@ -69,7 +69,7 @@ async function routeDetail(
   };
 }
 
-test("top-level and direct-subtask prompts copy the exact displayed suggestion", async ({
+test("top-level and direct-subtask actions use the exact generated prompt", async ({
   page,
   context,
 }, testInfo) => {
@@ -87,11 +87,8 @@ test("top-level and direct-subtask prompts copy the exact displayed suggestion",
   await page.goto(`/actionables/${ACTIONABLE_ID}`);
 
   const researchInstructions =
-    "Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.";
+    "Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. If research establishes that this task contains multiple independently implementable outcomes, you are authorized to split it into the minimum necessary direct tasks within the same work item. Make each task a narrow, complete, independently verifiable vertical slice through only the relevant layers; do not divide work merely by technical layer or create adjacent cleanup. Narrow the current task to one non-overlapping slice and record the split, rationale, dependencies, and validation boundaries before moving it to Ready. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.";
   const topLevelPrompt = `Use Actionables work item #${original.id}. Claim task #${original.id} — ${original.title} — and begin the Researching phase. ${researchInstructions}`;
-  await expect(page.locator(".agent-start-prompt code")).toHaveText(
-    topLevelPrompt,
-  );
   const openInCodex = page.getByRole("link", { name: "Open in Codex" });
   const topLevelHref = new URL((await openInCodex.getAttribute("href"))!);
   expect(topLevelHref.searchParams.get("prompt")).toBe(topLevelPrompt);
@@ -111,9 +108,6 @@ test("top-level and direct-subtask prompts copy the exact displayed suggestion",
   fixture.setItem(subtask);
   await page.reload();
   const subtaskPrompt = `Use Actionables work item #12. Claim task #${ACTIONABLE_ID} — Copy a direct-subtask prompt — and begin the Researching phase. ${researchInstructions}`;
-  await expect(page.locator(".agent-start-prompt code")).toHaveText(
-    subtaskPrompt,
-  );
   await page
     .getByRole("button", { name: "Copy Codex start-task prompt" })
     .click();
@@ -144,9 +138,6 @@ test("Ready unclaimed tasks recommend claiming and continuing implementation", a
   await page.goto(`/actionables/${ACTIONABLE_ID}`);
 
   const readyPrompt = `Use Actionables work item #${original.id}. Claim task #${original.id} — ${original.title} — and continue from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`;
-  await expect(page.locator(".agent-start-prompt code")).toHaveText(
-    readyPrompt,
-  );
   const preparedHref = new URL(
     (await page
       .getByRole("link", { name: "Open in Codex" })
@@ -166,9 +157,6 @@ test("Ready unclaimed tasks recommend claiming and continuing implementation", a
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await expect(page.locator(".agent-start-prompt code")).toHaveText(
-    readyPrompt,
-  );
   const overflow = await page.evaluate(() => ({
     page: document.documentElement.scrollWidth,
     viewport: document.documentElement.clientWidth,
@@ -190,9 +178,6 @@ test("Ready claimed tasks recommend continuing without reclaiming", async ({
   await page.goto(`/actionables/${ACTIONABLE_ID}`);
 
   const readyPrompt = `Use Actionables work item #${original.id}. Continue task #${original.id} — ${original.title} — from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`;
-  await expect(page.locator(".agent-start-prompt code")).toHaveText(
-    readyPrompt,
-  );
   await expect(page.getByRole("link", { name: "Open in Codex" })).toHaveCount(
     0,
   );

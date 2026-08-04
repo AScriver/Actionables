@@ -12,6 +12,11 @@ model HelperAgentSettings {
   agentClaimLeaseMinutes Int @default(30)
   agentClaimExpiryWarningMinutes Int @default(10)
   localCodexTimeoutSeconds   Int?
+  inboxTriagerBatchSize      Int      @default(5)
+  inboxTriagerEnabled        Boolean  @default(true)
+  inboxTriagerModel          String?
+  inboxTriagerReasoningEffort String?
+  inboxTriagerPrompt         String
   noteGroomerEnabled         Boolean  @default(true)
   noteGroomerModel           String?
   noteGroomerReasoningEffort String?

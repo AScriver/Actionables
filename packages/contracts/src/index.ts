@@ -866,6 +866,9 @@ const helperAgentPromptSchema = z.string().trim().min(1).max(20_000);
 export const defaultLocalCodexTimeoutSeconds = 120;
 export const minimumLocalCodexTimeoutSeconds = 30;
 export const maximumLocalCodexTimeoutSeconds = 900;
+export const defaultInboxTriageBatchSize = 5;
+export const minimumInboxTriageBatchSize = 1;
+export const maximumInboxTriageBatchSize = 50;
 export const localCodexTimeoutSecondsSchema = z
   .number()
   .int()
@@ -897,6 +900,16 @@ const helperAgentSettingsBaseSchema = z
     agentClaimExpiryWarningMinutes: agentClaimExpiryWarningMinutesSchema,
     localCodexTimeoutSeconds: localCodexTimeoutSecondsSchema.nullable(),
     localCodexEffectiveTimeoutSeconds: localCodexTimeoutSecondsSchema,
+    inboxTriagerBatchSize: z
+      .number()
+      .int()
+      .min(minimumInboxTriageBatchSize)
+      .max(maximumInboxTriageBatchSize),
+    inboxTriagerEnabled: z.boolean(),
+    inboxTriagerModel: noteGroomerModelSchema.nullable(),
+    inboxTriagerReasoningEffort: assistantReasoningEffortSchema.nullable(),
+    inboxTriagerEffectiveModel: z.string().trim().min(1).max(200),
+    inboxTriagerPrompt: helperAgentPromptSchema,
     noteGroomerEnabled: z.boolean(),
     noteGroomerModel: noteGroomerModelSchema.nullable(),
     noteGroomerReasoningEffort: assistantReasoningEffortSchema.nullable(),
@@ -936,6 +949,7 @@ export const updateHelperAgentSettingsRequestSchema =
   helperAgentSettingsBaseSchema
     .omit({
       localCodexEffectiveTimeoutSeconds: true,
+      inboxTriagerEffectiveModel: true,
       noteGroomerEffectiveModel: true,
       relationshipAuditorEffectiveModel: true,
       updatedAt: true,
@@ -1029,6 +1043,54 @@ export const groomActionableNotesResponseSchema = z
     basedOnVersion: z.number().int().positive(),
     model: z.string().trim().min(1).max(200),
     proposal: groomActionableNotesProposalSchema,
+  })
+  .strict();
+
+export const triageInboxQueueRequestSchema = z
+  .object({
+    project: z.string().min(1).optional(),
+    repository: z.string().min(1).optional(),
+    worktree: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const inboxTriageProposalSchema = z
+  .object({
+    priority: prioritySchema,
+    effort: effortSchema,
+    evidenceState: evidenceStateSchema,
+    finding: markdownField.min(1),
+    description: markdownField.min(1),
+    validation: notesSchema.min(1),
+    tags: tagsSchema,
+    changes: z
+      .array(z.string().trim().min(1).max(500))
+      .min(1)
+      .max(20)
+      .describe("Concise summary of the completed triage changes."),
+  })
+  .strict();
+
+export const inboxTriageItemResultSchema = z
+  .object({
+    id: z.number().int().positive(),
+    title: z.string().trim().min(1).max(240),
+    outcome: z.enum(["triaged", "skipped", "failed"]),
+    message: z.string().trim().min(1).max(2_000),
+  })
+  .strict();
+
+export const inboxTriageBatchResponseSchema = z
+  .object({
+    outcome: z.enum(["completed", "empty", "partial", "failed"]),
+    requestedLimit: z.number().int().positive(),
+    selectedCount: z.number().int().nonnegative(),
+    triagedCount: z.number().int().nonnegative(),
+    skippedCount: z.number().int().nonnegative(),
+    failedCount: z.number().int().nonnegative(),
+    results: z
+      .array(inboxTriageItemResultSchema)
+      .max(maximumInboxTriageBatchSize),
   })
   .strict();
 
@@ -1983,6 +2045,9 @@ export type UpdateActionableRequest = z.infer<
 export type GroomActionableNotesRequest = z.infer<
   typeof groomActionableNotesRequestSchema
 >;
+export type TriageInboxQueueRequest = z.infer<
+  typeof triageInboxQueueRequestSchema
+>;
 export type HelperAgentSettings = z.infer<typeof helperAgentSettingsSchema>;
 export type NoteGroomerModel = z.infer<typeof noteGroomerModelSchema>;
 export type AssistantReasoningEffort = z.infer<
@@ -2008,6 +2073,11 @@ export type GroomActionableNotesProposal = z.infer<
 >;
 export type GroomActionableNotesResponse = z.infer<
   typeof groomActionableNotesResponseSchema
+>;
+export type InboxTriageProposal = z.infer<typeof inboxTriageProposalSchema>;
+export type InboxTriageItemResult = z.infer<typeof inboxTriageItemResultSchema>;
+export type InboxTriageBatchResponse = z.infer<
+  typeof inboxTriageBatchResponseSchema
 >;
 export type AuditActionableRelationshipsRequest = z.infer<
   typeof auditActionableRelationshipsRequestSchema
