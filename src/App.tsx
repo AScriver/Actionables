@@ -4739,8 +4739,6 @@ function DataPanel({
     }
   };
 
-  const conflicts =
-    preview?.items.filter((item) => item.classification === "conflict") ?? [];
   const invalid =
     preview?.items.filter((item) =>
       ["invalid", "missing-reference", "integrity-failure"].includes(
