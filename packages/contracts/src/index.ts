@@ -429,21 +429,36 @@ export const scopeOptionsResponseSchema = z.object({
   ),
 });
 
-export const createRepositoryRequestSchema = z
-  .object({
-    projectId: z.string().min(1, "Choose a project."),
-    name: z.string().trim().min(1, "Enter a repository name.").max(240),
-    localPath: z
-      .string()
-      .trim()
-      .min(1, "Enter the local repository path.")
-      .max(4_096)
-      .refine(
-        (value) => /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(value),
-        "Enter an absolute Windows path.",
-      ),
-  })
-  .strict();
+const repositoryDetailsRequestSchema = z.object({
+  name: z.string().trim().min(1, "Enter a repository name.").max(240),
+  localPath: z
+    .string()
+    .trim()
+    .min(1, "Enter the local repository path.")
+    .max(4_096)
+    .refine(
+      (value) => /^(?:[a-zA-Z]:[\\/]|\\\\)/.test(value),
+      "Enter an absolute Windows path.",
+    ),
+});
+
+export const createRepositoryRequestSchema = z.discriminatedUnion(
+  "projectMode",
+  [
+    repositoryDetailsRequestSchema
+      .extend({
+        projectMode: z.literal("existing"),
+        projectId: z.string().min(1, "Choose a project."),
+      })
+      .strict(),
+    repositoryDetailsRequestSchema
+      .extend({
+        projectMode: z.literal("new"),
+        projectName: z.string().trim().min(1, "Enter a project name.").max(240),
+      })
+      .strict(),
+  ],
+);
 
 export const createRepositoryResponseSchema = z.object({
   projectId: z.string().min(1),

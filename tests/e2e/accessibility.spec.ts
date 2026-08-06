@@ -43,6 +43,15 @@ test("@a11y representative dashboard, list, detail, form, lifecycle, validation,
   await expectNoAxeViolations(page, "create form");
   await page.getByRole("button", { name: "Close actionable form" }).click();
 
+  await page.getByRole("button", { name: "Add repository" }).click();
+  const repositoryDialog = page.getByRole("dialog", {
+    name: "Add repository",
+  });
+  await expectNoAxeViolations(page, "add repository with existing project");
+  await repositoryDialog.getByRole("radio", { name: "New project" }).check();
+  await expectNoAxeViolations(page, "add repository with new project");
+  await repositoryDialog.getByRole("button", { name: "Cancel" }).click();
+
   await page.getByRole("row").nth(1).press("Enter");
   await page.getByRole("button", { name: "Edit actionable" }).click();
   await expectNoAxeViolations(page, "edit form");

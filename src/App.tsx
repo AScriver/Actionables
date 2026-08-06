@@ -5702,17 +5702,21 @@ function RepositoryDialog({
   const projects = scopes.projects.filter((project) => !project.archivedAt);
   const initialProject =
     projects.find((project) => project.id === initialProjectId) ?? projects[0];
+  const [projectMode, setProjectMode] = useState<"existing" | "new">(
+    projects.length > 0 ? "existing" : "new",
+  );
   const [projectId, setProjectId] = useState(initialProject?.id ?? "");
+  const [projectName, setProjectName] = useState("");
   const [name, setName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
+  const projectModeRef = useRef<HTMLInputElement>(null);
 
   useModalIsolation(dialogRef);
-  useEffect(() => nameRef.current?.focus(), []);
+  useEffect(() => projectModeRef.current?.focus(), []);
 
   const clearFieldError = (field: string) => {
     setErrors((current) => {
@@ -5729,7 +5733,13 @@ function RepositoryDialog({
     setError("");
     setErrors({});
     try {
-      onCreated(await createRepository({ projectId, name, localPath }));
+      onCreated(
+        await createRepository(
+          projectMode === "existing"
+            ? { projectMode, projectId, name, localPath }
+            : { projectMode, projectName, name, localPath },
+        ),
+      );
     } catch (caught) {
       if (caught instanceof ApiProblem) {
         setErrors(caught.problem.errors ?? {});
@@ -5766,33 +5776,92 @@ function RepositoryDialog({
             </div>
           </header>
           <div className="repository-form-fields">
-            <label className="form-field" htmlFor="repository-project">
-              <span>Project</span>
-              <select
-                id="repository-project"
-                value={projectId}
-                onChange={(event) => {
-                  setProjectId(event.target.value);
-                  clearFieldError("projectId");
-                }}
-                aria-invalid={Boolean(errors.projectId)}
-                aria-describedby={
-                  errors.projectId ? "projectId-error" : undefined
-                }
-                disabled={saving}
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              {fieldError(errors, "projectId")}
-            </label>
+            <fieldset className="repository-project-choice form-field-wide">
+              <legend>Project assignment</legend>
+              <div>
+                <label>
+                  <input
+                    ref={projects.length > 0 ? projectModeRef : undefined}
+                    type="radio"
+                    name="repository-project-mode"
+                    value="existing"
+                    checked={projectMode === "existing"}
+                    onChange={() => {
+                      setProjectMode("existing");
+                      clearFieldError("projectId");
+                      clearFieldError("projectName");
+                    }}
+                    disabled={saving || projects.length === 0}
+                  />
+                  <span>Existing project</span>
+                </label>
+                <label>
+                  <input
+                    ref={projects.length === 0 ? projectModeRef : undefined}
+                    type="radio"
+                    name="repository-project-mode"
+                    value="new"
+                    checked={projectMode === "new"}
+                    onChange={() => {
+                      setProjectMode("new");
+                      clearFieldError("projectId");
+                      clearFieldError("projectName");
+                    }}
+                    disabled={saving}
+                  />
+                  <span>New project</span>
+                </label>
+              </div>
+            </fieldset>
+            {projectMode === "existing" ? (
+              <label className="form-field" htmlFor="repository-project">
+                <span>Project</span>
+                <select
+                  id="repository-project"
+                  value={projectId}
+                  onChange={(event) => {
+                    setProjectId(event.target.value);
+                    clearFieldError("projectId");
+                  }}
+                  aria-invalid={Boolean(errors.projectId)}
+                  aria-describedby={
+                    errors.projectId ? "projectId-error" : undefined
+                  }
+                  required
+                  disabled={saving}
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                {fieldError(errors, "projectId")}
+              </label>
+            ) : (
+              <label className="form-field" htmlFor="repository-project-name">
+                <span>Project name</span>
+                <input
+                  id="repository-project-name"
+                  value={projectName}
+                  onChange={(event) => {
+                    setProjectName(event.target.value);
+                    clearFieldError("projectName");
+                  }}
+                  aria-invalid={Boolean(errors.projectName)}
+                  aria-describedby={
+                    errors.projectName ? "projectName-error" : undefined
+                  }
+                  maxLength={240}
+                  required
+                  disabled={saving}
+                />
+                {fieldError(errors, "projectName")}
+              </label>
+            )}
             <label className="form-field" htmlFor="repository-name">
               <span>Repository name</span>
               <input
-                ref={nameRef}
                 id="repository-name"
                 value={name}
                 onChange={(event) => {
@@ -5848,7 +5917,9 @@ function RepositoryDialog({
             <button
               type="submit"
               className="primary-action"
-              disabled={saving || projects.length === 0}
+              disabled={
+                saving || (projectMode === "existing" && projects.length === 0)
+              }
             >
               {saving ? "Adding…" : "Add repository"}
             </button>
@@ -7002,7 +7073,6 @@ export default function App() {
             type="button"
             className="add-project"
             onClick={openRepositoryForm}
-            disabled={!scopes.some((project) => !project.archivedAt)}
           >
             <Plus aria-hidden="true" /> Add repository
           </button>

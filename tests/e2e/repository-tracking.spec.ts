@@ -12,6 +12,15 @@ test("adds an additional repository and makes it immediately selectable", async 
 
   const dialog = page.getByRole("dialog", { name: "Add repository" });
   await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("group", { name: "Project assignment" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("radio", { name: "Existing project" }),
+  ).toBeChecked();
+  await expect(
+    dialog.getByRole("radio", { name: "New project" }),
+  ).not.toBeChecked();
   await dialog.getByLabel("Repository name").fill(repositoryName);
   await dialog.getByLabel("Local path").fill(localPath);
   await dialog
@@ -62,6 +71,175 @@ test("adds an additional repository and makes it immediately selectable", async 
   await expect(
     duplicateDialog.getByText(/path is already tracked/i),
   ).toBeVisible();
+});
+
+test("creates a project with its repository and rolls back failed attempts", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const projectName = `Browser project ${suffix}`;
+  const repositoryName = `Browser project repo ${suffix}`;
+  const localPath = `C:\\repos\\BrowserProjectRepo-${suffix}`;
+  const cancelledProjectName = `Cancelled project ${suffix}`;
+  const scopesBefore = await (await page.request.get("/api/scopes")).json();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add repository" }).click();
+
+  let dialog = page.getByRole("dialog", { name: "Add repository" });
+  const existingProject = dialog.getByRole("radio", {
+    name: "Existing project",
+  });
+  await existingProject.focus();
+  await existingProject.press("ArrowRight");
+  await expect(
+    dialog.getByRole("radio", { name: "New project" }),
+  ).toBeChecked();
+  await expect(dialog.getByLabel("Project", { exact: true })).toHaveCount(0);
+  await dialog.getByLabel("Project name").fill(cancelledProjectName);
+  await dialog.getByLabel("Repository name").fill("Cancelled repository");
+  await dialog.getByLabel("Local path").fill(`C:\\repos\\Cancelled-${suffix}`);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  const scopesAfterCancel = await (
+    await page.request.get("/api/scopes")
+  ).json();
+  expect(scopesAfterCancel.projects).toHaveLength(scopesBefore.projects.length);
+  expect(
+    scopesAfterCancel.projects.some(
+      (project: { name: string }) => project.name === cancelledProjectName,
+    ),
+  ).toBe(false);
+
+  await page.getByRole("button", { name: "Add repository" }).click();
+  dialog = page.getByRole("dialog", { name: "Add repository" });
+  await dialog.getByRole("radio", { name: "New project" }).check();
+  await dialog.getByLabel("Project name").fill(projectName);
+  await dialog.getByLabel("Repository name").fill(repositoryName);
+  await dialog.getByLabel("Local path").fill(localPath);
+  await dialog
+    .getByRole("button", { name: "Add repository", exact: true })
+    .click();
+
+  await expect(dialog).toHaveCount(0);
+  const projectTree = page.locator(".project-tree");
+  await expect(
+    projectTree.getByRole("button", { name: projectName, exact: true }),
+  ).toBeVisible();
+  await expect(
+    projectTree.getByRole("button", { name: repositoryName, exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/project=/);
+  await expect(page).toHaveURL(/repository=/);
+  await expect(page).toHaveURL(/worktree=/);
+
+  const scopesAfterCreate = await (
+    await page.request.get("/api/scopes")
+  ).json();
+  const createdProject = scopesAfterCreate.projects.find(
+    (project: { name: string }) => project.name === projectName,
+  );
+  expect(createdProject?.repositories).toEqual([
+    expect.objectContaining({
+      name: repositoryName,
+      worktrees: [expect.objectContaining({ name: "Default" })],
+    }),
+  ]);
+
+  const rolledBackProjectName = `Rolled back project ${suffix}`;
+  await page.getByRole("button", { name: "Add repository" }).click();
+  dialog = page.getByRole("dialog", { name: "Add repository" });
+  await dialog.getByRole("radio", { name: "New project" }).check();
+  await dialog.getByLabel("Project name").fill(rolledBackProjectName);
+  await dialog.getByLabel("Repository name").fill("Duplicate path repository");
+  await dialog.getByLabel("Local path").fill(localPath);
+  await dialog
+    .getByRole("button", { name: "Add repository", exact: true })
+    .click();
+
+  await expect(dialog.getByRole("alert")).toContainText("already tracked");
+  await expect(dialog.getByText(/path is already tracked/i)).toBeVisible();
+  const scopesAfterFailure = await (
+    await page.request.get("/api/scopes")
+  ).json();
+  expect(scopesAfterFailure.projects).toHaveLength(
+    scopesAfterCreate.projects.length,
+  );
+  expect(
+    scopesAfterFailure.projects.some(
+      (project: { name: string }) => project.name === rolledBackProjectName,
+    ),
+  ).toBe(false);
+
+  await expect(
+    dialog.getByRole("button", { name: "Add repository", exact: true }),
+  ).toBeEnabled();
+  await dialog.getByLabel("Project name").focus();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("keeps Add repository available when there are no active projects", async ({
+  page,
+}) => {
+  const scopes = await (await page.request.get("/api/scopes")).json();
+  const activeProjects = scopes.projects.filter(
+    (project: { archivedAt: string | null }) => !project.archivedAt,
+  );
+
+  try {
+    for (const project of activeProjects) {
+      const archived = await page.request.post(
+        `/api/scopes/project/${project.id}/archive`,
+        { data: { version: project.version } },
+      );
+      expect(archived.ok()).toBeTruthy();
+    }
+
+    await page.goto("/");
+    const addRepository = page.getByRole("button", {
+      name: "Add repository",
+    });
+    await expect(addRepository).toBeEnabled();
+    await addRepository.click();
+
+    const dialog = page.getByRole("dialog", { name: "Add repository" });
+    await expect(
+      dialog.getByRole("radio", { name: "New project" }),
+    ).toBeChecked();
+    await expect(
+      dialog.getByRole("radio", { name: "Existing project" }),
+    ).toBeDisabled();
+    await expect(
+      dialog.getByRole("radio", { name: "New project" }),
+    ).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const choices = await dialog
+      .locator(".repository-project-choice label")
+      .evaluateAll((labels) =>
+        labels.map((label) => {
+          const rect = label.getBoundingClientRect();
+          return { top: rect.top, bottom: rect.bottom };
+        }),
+      );
+    expect(choices[1]!.top).toBeGreaterThan(choices[0]!.bottom);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+  } finally {
+    const currentScopes = await (await page.request.get("/api/scopes")).json();
+    for (const project of currentScopes.projects.filter(
+      (candidate: { id: string }) =>
+        activeProjects.some(
+          (original: { id: string }) => original.id === candidate.id,
+        ),
+    )) {
+      if (!project.archivedAt) continue;
+      const restored = await page.request.post(
+        `/api/scopes/project/${project.id}/restore`,
+        { data: { version: project.version } },
+      );
+      expect(restored.ok()).toBeTruthy();
+    }
+  }
 });
 
 test("hides archived projects from the sidebar after refresh", async ({

@@ -1813,6 +1813,7 @@ describe("Actionables API", () => {
       method: "POST",
       url: "/api/repositories",
       payload: {
+        projectMode: "existing",
         projectId: scope.projectId,
         name: "Tracked API Repo",
         localPath: "C:/repos/TrackedApiRepo/",
@@ -1851,11 +1852,49 @@ describe("Actionables API", () => {
     });
   });
 
-  it("rejects invalid and duplicate repository paths with field errors", async () => {
+  it("creates a new project and repository in one transaction", async () => {
+    const before = {
+      projects: await prisma!.project.count(),
+      repositories: await prisma!.repository.count(),
+      worktrees: await prisma!.worktree.count(),
+    };
+    const response = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "new",
+        projectName: "New API Project",
+        name: "New Project Repository",
+        localPath: "C:\\repos\\NewProjectRepository",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const payload = response.json();
+    const project = payload.scopes.projects.find(
+      (item: { id: string }) => item.id === payload.projectId,
+    );
+    expect(project).toMatchObject({
+      name: "New API Project",
+      repositories: [
+        {
+          id: payload.repositoryId,
+          name: "New Project Repository",
+          worktrees: [{ id: payload.worktreeId, name: "Default" }],
+        },
+      ],
+    });
+    expect(await prisma!.project.count()).toBe(before.projects + 1);
+    expect(await prisma!.repository.count()).toBe(before.repositories + 1);
+    expect(await prisma!.worktree.count()).toBe(before.worktrees + 1);
+  });
+
+  it("rejects invalid project choices and duplicate repository details atomically", async () => {
     const invalid = await app!.inject({
       method: "POST",
       url: "/api/repositories",
       payload: {
+        projectMode: "existing",
         projectId: scope.projectId,
         name: "Relative repo",
         localPath: "repos/relative",
@@ -1867,10 +1906,80 @@ describe("Actionables API", () => {
       errors: { localPath: ["Enter an absolute Windows path."] },
     });
 
+    const missingExistingProject = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "existing",
+        name: "Missing existing project",
+        localPath: "C:\\repos\\MissingExistingProject",
+      },
+    });
+    expect(missingExistingProject.statusCode).toBe(422);
+    expect(missingExistingProject.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      errors: { projectId: expect.any(Array) },
+    });
+
+    const missingNewProjectName = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "new",
+        name: "Missing new project name",
+        localPath: "C:\\repos\\MissingNewProjectName",
+      },
+    });
+    expect(missingNewProjectName.statusCode).toBe(422);
+    expect(missingNewProjectName.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      errors: { projectName: expect.any(Array) },
+    });
+
+    const unknownProject = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "existing",
+        projectId: "missing-project",
+        name: "Unknown project repository",
+        localPath: "C:\\repos\\UnknownProject",
+      },
+    });
+    expect(unknownProject.statusCode).toBe(422);
+    expect(unknownProject.json()).toMatchObject({
+      code: "INVALID_PROJECT",
+      errors: { projectId: expect.any(Array) },
+    });
+
+    const archivedProject = await prisma!.project.create({
+      data: {
+        externalKey: `archived-test-project-${randomUUID()}`,
+        name: "Archived test project",
+        archivedAt: new Date(),
+      },
+    });
+    const unavailableProject = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "existing",
+        projectId: archivedProject.id,
+        name: "Archived project repository",
+        localPath: "C:\\repos\\ArchivedProject",
+      },
+    });
+    expect(unavailableProject.statusCode).toBe(422);
+    expect(unavailableProject.json()).toMatchObject({
+      code: "INVALID_PROJECT",
+      errors: { projectId: expect.any(Array) },
+    });
+
     const duplicate = await app!.inject({
       method: "POST",
       url: "/api/repositories",
       payload: {
+        projectMode: "existing",
         projectId: scope.projectId,
         name: "tracked api repo",
         localPath: "c:\\repos\\TrackedApiRepo\\",
@@ -1884,6 +1993,49 @@ describe("Actionables API", () => {
         localPath: expect.any(Array),
       },
     });
+
+    const project = await prisma!.project.findUniqueOrThrow({
+      where: { id: scope.projectId },
+    });
+    const duplicateProject = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "new",
+        projectName: project.name.toUpperCase(),
+        name: "Repository for duplicate project",
+        localPath: "C:\\repos\\DuplicateProject",
+      },
+    });
+    expect(duplicateProject.statusCode).toBe(422);
+    expect(duplicateProject.json()).toMatchObject({
+      code: "DUPLICATE_PROJECT",
+      errors: { projectName: expect.any(Array) },
+    });
+
+    const beforeRollback = {
+      projects: await prisma!.project.count(),
+      repositories: await prisma!.repository.count(),
+      worktrees: await prisma!.worktree.count(),
+    };
+    const duplicatePath = await app!.inject({
+      method: "POST",
+      url: "/api/repositories",
+      payload: {
+        projectMode: "new",
+        projectName: "Rolled Back Project",
+        name: "Repository with duplicate path",
+        localPath: "c:\\repos\\TrackedApiRepo\\",
+      },
+    });
+    expect(duplicatePath.statusCode).toBe(422);
+    expect(duplicatePath.json()).toMatchObject({
+      code: "DUPLICATE_REPOSITORY",
+      errors: { localPath: expect.any(Array) },
+    });
+    expect(await prisma!.project.count()).toBe(beforeRollback.projects);
+    expect(await prisma!.repository.count()).toBe(beforeRollback.repositories);
+    expect(await prisma!.worktree.count()).toBe(beforeRollback.worktrees);
   });
 
   it("creates a minimally valid manual actionable with neutral values and a stable location", async () => {

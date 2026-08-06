@@ -4618,6 +4618,54 @@ button {
   padding: 16px;
 }
 
+.repository-project-choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.repository-project-choice legend {
+  margin-bottom: 6px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.repository-project-choice > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repository-project-choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #39464f;
+  border-radius: var(--radius-sm);
+  background: #10171c;
+  color: var(--text-strong);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.repository-project-choice label:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(10, 168, 207, 0.2);
+}
+
+.repository-project-choice label:has(input:disabled) {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.repository-project-choice input {
+  accent-color: var(--accent);
+}
+
 .archive-impact {
   min-height: 70px;
   padding: 13px 16px;
@@ -4833,6 +4881,10 @@ button {
   }
 
   .repository-form-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .repository-project-choice > div {
     grid-template-columns: minmax(0, 1fr);
   }
 

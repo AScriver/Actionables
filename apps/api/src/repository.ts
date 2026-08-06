@@ -860,15 +860,50 @@ export async function createRepository(
   const localPath = normalizedLocalPath(input.localPath);
 
   return prisma.$transaction(async (transaction) => {
-    const project = await transaction.project.findUnique({
-      where: { id: input.projectId },
-    });
-    if (!project || project.archivedAt) {
-      throw new DomainValidationError(
-        "INVALID_PROJECT",
-        { projectId: ["Choose an active project."] },
-        "The selected project is unavailable.",
-      );
+    let projectId: string;
+    if (input.projectMode === "existing") {
+      const project = await transaction.project.findUnique({
+        where: { id: input.projectId },
+      });
+      if (!project || project.archivedAt) {
+        throw new DomainValidationError(
+          "INVALID_PROJECT",
+          { projectId: ["Choose an active project."] },
+          "The selected project is unavailable.",
+        );
+      }
+      projectId = project.id;
+    } else {
+      const projectName = input.projectName.trim();
+      const projects = await transaction.project.findMany({
+        where: { archivedAt: null },
+        select: { name: true },
+      });
+      if (
+        projects.some(
+          (existing) =>
+            existing.name.localeCompare(projectName, undefined, {
+              sensitivity: "accent",
+            }) === 0,
+        )
+      ) {
+        throw new DomainValidationError(
+          "DUPLICATE_PROJECT",
+          {
+            projectName: [
+              "A project with this name already exists. Select the existing project instead.",
+            ],
+          },
+          "This project already exists.",
+        );
+      }
+      const project = await transaction.project.create({
+        data: {
+          externalKey: `manual-project-${randomUUID()}`,
+          name: projectName,
+        },
+      });
+      projectId = project.id;
     }
 
     const repositories = await transaction.repository.findMany({
@@ -878,7 +913,7 @@ export async function createRepository(
     if (
       repositories.some(
         (repository) =>
-          repository.projectId === input.projectId &&
+          repository.projectId === projectId &&
           repository.name.localeCompare(name, undefined, {
             sensitivity: "accent",
           }) === 0,
@@ -911,7 +946,7 @@ export async function createRepository(
         externalKey: `manual-repository-${randomUUID()}`,
         name,
         localPath,
-        projectId: project.id,
+        projectId,
       },
     });
     const worktree = await transaction.worktree.create({
@@ -919,13 +954,13 @@ export async function createRepository(
         externalKey: `manual-worktree-${randomUUID()}`,
         name: "Default",
         localPath,
-        projectId: project.id,
+        projectId,
         repositoryId: repository.id,
       },
     });
 
     return createRepositoryResponseSchema.parse({
-      projectId: project.id,
+      projectId,
       repositoryId: repository.id,
       worktreeId: worktree.id,
       scopes: await listScopeOptions(transaction),
