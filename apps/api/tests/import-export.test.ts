@@ -693,7 +693,7 @@ describe("portable import and export", () => {
         type: "URL",
         locator: "https://example.com/evidence",
         label: "Evidence",
-        provenance: "user-added",
+        provenance: "agent-added",
         createdAt: new Date("2026-07-25T01:10:00.000Z"),
       },
     });
@@ -748,6 +748,12 @@ describe("portable import and export", () => {
     expect(await restored.validationRecord.count()).toBe(
       exported.validationRecords.length,
     );
+    expect(
+      await restored.userSourceReference.findUniqueOrThrow({
+        where: { id: "source-01" },
+        select: { provenance: true },
+      }),
+    ).toEqual({ provenance: "agent-added" });
     expect(
       await restored.dependencyRelationship.findUniqueOrThrow({
         where: { id: "dependency-cross-scope" },

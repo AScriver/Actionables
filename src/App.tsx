@@ -671,7 +671,7 @@ function SourceHistory({
             key={`${source.type}-${source.locator}-${index}`}
           >
             <div className="source-event-meta">
-              <span className="source-label">user-added</span>
+              <span className="source-label">{source.provenance}</span>
               <span>{source.type}</span>
               <span>{source.label || "source reference"}</span>
             </div>

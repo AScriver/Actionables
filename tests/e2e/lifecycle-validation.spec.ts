@@ -117,6 +117,7 @@ test("lifecycle, append-only validation, safe Markdown, and sources persist thro
   const safeSource = inspector
     .locator(".user-source")
     .filter({ hasText: "Safe web evidence" });
+  await expect(safeSource.locator(".source-label")).toHaveText("user-added");
   await expect(
     safeSource.getByRole("link", { name: "Open source" }),
   ).toHaveAttribute("href", "https://example.test/evidence");

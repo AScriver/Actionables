@@ -25,6 +25,7 @@ import {
   type Status,
   type StatusTransitionRequest,
   type UpdateActionableRequest,
+  type UserSourceReference,
   type UserSourceReferenceInput,
 } from "@actionables/contracts";
 import type { Prisma } from "./generated/prisma/client.js";
@@ -351,7 +352,7 @@ function toDetail(row: ActionableRow): ActionableDetail {
       type: source.type,
       locator: source.locator,
       label: source.label ?? undefined,
-      provenance: "user-added",
+      provenance: source.provenance,
       createdAt: source.createdAt.toISOString(),
     })),
     immutableSourceEvidence: {
@@ -1483,6 +1484,7 @@ async function syncUserSources(
   transaction: TransactionClient,
   current: ActionableRow,
   requested: UserSourceReferenceInput[],
+  provenance: UserSourceReference["provenance"],
 ) {
   const remaining = [...current.userSources];
   const added: UserSourceReferenceInput[] = [];
@@ -1522,7 +1524,7 @@ async function syncUserSources(
         type: source.type,
         locator: source.locator,
         label: source.label || null,
-        provenance: "user-added",
+        provenance,
       },
     });
     await transaction.activityEvent.create({
@@ -1911,6 +1913,7 @@ export async function updateActionable(
   sourceOrdinal: number,
   input: UpdateActionableRequest,
   existingTransaction?: TransactionClient,
+  sourceProvenance: UserSourceReference["provenance"] = "user-added",
 ): Promise<ActionableDetail | null> {
   const operation = async (transaction: TransactionClient) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
@@ -1968,7 +1971,12 @@ export async function updateActionable(
       throw new VersionConflictError(toDetail(latest));
     }
 
-    await syncUserSources(transaction, current, input.userSources);
+    await syncUserSources(
+      transaction,
+      current,
+      input.userSources,
+      sourceProvenance,
+    );
     if (decision) {
       await writeTransitionHistory(
         transaction,

@@ -1308,6 +1308,18 @@ describe("agent task claims", () => {
     ]);
     expect(updatedPlanAndSources.tags).toEqual(["grouped", "agent"]);
     expect(updatedPlanAndSources.userSources).toHaveLength(2);
+    expect(updatedPlanAndSources.userSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          locator: "https://example.com/preserved",
+          provenance: "user-added",
+        }),
+        expect.objectContaining({
+          locator: "pnpm test",
+          provenance: "agent-added",
+        }),
+      ]),
+    );
 
     const appended = await updateClaimedAgentTask(
       prisma,
@@ -1345,6 +1357,33 @@ describe("agent task claims", () => {
     expect(
       appended.userSources.filter((source) => source.locator === "pnpm test"),
     ).toHaveLength(1);
+    expect(appended.userSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          locator: "pnpm test",
+          provenance: "agent-added",
+        }),
+        expect.objectContaining({
+          locator: "abc123",
+          provenance: "agent-added",
+        }),
+      ]),
+    );
+    expect(
+      await prisma.userSourceReference.findMany({
+        where: { actionableId: task.id },
+        select: { locator: true, provenance: true },
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          locator: "https://example.com/preserved",
+          provenance: "user-added",
+        },
+        { locator: "pnpm test", provenance: "agent-added" },
+        { locator: "abc123", provenance: "agent-added" },
+      ]),
+    );
 
     await expect(
       updateClaimedAgentTask(

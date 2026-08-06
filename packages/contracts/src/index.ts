@@ -152,7 +152,7 @@ export const userSourceReferenceInputSchema = z.object({
 
 export const userSourceReferenceSchema = userSourceReferenceInputSchema.extend({
   id: z.string().min(1),
-  provenance: z.literal("user-added"),
+  provenance: z.enum(["user-added", "agent-added"]),
   createdAt: z.string().datetime(),
 });
 
@@ -1238,13 +1238,13 @@ export const updateClaimedAgentTaskRequestSchema = z
       .max(50)
       .optional()
       .describe(
-        "Replace all user-added sources; do not combine with addUserSources.",
+        "Replace all source references; do not combine with addUserSources.",
       ),
     addUserSources: z
       .array(userSourceReferenceInputSchema)
       .max(50)
       .optional()
-      .describe("Add new exact-deduplicated user sources."),
+      .describe("Add new exact-deduplicated source references."),
   })
   .strict()
   .superRefine((input, context) => {
@@ -1797,7 +1797,7 @@ const portableUserSourceSchema = z
     type: userSourceReferenceInputSchema.shape.type,
     locator: z.string().trim().min(1).max(4_096),
     label: z.string().trim().max(200).nullable(),
-    provenance: z.literal("user-added"),
+    provenance: userSourceReferenceSchema.shape.provenance,
     createdAt: portableTimestampSchema,
     removedAt: portableTimestampSchema.nullable(),
   })

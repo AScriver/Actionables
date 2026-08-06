@@ -1212,7 +1212,13 @@ async function updateClaimedAgentTaskResult(
             ? appendUniqueUserSources(currentSources, request.addUserSources)
             : currentSources),
       });
-      const saved = await updateActionable(prisma, sourceOrdinal, update, tx);
+      const saved = await updateActionable(
+        prisma,
+        sourceOrdinal,
+        update,
+        tx,
+        "agent-added",
+      );
       if (!saved)
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
 

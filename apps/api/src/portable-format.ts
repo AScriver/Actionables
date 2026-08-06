@@ -335,7 +335,8 @@ export async function exportPortableDocument(
       type: source.type as PortableDocument["userSources"][number]["type"],
       locator: source.locator,
       label: source.label,
-      provenance: "user-added",
+      provenance:
+        source.provenance as PortableDocument["userSources"][number]["provenance"],
       createdAt: source.createdAt.toISOString(),
       removedAt: source.removedAt?.toISOString() ?? null,
     })),

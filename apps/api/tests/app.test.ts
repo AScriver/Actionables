@@ -2200,8 +2200,19 @@ describe("Actionables API", () => {
       validation: ["Run the focused check"],
       tags: ["api", "triage"],
       version: 2,
-      userSources: [{ locator: "apps/api/src/app.ts" }],
+      userSources: [
+        {
+          locator: "apps/api/src/app.ts",
+          provenance: "user-added",
+        },
+      ],
     });
+    expect(
+      await prisma!.userSourceReference.findFirstOrThrow({
+        where: { actionableId: item.recordId },
+        select: { provenance: true },
+      }),
+    ).toEqual({ provenance: "user-added" });
     expect(response.json().item.statusHistory[0]).toMatchObject({
       previousStatus: "Inbox",
       newStatus: "Researching",
