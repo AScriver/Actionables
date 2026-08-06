@@ -486,12 +486,6 @@ async function findActionableRow(
   });
 }
 
-export async function listActionables(
-  prisma: AppPrismaClient,
-): Promise<ActionablesListResponse> {
-  return listActionablesWithQuery(prisma, actionableQuerySchema.parse({}));
-}
-
 const priorityRank = new Map(
   ["Critical", "High", "Medium", "Low", "Backlog", "Unset"].map(
     (value, index) => [value, index],
