@@ -10,6 +10,7 @@ import {
   createDependencyRequestSchema,
   createRepositoryRequestSchema,
   createRepositoryResponseSchema,
+  repositoryFolderPickerResponseSchema,
   createSubtaskRequestSchema,
   createTaskBreakdownRequestSchema,
   createValidationRecordRequestSchema,
@@ -102,6 +103,10 @@ import {
   AgentIntegrationInstallError,
   AgentIntegrationInstaller,
 } from "./agent-integration.js";
+import {
+  selectNativeFolder,
+  type NativeFolderPicker,
+} from "./native-folder-picker.js";
 
 type BuildAppOptions = {
   prisma: AppPrismaClient;
@@ -110,6 +115,7 @@ type BuildAppOptions = {
   runtimeConfig?: ApiRuntimeConfig;
   assistantRunner?: AssistantRunner;
   agentHomeDirectory?: string;
+  folderPicker?: NativeFolderPicker;
 };
 
 function fieldErrors(error: {
@@ -211,6 +217,7 @@ export function buildApp({
   runtimeConfig = resolveApiRuntimeConfig(undefined),
   assistantRunner,
   agentHomeDirectory,
+  folderPicker = selectNativeFolder,
 }: BuildAppOptions) {
   const dataImports = new DataImportService(prisma);
   const agentIntegration = new AgentIntegrationInstaller({
@@ -505,6 +512,23 @@ export function buildApp({
 
     const created = await createRepository(prisma, parsed.data);
     return reply.code(201).send(createRepositoryResponseSchema.parse(created));
+  });
+
+  app.post("/api/repositories/folder-picker", async (request, reply) => {
+    try {
+      return repositoryFolderPickerResponseSchema.parse({
+        path: await folderPicker(),
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "Repository folder picker failed");
+      return problem(
+        request,
+        reply,
+        503,
+        "FOLDER_PICKER_FAILED",
+        "The folder picker could not be opened.",
+      );
+    }
   });
 
   app.post("/api/data/import-previews", async (request) => {

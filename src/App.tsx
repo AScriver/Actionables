@@ -116,6 +116,7 @@ import {
   transitionActionable,
   triageInboxQueue,
   installAgentIntegration,
+  selectRepositoryFolder,
   updateActionable,
   updateHelperAgentSettings,
   waiveDependency,
@@ -5814,6 +5815,7 @@ function RepositoryDialog({
   const [projectName, setProjectName] = useState("");
   const [name, setName] = useState("");
   const [localPath, setLocalPath] = useState("");
+  const [browsing, setBrowsing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -5854,6 +5856,25 @@ function RepositoryDialog({
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const browse = async () => {
+    setBrowsing(true);
+    setError("");
+    try {
+      const selected = await selectRepositoryFolder();
+      if (selected.path === null) return;
+      setLocalPath(selected.path);
+      clearFieldError("localPath");
+    } catch (caught) {
+      setError(
+        caught instanceof ApiProblem
+          ? caught.problem.title
+          : "The folder picker could not be opened.",
+      );
+    } finally {
+      setBrowsing(false);
     }
   };
 
@@ -5981,29 +6002,37 @@ function RepositoryDialog({
               />
               {fieldError(errors, "name")}
             </label>
-            <label
-              className="form-field form-field-wide"
-              htmlFor="repository-path"
-            >
-              <span>Local path</span>
-              <input
-                id="repository-path"
-                value={localPath}
-                onChange={(event) => {
-                  setLocalPath(event.target.value);
-                  clearFieldError("localPath");
-                }}
-                aria-invalid={Boolean(errors.localPath)}
-                aria-describedby={
-                  errors.localPath ? "localPath-error" : undefined
-                }
-                placeholder="C:\repos\Example"
-                maxLength={4096}
-                required
-                disabled={saving}
-              />
+            <div className="form-field form-field-wide">
+              <label htmlFor="repository-path">Local path</label>
+              <div className="repository-path-control">
+                <input
+                  id="repository-path"
+                  value={localPath}
+                  onChange={(event) => {
+                    setLocalPath(event.target.value);
+                    clearFieldError("localPath");
+                  }}
+                  aria-invalid={Boolean(errors.localPath)}
+                  aria-describedby={
+                    errors.localPath ? "localPath-error" : undefined
+                  }
+                  placeholder="C:\repos\Example"
+                  maxLength={4096}
+                  required
+                  disabled={saving}
+                />
+                <button
+                  type="button"
+                  className="toolbar-button repository-browse-button"
+                  aria-label="Browse for a local repository folder"
+                  onClick={() => void browse()}
+                  disabled={saving || browsing}
+                >
+                  {browsing ? "Browsing…" : "Browse…"}
+                </button>
+              </div>
               {fieldError(errors, "localPath")}
-            </label>
+            </div>
           </div>
           {error && (
             <div className="inline-error" role="alert">

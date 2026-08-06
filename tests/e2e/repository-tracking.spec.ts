@@ -73,6 +73,61 @@ test("adds an additional repository and makes it immediately selectable", async 
   ).toBeVisible();
 });
 
+test("browses for a repository folder and handles cancellation and failure", async ({
+  page,
+}) => {
+  let pickerRequest = 0;
+  await page.route("**/api/repositories/folder-picker", async (route) => {
+    pickerRequest += 1;
+    if (pickerRequest === 1) {
+      await route.fulfill({ json: { path: "C:\\repos\\Selected project" } });
+      return;
+    }
+    if (pickerRequest === 2) {
+      await route.fulfill({ json: { path: null } });
+      return;
+    }
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        type: "https://actionables.local/problems/folder_picker_failed",
+        title: "The folder picker could not be opened.",
+        status: 503,
+        code: "FOLDER_PICKER_FAILED",
+        requestId: "folder-picker-fixture",
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add repository" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add repository" });
+  const localPath = dialog.getByLabel("Local path");
+  const browse = dialog.getByRole("button", {
+    name: "Browse for a local repository folder",
+  });
+
+  await localPath.fill("C:\\repos\\Manual fallback");
+  await localPath.press("Tab");
+  await expect(browse).toBeFocused();
+  await expect(browse).toHaveCSS("outline-style", "solid");
+  await expect(browse).toHaveCSS("outline-width", "2px");
+  await browse.press("Enter");
+  await expect(localPath).toHaveValue("C:\\repos\\Selected project");
+
+  await localPath.fill("C:\\repos\\Keep this value");
+  await browse.press("Enter");
+  await expect(localPath).toHaveValue("C:\\repos\\Keep this value");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+
+  await browse.press("Enter");
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "The folder picker could not be opened.",
+  );
+  await expect(localPath).toHaveValue("C:\\repos\\Keep this value");
+});
+
 test("creates a project with its repository and rolls back failed attempts", async ({
   page,
 }) => {

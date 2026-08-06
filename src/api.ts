@@ -6,6 +6,7 @@ import {
   auditActionableRelationshipsRequestSchema,
   archiveImpactResponseSchema,
   createRepositoryResponseSchema,
+  repositoryFolderPickerResponseSchema,
   dashboardResponseSchema,
   problemDetailsSchema,
   scopeOptionsResponseSchema,
@@ -27,6 +28,7 @@ import {
   type CreateActionableRequest,
   type CreateRepositoryRequest,
   type CreateRepositoryResponse,
+  type RepositoryFolderPickerResponse,
   type GroomActionableNotesRequest,
   type GroomActionableNotesResponse,
   type HelperAgentSettings,
@@ -163,6 +165,14 @@ export async function createRepository(
     await requestJson("/api/repositories", {
       method: "POST",
       body: JSON.stringify(input),
+    }),
+  );
+}
+
+export async function selectRepositoryFolder(): Promise<RepositoryFolderPickerResponse> {
+  return repositoryFolderPickerResponseSchema.parse(
+    await requestJson("/api/repositories/folder-picker", {
+      method: "POST",
     }),
   );
 }

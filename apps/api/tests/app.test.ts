@@ -14,6 +14,7 @@ import {
 } from "../src/assistant-runner.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { importSampleSeed, readSampleSeed } from "../src/import-seed.js";
+import type { NativeFolderPicker } from "../src/native-folder-picker.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -26,6 +27,8 @@ let scope: { projectId: string; repositoryId: string; worktreeId: string };
 let assistantRequests: AssistantRequest[] = [];
 let assistantShouldTimeout = false;
 let assistantResponses: Array<unknown | Error> | null = null;
+let folderPickerPath: string | null = null;
+let folderPickerError: Error | null = null;
 let assistantOutput: unknown = {
   description: "Organized description",
   research: ["Observed behavior", "Open question"],
@@ -51,6 +54,10 @@ const assistantRunner: AssistantRunner = {
       output: response ?? assistantOutput,
     };
   },
+};
+const folderPicker: NativeFolderPicker = async () => {
+  if (folderPickerError) throw folderPickerError;
+  return folderPickerPath;
 };
 
 beforeAll(async () => {
@@ -86,7 +93,12 @@ beforeAll(async () => {
     total: 32,
   });
 
-  app = buildApp({ prisma, assistantRunner, agentHomeDirectory });
+  app = buildApp({
+    prisma,
+    assistantRunner,
+    agentHomeDirectory,
+    folderPicker,
+  });
   const project = await prisma.project.findFirstOrThrow({
     include: {
       repositories: {
@@ -1850,6 +1862,50 @@ describe("Actionables API", () => {
       localPath: saved.localPath,
       projectId: scope.projectId,
     });
+  });
+
+  it("returns folder picker selection, cancellation, and failure without mutating scopes", async () => {
+    const before = await Promise.all([
+      prisma!.project.count(),
+      prisma!.repository.count(),
+      prisma!.worktree.count(),
+    ]);
+
+    folderPickerPath = "C:\\repos\\Résumé project";
+    const selected = await app!.inject({
+      method: "POST",
+      url: "/api/repositories/folder-picker",
+    });
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json()).toEqual({ path: folderPickerPath });
+
+    folderPickerPath = null;
+    const cancelled = await app!.inject({
+      method: "POST",
+      url: "/api/repositories/folder-picker",
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toEqual({ path: null });
+
+    folderPickerError = new Error("Native picker fixture failure");
+    const failed = await app!.inject({
+      method: "POST",
+      url: "/api/repositories/folder-picker",
+    });
+    folderPickerError = null;
+    expect(failed.statusCode).toBe(503);
+    expect(failed.json()).toMatchObject({
+      status: 503,
+      code: "FOLDER_PICKER_FAILED",
+      title: "The folder picker could not be opened.",
+    });
+    expect(
+      await Promise.all([
+        prisma!.project.count(),
+        prisma!.repository.count(),
+        prisma!.worktree.count(),
+      ]),
+    ).toEqual(before);
   });
 
   it("creates a new project and repository in one transaction", async () => {

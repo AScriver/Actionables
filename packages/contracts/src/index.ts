@@ -467,6 +467,12 @@ export const createRepositoryResponseSchema = z.object({
   scopes: scopeOptionsResponseSchema,
 });
 
+export const repositoryFolderPickerResponseSchema = z
+  .object({
+    path: z.string().min(1).max(4_096).nullable(),
+  })
+  .strict();
+
 export const actionableSortSchema = z.enum([
   "priority",
   "updated-desc",
@@ -2012,6 +2018,9 @@ export type CreateRepositoryRequest = z.infer<
 >;
 export type CreateRepositoryResponse = z.infer<
   typeof createRepositoryResponseSchema
+>;
+export type RepositoryFolderPickerResponse = z.infer<
+  typeof repositoryFolderPickerResponseSchema
 >;
 export type ActionableQuery = z.infer<typeof actionableQuerySchema>;
 export type ActionableSort = z.infer<typeof actionableSortSchema>;
