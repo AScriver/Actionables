@@ -12,6 +12,7 @@ import {
   Copy,
   Database,
   Download,
+  Ellipsis,
   ExternalLink,
   FileCode2,
   GitBranch,
@@ -420,6 +421,110 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function ProjectArchiveMenu({
+  projectId,
+  projectName,
+  onArchive,
+}: {
+  projectId: string;
+  projectName: string;
+  onArchive: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const archiveRef = useRef<HTMLButtonElement>(null);
+  const triggerId = `project-actions-trigger-${projectId}`;
+  const menuId = `project-actions-menu-${projectId}`;
+
+  useEffect(() => {
+    if (!open) return;
+    archiveRef.current?.focus();
+
+    const dismissOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !wrapperRef.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    };
+
+    window.addEventListener("pointerdown", dismissOnOutsidePointer);
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", dismissOnOutsidePointer);
+      window.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div
+      className="project-actions"
+      ref={wrapperRef}
+      onBlur={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        setOpen(false);
+      }}
+    >
+      <button
+        id={triggerId}
+        ref={triggerRef}
+        type="button"
+        className="icon-button project-action-trigger"
+        aria-label={`More actions for project ${projectName}`}
+        title={`More actions for project ${projectName}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <Ellipsis aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          className="scope-selector-menu project-actions-menu"
+          role="menu"
+          aria-labelledby={triggerId}
+          onKeyDown={(event) => {
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+              event.preventDefault();
+              archiveRef.current?.focus();
+            }
+          }}
+        >
+          <button
+            ref={archiveRef}
+            type="button"
+            role="menuitem"
+            aria-label={`Archive project ${projectName}`}
+            onClick={() => {
+              setOpen(false);
+              triggerRef.current?.focus();
+              onArchive();
+            }}
+          >
+            <Archive aria-hidden="true" />
+            <span>Archive</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -6969,9 +7074,10 @@ export default function App() {
                     {project.archivedAt && <Archive aria-label="Archived" />}
                   </button>
                 </div>
-                <IconButton
-                  label={`${project.archivedAt ? "Restore" : "Archive"} project ${project.name}`}
-                  onClick={() =>
+                <ProjectArchiveMenu
+                  projectId={project.id}
+                  projectName={project.name}
+                  onArchive={() =>
                     openArchive(
                       "project",
                       project.id,
@@ -6980,9 +7086,7 @@ export default function App() {
                       Boolean(project.archivedAt),
                     )
                   }
-                >
-                  {project.archivedAt ? <ArchiveRestore /> : <Archive />}
-                </IconButton>
+                />
               </div>
               {!collapsedProjects.has(project.id) &&
                 project.repositories.map((repository) => (

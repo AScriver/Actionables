@@ -4052,6 +4052,32 @@ button {
   border: 0;
 }
 
+.project-actions {
+  position: relative;
+}
+
+.project-action-trigger {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.scope-action-row:hover > .project-actions .project-action-trigger,
+.scope-action-row:focus-within > .project-actions .project-action-trigger {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.project-actions-menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 150px;
+}
+
+.project-actions-menu button {
+  justify-content: flex-start;
+}
+
 .repository-group {
   display: grid;
 }

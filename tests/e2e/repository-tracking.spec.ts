@@ -258,9 +258,52 @@ test("hides archived projects from the sidebar after refresh", async ({
 
   try {
     await page.goto("/");
+    const projectButton = sidebar.getByRole("button", {
+      name: project.name,
+      exact: true,
+    });
+    const projectRow = projectButton.locator("..").locator("..");
+    const menuTrigger = projectRow.getByRole("button", {
+      name: `More actions for project ${project.name}`,
+    });
+
+    await expect(menuTrigger).toHaveCSS("opacity", "0");
+    await expect(menuTrigger).toHaveCSS("pointer-events", "none");
+    await projectRow.hover();
+    await expect(menuTrigger).toHaveCSS("opacity", "1");
+    await expect(menuTrigger).toHaveCSS("pointer-events", "auto");
+
     await sidebar
-      .getByRole("button", { name: `Archive project ${project.name}` })
-      .click();
+      .getByRole("button", { name: "Dashboard", exact: true })
+      .hover();
+    await expect(menuTrigger).toHaveCSS("opacity", "0");
+    await projectButton.focus();
+    await expect(menuTrigger).toHaveCSS("opacity", "1");
+
+    await menuTrigger.focus();
+    await expect(menuTrigger).toBeFocused();
+    await expect(menuTrigger).toHaveAttribute("aria-haspopup", "menu");
+    await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+
+    await menuTrigger.press("Enter");
+    const menu = projectRow.getByRole("menu", {
+      name: `More actions for project ${project.name}`,
+    });
+    const archive = menu.getByRole("menuitem", {
+      name: `Archive project ${project.name}`,
+    });
+    await expect(menu).toBeVisible();
+    await expect(menuTrigger).toHaveAttribute("aria-expanded", "true");
+    await expect(archive).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+    await expect(menuTrigger).toBeFocused();
+
+    await menuTrigger.press("Space");
+    await expect(archive).toBeFocused();
+    await archive.press("Enter");
     const dialog = page.getByRole("dialog", {
       name: `Archive ${project.name}?`,
     });
