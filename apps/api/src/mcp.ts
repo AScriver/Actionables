@@ -244,6 +244,7 @@ const compactTaskSchema = z
             blocks: z.number().int().nonnegative(),
           })
           .strict(),
+        reconciliationGuidance: z.string().min(1).max(600).optional(),
       })
       .strict(),
   })
@@ -303,20 +304,46 @@ function compactTask(
 ) {
   const truncatedFields: Array<z.infer<typeof compactTruncatedFieldSchema>> =
     [];
+  let requiresReconciliation = false;
+  const markTruncated = (
+    field: z.infer<typeof compactTruncatedFieldSchema>,
+    affectsImplementation = false,
+  ) => {
+    if (!truncatedFields.includes(field)) truncatedFields.push(field);
+    if (affectsImplementation) requiresReconciliation = true;
+  };
   const compactText = (
     value: string,
     max: number,
     field: z.infer<typeof compactTruncatedFieldSchema>,
+    affectsImplementation = false,
   ) => {
-    if (value.length > max && !truncatedFields.includes(field)) {
-      truncatedFields.push(field);
-    }
+    if (value.length > max) markTruncated(field, affectsImplementation);
     return truncate(value, max);
   };
   const subtasks = task.relationships.subtasks.slice(0, 5);
   const blockedBy = task.relationships.blockedBy.slice(0, 5);
   const blocks = task.relationships.blocks.slice(0, 5);
-  return compactTaskSchema.parse({
+  const omitted = {
+    research: Math.max(0, task.research.length - 6),
+    plannedValidation: Math.max(0, task.validation.length - 6),
+    tags: Math.max(0, task.tags.length - 10),
+    files: Math.max(0, task.files.length - 6),
+    userSources: Math.max(0, task.userSources.length - 5),
+    validationRecords: Math.max(0, task.validationRecords.length - 5),
+    subtasks: Math.max(0, task.relationships.subtasks.length - 5),
+    blockedBy: Math.max(0, task.relationships.blockedBy.length - 5),
+    blocks: Math.max(0, task.relationships.blocks.length - 5),
+  };
+  requiresReconciliation = [
+    omitted.research,
+    omitted.plannedValidation,
+    omitted.files,
+    omitted.userSources,
+    omitted.subtasks,
+    omitted.blockedBy,
+  ].some((count) => count > 0);
+  const detail = {
     id: task.id,
     recordId: task.recordId,
     title: truncate(task.title, 240),
@@ -328,26 +355,28 @@ function compactTask(
     scope: task.scope,
     ...(scopeProvisioning ? { scopeProvisioning } : {}),
     updatedAt: task.updatedAt,
-    finding: compactText(task.finding, 1_500, "finding"),
-    description: compactText(task.description, 2_500, "description"),
+    finding: compactText(task.finding, 1_500, "finding", true),
+    description: compactText(task.description, 2_500, "description", true),
     resolution: compactText(task.resolution, 2_500, "resolution"),
     research: task.research
       .slice(0, 6)
-      .map((item) => compactText(item, 400, "research")),
+      .map((item) => compactText(item, 400, "research", true)),
     plannedValidation: task.validation
       .slice(0, 6)
-      .map((item) => compactText(item, 400, "plannedValidation")),
+      .map((item) => compactText(item, 400, "plannedValidation", true)),
     tags: task.tags.slice(0, 10),
     files: task.files.slice(0, 6).map((file) => ({
-      path: compactText(file.path, 400, "files"),
-      ...(file.lines ? { lines: compactText(file.lines, 80, "files") } : {}),
+      path: compactText(file.path, 400, "files", true),
+      ...(file.lines
+        ? { lines: compactText(file.lines, 80, "files", true) }
+        : {}),
       ...(file.symbol
-        ? { symbol: compactText(file.symbol, 160, "files") }
+        ? { symbol: compactText(file.symbol, 160, "files", true) }
         : {}),
     })),
     userSources: task.userSources.slice(0, 5).map((source) => ({
       type: source.type,
-      locator: compactText(source.locator, 500, "userSources"),
+      locator: compactText(source.locator, 500, "userSources", true),
       ...(source.label
         ? { label: compactText(source.label, 100, "userSources") }
         : {}),
@@ -365,45 +394,36 @@ function compactTask(
     })),
     parent: task.relationships.parent
       ? compactReference(task.relationships.parent.parent, () => {
-          if (!truncatedFields.includes("parent")) {
-            truncatedFields.push("parent");
-          }
+          markTruncated("parent", true);
         })
       : null,
     subtasks: subtasks.map((relationship) =>
       compactReference(relationship.child, () => {
-        if (!truncatedFields.includes("subtasks")) {
-          truncatedFields.push("subtasks");
-        }
+        markTruncated("subtasks", true);
       }),
     ),
     blockedBy: blockedBy.map((relationship) =>
       compactReference(relationship.prerequisite, () => {
-        if (!truncatedFields.includes("blockedBy")) {
-          truncatedFields.push("blockedBy");
-        }
+        markTruncated("blockedBy", true);
       }),
     ),
     blocks: blocks.map((relationship) =>
       compactReference(relationship.dependent, () => {
-        if (!truncatedFields.includes("blocks")) {
-          truncatedFields.push("blocks");
-        }
+        markTruncated("blocks");
       }),
     ),
+  };
+  return compactTaskSchema.parse({
+    ...detail,
     truncation: {
       truncatedFields,
-      omitted: {
-        research: Math.max(0, task.research.length - 6),
-        plannedValidation: Math.max(0, task.validation.length - 6),
-        tags: Math.max(0, task.tags.length - 10),
-        files: Math.max(0, task.files.length - 6),
-        userSources: Math.max(0, task.userSources.length - 5),
-        validationRecords: Math.max(0, task.validationRecords.length - 5),
-        subtasks: Math.max(0, task.relationships.subtasks.length - 5),
-        blockedBy: Math.max(0, task.relationships.blockedBy.length - 5),
-        blocks: Math.max(0, task.relationships.blocks.length - 5),
-      },
+      omitted,
+      ...(requiresReconciliation
+        ? {
+            reconciliationGuidance:
+              "Task detail that can affect scope or planned validation was truncated or omitted. Do not move the task forward or edit files until the full Actionable is reconciled and a newer complete detail is returned. If reconciliation is unavailable, record the blocker and hand off the task.",
+          }
+        : {}),
     },
   });
 }
@@ -608,7 +628,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide the same top-level Actionable as workItemId and parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it: for a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope; for one direct subtask, provide the same top-level Actionable as workItemId and parentId without placement fields. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). If it is present, follow it and do not move the task forward or edit files; if it is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
   const readOnly = {

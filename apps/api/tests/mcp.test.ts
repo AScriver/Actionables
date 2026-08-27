@@ -226,6 +226,12 @@ describe("Actionables MCP", () => {
           "Never claim completion while an owned task remains Researching",
         ),
       );
+      expect(client.getInstructions()).toContain(
+        "truncation.reconciliationGuidance",
+      );
+      expect(client.getInstructions()).toContain(
+        "if it is absent, normal flow may continue",
+      );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
       expect(names).toEqual(
@@ -1635,6 +1641,7 @@ describe("Actionables MCP", () => {
           truncation: {
             truncatedFields: string[];
             omitted: Record<string, number>;
+            reconciliationGuidance?: string;
           };
         };
         claim: { claimToken: string };
@@ -1678,6 +1685,132 @@ describe("Actionables MCP", () => {
         blockedBy: 3,
         blocks: 3,
       });
+      expect(detail.truncation.reconciliationGuidance).toContain(
+        "Do not move the task forward or edit files",
+      );
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("keeps untruncated and noncritical detail loss on the normal path", async () => {
+    const untruncatedTask = await createTask({ title: "Complete detail" });
+    const noncriticalTask = await createTask({
+      title: "Noncritical bounded detail",
+    });
+    const downstream = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        createTask({
+          title: `Downstream ${index} ${"d".repeat(180)}`,
+        }),
+      ),
+    );
+    await prisma.actionable.update({
+      where: { id: noncriticalTask.id },
+      data: {
+        resolution: "x".repeat(100_000),
+        tagsJson: json(
+          Array.from({ length: 12 }, (_, index) => `tag-${index}`),
+        ),
+      },
+    });
+    await prisma.userSourceReference.create({
+      data: {
+        actionableId: noncriticalTask.id,
+        type: "URL",
+        locator: "https://example.test/noncritical",
+        label: "l".repeat(200),
+      },
+    });
+    await prisma.validationRecord.createMany({
+      data: Array.from({ length: 6 }, () => ({
+        actionableId: noncriticalTask.id,
+        type: "Command",
+        outcome: "Passed",
+        notesMd: "n".repeat(1_000),
+        evidenceMd: "e".repeat(1_000),
+        origin: "noncritical-history",
+      })),
+    });
+    for (const item of downstream) {
+      await prisma.dependencyRelationship.create({
+        data: {
+          dependentId: item.id,
+          prerequisiteId: noncriticalTask.id,
+          provenance: "test",
+        },
+      });
+    }
+
+    const { client, transport } = await connectClient();
+    try {
+      const untruncated = output<{
+        task: {
+          truncation: {
+            truncatedFields: string[];
+            omitted: Record<string, number>;
+            reconciliationGuidance?: string;
+          };
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: untruncatedTask.sourceOrdinal,
+            workItemId: untruncatedTask.sourceOrdinal,
+            version: untruncatedTask.version,
+          },
+        }),
+      );
+      expect(untruncated.task.truncation).toEqual({
+        truncatedFields: [],
+        omitted: {
+          research: 0,
+          plannedValidation: 0,
+          tags: 0,
+          files: 0,
+          userSources: 0,
+          validationRecords: 0,
+          subtasks: 0,
+          blockedBy: 0,
+          blocks: 0,
+        },
+      });
+
+      const noncritical = output<{
+        task: {
+          truncation: {
+            truncatedFields: string[];
+            omitted: Record<string, number>;
+            reconciliationGuidance?: string;
+          };
+        };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: noncriticalTask.sourceOrdinal,
+            workItemId: noncriticalTask.sourceOrdinal,
+            version: noncriticalTask.version,
+          },
+        }),
+      );
+      expect(noncritical.task.truncation.truncatedFields).toEqual(
+        expect.arrayContaining([
+          "resolution",
+          "userSources",
+          "validationRecords",
+          "blocks",
+        ]),
+      );
+      expect(noncritical.task.truncation.omitted).toMatchObject({
+        tags: 2,
+        validationRecords: 1,
+        blocks: 1,
+      });
+      expect(noncritical.task.truncation).not.toHaveProperty(
+        "reconciliationGuidance",
+      );
     } finally {
       await transport.close();
     }

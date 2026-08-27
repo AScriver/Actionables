@@ -64,7 +64,7 @@ The server instructions direct agents to use this sequence:
 2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID and any user-requested grouping tags. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
-5. Start from the compact task detail returned by claim; fetch again only when reconciling newer state.
+5. Start from the compact task detail returned by claim. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, do not move the task forward or edit files until the full Actionable is reconciled and a newer complete detail is returned; when it is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue. Fetch again only when reconciling newer state because unchanged detail is compacted deterministically.
 6. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
 7. For a newly claimed Inbox task, transition to `Researching` before investigation.
 8. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
@@ -181,7 +181,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.
