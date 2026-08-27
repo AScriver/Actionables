@@ -120,11 +120,14 @@ security details, and troubleshooting.
 1. Capture a top-level feature or bug in `Inbox` with its intended outcome,
    evidence, sources, relevant files, and planned validation. Add direct
    subtasks when the work needs independent execution units.
-2. Open an unclaimed Actionable and choose **Open in Codex** to prepare a local
-   chat with the displayed prompt and, when valid, the tracked workspace. Codex
-   leaves the prompt in the composer for review rather than sending it. **Copy
-   prompt** remains available when the desktop link or workspace cannot be used.
-   For example, a generated prompt begins:
+2. Open an eligible, unclaimed Actionable in `Inbox`, `Researching`, `Ready`, or
+   `In progress` and choose **Open in Codex** to prepare a local chat with the
+   displayed prompt and, when valid, the tracked workspace. Codex leaves the
+   prompt in the composer for review rather than sending it. **Copy prompt**
+   exposes the same text. Manual or dependency blockers, archived or terminal
+   tasks, and active or expired claims show the relevant unblock, existing
+   claim, or release guidance instead of start actions. For example, an `Inbox`
+   prompt begins:
 
    ```text
    Use Actionables work item #42. Claim task #47 and begin the Researching phase.
@@ -137,10 +140,11 @@ security details, and troubleshooting.
    `In progress` before editing. It records actual validation before marking the
    work `Done`, or saves handoff context when another task must continue.
 
-For a task that is already `Ready`, Actionables generates a continuation prompt
-that directs Codex to confirm the recorded scope and move to `In progress`
-before editing. Claims prevent two Codex tasks from silently working the same
-item, while leases and handoffs make interrupted work visible.
+For a task that is already `Researching` or `In progress`, Actionables generates
+a prompt that resumes its recorded phase. A `Ready` prompt directs Codex to
+confirm the recorded scope and move to `In progress` before editing. Claims
+prevent two Codex tasks from silently working the same item, while leases and
+handoffs make interrupted work visible.
 
 The dashboard derives its queues and alerts from lifecycle, validation,
 hierarchy, dependency, and claim state, so stalled or blocked work remains

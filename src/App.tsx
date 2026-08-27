@@ -1749,29 +1749,36 @@ function AgentClaimPanel({
   const claimantUrl = claim ? codexThreadUrlFromAgentId(claim.agentId) : null;
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
-  const canRecommendPrompt = !selected.archiveState.isArchived && !isTerminal;
+  const canRecommendPrompt =
+    !claim &&
+    !selected.archiveState.isArchived &&
+    !selected.isEffectivelyBlocked &&
+    !isTerminal;
   const truncationInstructions =
     "Before treating the bounded detail as complete, inspect `task.truncation.reconciliationGuidance`. If it is present, follow it and do not move the task forward or edit files until the full Actionable has been reconciled and a newer complete detail is returned; if it is absent, continue normally because any reported loss is noncritical to scope and planned validation.";
-  const readyPrompt =
-    canRecommendPrompt &&
-    selected.status === "Ready" &&
-    claim?.state !== "expired"
-      ? `Use Actionables work item #${selected.parentId ?? selected.id}. ${claim ? `Continue task #${selected.id} from Ready.` : `Claim task #${selected.id} and continue from Ready.`} Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${selected.id} to Done only if it passes; otherwise hand off with the blocker.`
-      : null;
   const researchPrompt =
-    canRecommendPrompt && !claim && selected.status !== "Ready"
-      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} and begin the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. If research establishes that this task contains multiple independently implementable outcomes, you are authorized to split it into the minimum necessary direct tasks within the same work item. Make each task a narrow, complete, independently verifiable vertical slice through only the relevant layers; do not divide work merely by technical layer or create adjacent cleanup. Narrow the current task to one non-overlapping slice and record the split, rationale, dependencies, and validation boundaries before moving it to Ready. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
+    canRecommendPrompt &&
+    (selected.status === "Inbox" || selected.status === "Researching")
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} and ${selected.status === "Inbox" ? "begin" : "resume"} the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. If research establishes that this task contains multiple independently implementable outcomes, you are authorized to split it into the minimum necessary direct tasks within the same work item. Make each task a narrow, complete, independently verifiable vertical slice through only the relevant layers; do not divide work merely by technical layer or create adjacent cleanup. Narrow the current task to one non-overlapping slice and record the split, rationale, dependencies, and validation boundaries before moving it to Ready. Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
       : null;
-  const startPrompt = readyPrompt ?? researchPrompt;
-  const preparedChatUrl =
-    startPrompt && !claim
-      ? buildCodexNewChatUrl(startPrompt, selected.workspacePath)
+  const implementationPrompt =
+    canRecommendPrompt &&
+    (selected.status === "Ready" || selected.status === "In progress")
+      ? `Use Actionables work item #${selected.parentId ?? selected.id}. Claim task #${selected.id} and ${selected.status === "Ready" ? "continue from Ready" : "resume implementation from In progress"}. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} ${selected.status === "Ready" ? "Confirm the scope, then move the task to In progress before editing. Implement the stated outcome" : "Confirm the scope, continue implementing the stated outcome"}, preserve existing user modifications, run the planned validation, record actual evidence, and move #${selected.id} to Done only if it passes; otherwise hand off with the blocker.`
       : null;
+  const startPrompt = researchPrompt ?? implementationPrompt;
+  const preparedChatUrl = startPrompt
+    ? buildCodexNewChatUrl(startPrompt, selected.workspacePath)
+    : null;
   const unavailableGuidance = selected.archiveState.isArchived
     ? "Restore this Actionable before starting agent work."
     : isTerminal
       ? `Reopen this ${selected.status} Actionable before starting agent work.`
-      : null;
+      : claim
+        ? null
+        : selected.isEffectivelyBlocked
+          ? "Resolve this Actionable's blockers before starting agent work."
+          : null;
 
   const copyStartPrompt = async () => {
     if (!startPrompt) return;
