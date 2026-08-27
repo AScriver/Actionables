@@ -248,6 +248,24 @@ describe("Actionables MCP", () => {
       expect(client.getInstructions()).toContain(
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
       );
+      expect(client.getInstructions()).toContain(
+        "keep the root as the coordination record and create the minimum direct task set covering every implementation slice",
+      );
+      expect(client.getInstructions()).toContain(
+        "narrow it to one slice and create only the remaining slices as siblings under the same root",
+      );
+      expect(client.getInstructions()).toContain(
+        "Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope",
+      );
+      expect(client.getInstructions()).toContain(
+        "do not claim dependency relationships were created",
+      );
+      expect(client.getInstructions()).toContain(
+        "in the current task and every created task, and leave created tasks unclaimed in Inbox",
+      );
+      expect(client.getInstructions()).toContain(
+        "A split root remains coordination-only when Ready",
+      );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
       expect(names).toEqual(
@@ -301,6 +319,12 @@ describe("Actionables MCP", () => {
       };
       expect(createTaskTool?.description).toContain(
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
+      );
+      expect(createTaskTool?.description).toContain(
+        "For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId",
+      );
+      expect(createTaskTool?.description).toContain(
+        "never use a direct task as the parent",
       );
       expect(createTaskInputSchema.required).toEqual(
         expect.arrayContaining(["priority", "effort", "tags"]),

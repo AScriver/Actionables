@@ -61,7 +61,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct subtask, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields. Reuse the UUID only for an exact retry.
+2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields; never use a direct task as the parent. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
 5. Start from the compact task detail returned by claim. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, do not move the task forward or edit files until the full Actionable is reconciled and a newer complete detail is returned; when it is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue. Fetch again only when reconciling newer state because unchanged detail is compacted deterministically.
@@ -69,13 +69,16 @@ The server instructions direct agents to use this sequence:
 7. For a newly claimed Inbox task, transition to `Researching` before investigation.
 8. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
 9. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
-10. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient.
-11. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
-12. Mutate with the latest version and secret claim token.
-13. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
-14. Never claim completion while an owned task remains `Researching`.
-15. Release a nonterminal claim when abandoning or handing off work.
-16. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
+10. Split only when research confirms multiple independently implementable outcomes. For a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. For an existing direct task, narrow it to one slice and create only the remaining slices as siblings under the same root. A single outcome remains one task.
+11. Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, duplicate scope, or create grandchildren.
+12. Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, record dependencies only as task notes and do not claim that dependency relationships were created.
+13. Before reporting research complete, move the task to `Ready` when the findings and validation plan are sufficient. A split root remains the coordination record; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation scope.
+14. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
+15. Mutate with the latest version and secret claim token.
+16. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
+17. Never claim completion while an owned task remains `Researching`.
+18. Release a nonterminal claim when abandoning or handing off work.
+19. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
@@ -86,9 +89,10 @@ applied, so blocked tasks cannot hide safe work.
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
-verify creation. A child can be created only when `workItemId` and `parentId`
-identify the same active, top-level Actionable; it inherits that parent's
-project, repository, and worktree. For a top-level task, existing scope IDs
+verify creation. A direct task or sibling can be created only when `workItemId`
+and `parentId` identify the same active, top-level Actionable; it inherits that
+root's project, repository, and worktree. Grandchildren are rejected. For a
+top-level task, existing scope IDs
 remain supported. When `repositoryPath` and `ensureScope: true` are supplied
 instead, the server verifies the local Git path, resolves its repository and
 worktree roots, reuses matching active scope records, and atomically creates

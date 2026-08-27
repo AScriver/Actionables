@@ -19,6 +19,7 @@ const mcpBearerTokenEnvironmentVariable = "ACTIONABLES_MCP_TOKEN";
 const actionablesMcpTableHeader = "[mcp_servers.actionables]";
 const knownLegacySkillHashes = new Set([
   "d75e5b9094b6bb0f4c8c31059e8bbfac88178ad2b46736c570db217aea19cf42",
+  "d090896ff221b734e43c6bba21b7e79b195f62a20b47961b4a7147b6281c779d",
 ]);
 const repositoryRoot = resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),

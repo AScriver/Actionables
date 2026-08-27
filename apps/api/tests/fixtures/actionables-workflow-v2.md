@@ -28,22 +28,12 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - For a creation-only request, create each authorized Actionable unclaimed in Inbox and stop unless the user also requested triage, research, or implementation.
 - Generate one caller-stable idempotency UUID for each intended task. Reuse it only for an exact retry and never for a different task.
 - Provide a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag for every created task.
-- For a direct task or sibling, pass the authorized top-level Actionable as both `workItemId` and `parentId`; the server inherits that root's scope. Never use a direct task as the parent or also pass top-level placement fields.
+- For a direct subtask, pass `parentId`; the server inherits the parent's scope. Do not also pass top-level placement fields.
 - For a top-level task with known scope IDs, pass `projectId`, `repositoryId`, and `worktreeId`.
 - If the current local Git repository is not tracked yet, pass its absolute path as `repositoryPath` with `ensureScope: true`. The server resolves the Git roots and atomically creates any missing project, repository, or worktree before creating the task.
 - Treat the task detail returned by creation as verification. Do not claim a newly created task only to fetch it again.
 - Creation records the calling Codex thread as creator provenance. Do not dismiss, archive, or delete an invalid, accidental, or disposable task without explicit user authorization. When dismissal is authorized and a task created by this same thread is still active and unclaimed, call `actionables.dismiss_task` with only its ID and a required reason.
 - Automatic scope provisioning does not authorize arbitrary backlog discovery or creation outside the repository and task content the user placed in scope.
-
-## Split researched work
-
-- Split only when research confirms multiple independently implementable outcomes. A task with one outcome remains one task.
-- For a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. Do not narrow the root to one slice.
-- For an existing direct task, narrow it to one non-overlapping slice and create only the remaining slices as sibling direct tasks under the same top-level work item. Do not create grandchildren.
-- Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, or duplicate scope.
-- Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox unless the user separately authorized more work on them.
-- Unless a dedicated relationship tool is available, record dependencies only as task notes and do not claim that dependency relationships were created.
-- Move a research-complete split root to Ready as the coordination record. Later work on that root coordinates its direct tasks and aggregate validation instead of implementing or duplicating their scope.
 
 ## Maintain the task
 
