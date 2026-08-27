@@ -127,7 +127,7 @@ security details, and troubleshooting.
    For example, a generated prompt begins:
 
    ```text
-   Use Actionables work item #42. Claim task #47 — Fix stale cache invalidation — and begin the Researching phase.
+   Use Actionables work item #42. Claim task #47 and begin the Researching phase.
    ```
 
 3. Review and send the prepared prompt, or paste the copied prompt into Codex.
