@@ -848,7 +848,8 @@ export const archiveImpactResponseSchema = z.object({
 const titleField = z.string().trim().min(1, "Enter a title.").max(240);
 const markdownField = z.string().trim().max(100_000);
 const notesSchema = z.array(z.string().trim().min(1)).max(200);
-const tagsSchema = z.array(z.string().trim().min(1).max(60)).max(30);
+const tagSchema = z.string().trim().min(1, "Provide a nonblank tag.").max(60);
+const tagsSchema = z.array(tagSchema).max(30);
 
 export const createActionableRequestSchema = z
   .object({
@@ -1469,18 +1470,26 @@ export const createAgentTaskRequestSchema = z
       ),
     title: titleField.describe("Clear title for the new task."),
     priority: prioritySchema
-      .default("Unset")
-      .describe("Optional task priority."),
+      .exclude(["Unset"], {
+        error: "Choose a deliberate priority other than Unset.",
+      })
+      .describe("Required deliberate task priority; Unset is not allowed."),
     description: markdownField
       .default("")
       .describe("Optional intended-result Markdown."),
     effort: effortSchema
-      .default("Unknown")
-      .describe("Optional effort estimate."),
+      .exclude(["Unknown"], {
+        error: "Choose a deliberate effort estimate other than Unknown.",
+      })
+      .describe("Required deliberate effort estimate; Unknown is not allowed."),
     plannedValidation: notesSchema
       .default([])
       .describe("Optional checks planned for this task."),
-    tags: tagsSchema.default([]).describe("Optional grouping tags."),
+    tags: z
+      .array(tagSchema, { error: "Provide at least one meaningful tag." })
+      .min(1, "Provide at least one meaningful tag.")
+      .max(30)
+      .describe("Required grouping tags; provide at least one meaningful tag."),
   })
   .strict()
   .superRefine((input, context) => {

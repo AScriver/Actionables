@@ -27,6 +27,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Create a task only when the user explicitly requests or approves its creation and the dedicated `actionables.create_task` tool is available.
 - For a creation-only request, create each authorized Actionable unclaimed in Inbox and stop unless the user also requested triage, research, or implementation.
 - Generate one caller-stable idempotency UUID for each intended task. Reuse it only for an exact retry and never for a different task.
+- Provide a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag for every created task.
 - For a direct subtask, pass `parentId`; the server inherits the parent's scope. Do not also pass top-level placement fields.
 - For a top-level task with known scope IDs, pass `projectId`, `repositoryId`, and `worktreeId`.
 - If the current local Git repository is not tracked yet, pass its absolute path as `repositoryPath` with `ensureScope: true`. The server resolves the Git roots and atomically creates any missing project, repository, or worktree before creating the task.

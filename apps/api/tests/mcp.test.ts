@@ -18,6 +18,11 @@ const bearerToken = "test-mcp-token-with-at-least-thirty-two-characters";
 const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
 const agentId = `codex:${threadId}`;
 const json = (value: unknown) => value as never;
+const validTaskClassification = {
+  priority: "Medium",
+  effort: "S",
+  tags: ["mcp"],
+};
 
 let databasePath: string;
 let prisma: AppPrismaClient;
@@ -114,6 +119,14 @@ function errorOutput(value: unknown) {
   expect(typeof parsed.retryable).toBe("boolean");
   expect(typeof parsed.nextAction).toBe("string");
   return parsed;
+}
+
+function validationErrorText(value: unknown) {
+  const result = value as CallToolResult;
+  expect(result.isError).toBe(true);
+  const message = result.content.find((item) => item.type === "text")?.text;
+  expect(message).toEqual(expect.any(String));
+  return message!;
 }
 
 function describedProperties(
@@ -232,6 +245,9 @@ describe("Actionables MCP", () => {
       expect(client.getInstructions()).toContain(
         "if it is absent, normal flow may continue",
       );
+      expect(client.getInstructions()).toContain(
+        "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
+      );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
       expect(names).toEqual(
@@ -273,6 +289,36 @@ describe("Actionables MCP", () => {
       expect(recoverTaskTool?.description).toContain(
         "superseded token becomes invalid immediately",
       );
+      const createTaskTool = tools.find(
+        (tool) => tool.name === "actionables.create_task",
+      );
+      const createTaskInputSchema = createTaskTool?.inputSchema as {
+        required?: string[];
+        properties?: Record<
+          string,
+          { description?: string; enum?: string[]; minItems?: number }
+        >;
+      };
+      expect(createTaskTool?.description).toContain(
+        "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
+      );
+      expect(createTaskInputSchema.required).toEqual(
+        expect.arrayContaining(["priority", "effort", "tags"]),
+      );
+      expect(createTaskInputSchema.properties?.priority).toMatchObject({
+        description: "Required deliberate task priority; Unset is not allowed.",
+        enum: ["Critical", "High", "Medium", "Low", "Backlog"],
+      });
+      expect(createTaskInputSchema.properties?.effort).toMatchObject({
+        description:
+          "Required deliberate effort estimate; Unknown is not allowed.",
+        enum: ["XS", "S", "S–M", "M", "M–L", "L", "L–XL", "XL"],
+      });
+      expect(createTaskInputSchema.properties?.tags).toMatchObject({
+        description:
+          "Required grouping tags; provide at least one meaningful tag.",
+        minItems: 1,
+      });
       for (const tool of tools) {
         const properties = describedProperties(tool.inputSchema);
         expect(properties.length, tool.name).toBeGreaterThan(0);
@@ -424,6 +470,72 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("requires deliberate classification for every created task", async () => {
+    const { client, transport } = await connectClient();
+    const before = await prisma.actionable.count();
+    try {
+      const expectClassificationError = async (
+        field: "priority" | "effort" | "tags",
+        value: unknown,
+        expectedMessage: string,
+      ) => {
+        const argumentsValue: Record<string, unknown> = {
+          idempotencyKey: randomUUID(),
+          ...scope,
+          title: `Invalid ${field} classification`,
+          ...validTaskClassification,
+        };
+        if (value === undefined) delete argumentsValue[field];
+        else argumentsValue[field] = value;
+
+        const message = validationErrorText(
+          await client.callTool({
+            name: "actionables.create_task",
+            arguments: argumentsValue,
+          }),
+        );
+        expect(message).toContain(field);
+        expect(message).toContain(expectedMessage);
+      };
+
+      await expectClassificationError(
+        "priority",
+        undefined,
+        "Choose a deliberate priority other than Unset.",
+      );
+      await expectClassificationError(
+        "priority",
+        "Unset",
+        "Choose a deliberate priority other than Unset.",
+      );
+      await expectClassificationError(
+        "effort",
+        undefined,
+        "Choose a deliberate effort estimate other than Unknown.",
+      );
+      await expectClassificationError(
+        "effort",
+        "Unknown",
+        "Choose a deliberate effort estimate other than Unknown.",
+      );
+      await expectClassificationError(
+        "tags",
+        undefined,
+        "Provide at least one meaningful tag.",
+      );
+      await expectClassificationError(
+        "tags",
+        [],
+        "Provide at least one meaningful tag.",
+      );
+      await expectClassificationError("tags", [" "], "Provide a nonblank tag.");
+
+      expect(await prisma.actionable.count()).toBe(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("creates top-level and direct-child tasks and returns the same task on retry", async () => {
     const { client, transport } = await connectClient();
     try {
@@ -443,6 +555,7 @@ describe("Actionables MCP", () => {
         recordId: string;
         title: string;
         priority: string;
+        status: string;
         description: string;
         effort: string;
         plannedValidation: string[];
@@ -459,6 +572,7 @@ describe("Actionables MCP", () => {
       expect(topLevel).toMatchObject({
         title: topLevelArguments.title,
         priority: "High",
+        status: "Inbox",
         description: topLevelArguments.description,
         effort: "S",
         plannedValidation: topLevelArguments.plannedValidation,
@@ -478,6 +592,16 @@ describe("Actionables MCP", () => {
           version: topLevel.version,
         }),
       );
+      const classificationConflict = errorOutput(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: { ...topLevelArguments, priority: "Low" },
+        }),
+      );
+      expect(classificationConflict).toMatchObject({
+        code: "IDEMPOTENCY_CONFLICT",
+        retryable: false,
+      });
 
       const childKey = randomUUID();
       const childArguments = {
@@ -485,6 +609,7 @@ describe("Actionables MCP", () => {
         workItemId: topLevel.id,
         parentId: topLevel.id,
         title: "Agent-created direct child",
+        priority: "Medium",
         description: "Must inherit the parent scope.",
         effort: "M",
         plannedValidation: ["Verify direct hierarchy placement."],
@@ -492,7 +617,11 @@ describe("Actionables MCP", () => {
       };
       const child = output<{
         id: number;
+        recordId: string;
         title: string;
+        priority: string;
+        status: string;
+        effort: string;
         parent: { id: number };
         scope: typeof scope;
         tags: string[];
@@ -505,6 +634,9 @@ describe("Actionables MCP", () => {
       );
       expect(child).toMatchObject({
         title: childArguments.title,
+        priority: childArguments.priority,
+        status: "Inbox",
+        effort: childArguments.effort,
         parent: { id: topLevel.id },
         scope,
         tags: childArguments.tags,
@@ -537,13 +669,29 @@ describe("Actionables MCP", () => {
           },
         }),
       ).toBe(1);
-      expect(
-        (
-          await prisma.actionable.findUniqueOrThrow({
-            where: { id: topLevel.recordId },
-          })
-        ).rawFragmentJson,
-      ).toMatchObject({ creatorThreadId: threadId });
+      const storedTopLevel = await prisma.actionable.findUniqueOrThrow({
+        where: { id: topLevel.recordId },
+        include: { agentTaskClaim: true },
+      });
+      expect(storedTopLevel).toMatchObject({
+        priority: topLevelArguments.priority,
+        status: "Inbox",
+        effort: topLevelArguments.effort,
+        tagsJson: topLevelArguments.tags,
+        agentTaskClaim: null,
+        rawFragmentJson: { creatorThreadId: threadId },
+      });
+      const storedChild = await prisma.actionable.findUniqueOrThrow({
+        where: { id: child.recordId },
+        include: { agentTaskClaim: true },
+      });
+      expect(storedChild).toMatchObject({
+        priority: childArguments.priority,
+        status: "Inbox",
+        effort: childArguments.effort,
+        tagsJson: childArguments.tags,
+        agentTaskClaim: null,
+      });
     } finally {
       await transport.close();
     }
@@ -561,6 +709,7 @@ describe("Actionables MCP", () => {
         idempotencyKey: randomUUID(),
         ...scope,
         title,
+        ...validTaskClassification,
       });
       const created = output<{ id: number; recordId: string; version: number }>(
         await client.callTool({
@@ -702,6 +851,7 @@ describe("Actionables MCP", () => {
         repositoryPath: repoRoot,
         ensureScope: true,
         title: "Task with automatically provisioned scope",
+        ...validTaskClassification,
       };
       const created = output<{
         id: number;
@@ -790,6 +940,7 @@ describe("Actionables MCP", () => {
             repositoryPath: directory,
             ensureScope: true,
             title: "Task with invalid automatic scope",
+            ...validTaskClassification,
           },
         }),
       );
@@ -866,7 +1017,7 @@ describe("Actionables MCP", () => {
           (
             await client.callTool({
               name: "actionables.create_task",
-              arguments: argumentsValue,
+              arguments: { ...validTaskClassification, ...argumentsValue },
             })
           ).isError,
         ).toBe(true);
@@ -880,6 +1031,7 @@ describe("Actionables MCP", () => {
             workItemId: 999_999,
             parentId: 999_999,
             title: "Unknown parent",
+            ...validTaskClassification,
           },
         }),
       );
@@ -897,6 +1049,7 @@ describe("Actionables MCP", () => {
             repositoryId: "missing-repository",
             worktreeId: "missing-worktree",
             title: "Invalid top-level scope",
+            ...validTaskClassification,
           },
         }),
       );
@@ -917,6 +1070,7 @@ describe("Actionables MCP", () => {
             workItemId: root.sourceOrdinal,
             parentId: root.sourceOrdinal,
             title: "Existing direct child",
+            ...validTaskClassification,
           },
         }),
       );
@@ -928,6 +1082,7 @@ describe("Actionables MCP", () => {
             workItemId: root.sourceOrdinal,
             parentId: child.id,
             title: "Forbidden grandchild",
+            ...validTaskClassification,
           },
         }),
       );
@@ -941,6 +1096,7 @@ describe("Actionables MCP", () => {
         idempotencyKey: reusedKey,
         ...scope,
         title: "Original keyed task",
+        ...validTaskClassification,
       };
       const original = output<{ id: number }>(
         await client.callTool({
