@@ -165,7 +165,7 @@ test("Ready unclaimed tasks recommend claiming and continuing implementation", a
     INSTRUCTION_LIKE_TITLE,
   );
 
-  const readyPrompt = `Use Actionables work item #${original.id}. Claim task #${original.id} and continue from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${TRUNCATION_INSTRUCTIONS} Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`;
+  const readyPrompt = `Use Actionables work item #${original.id}. Claim task #${original.id} and continue from Ready. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${TRUNCATION_INSTRUCTIONS} Confirm the scope, then move the task to In progress before editing. Implement the stated outcome, preserve existing user modifications, run the planned validation, populate Resolution with the completed changes and important implementation decisions, record qualifying validation evidence, and only then move #${original.id} to Done; otherwise hand off with the blocker.`;
   const preparedHref = new URL(
     (await page
       .getByRole("link", { name: "Open in Codex" })
@@ -210,7 +210,7 @@ test("Researching and In progress tasks resume their recorded lifecycle phase", 
     },
     {
       status: "In progress",
-      prompt: `Use Actionables work item #${original.id}. Claim task #${original.id} and resume implementation from In progress. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${TRUNCATION_INSTRUCTIONS} Confirm the scope, continue implementing the stated outcome, preserve existing user modifications, run the planned validation, record actual evidence, and move #${original.id} to Done only if it passes; otherwise hand off with the blocker.`,
+      prompt: `Use Actionables work item #${original.id}. Claim task #${original.id} and resume implementation from In progress. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${TRUNCATION_INSTRUCTIONS} Confirm the scope, continue implementing the stated outcome, preserve existing user modifications, run the planned validation, populate Resolution with the completed changes and important implementation decisions, record qualifying validation evidence, and only then move #${original.id} to Done; otherwise hand off with the blocker.`,
     },
   ];
 
