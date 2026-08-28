@@ -143,6 +143,25 @@ value is preserved while Actionables safely resolves the other port.
 
 Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
 
+### Scheduled development operation
+
+When the optional `Actionables Dashboard` Windows Scheduled Task is registered,
+its wrapper runs the same `pnpm run dev` command described above. The task is
+the logon host; its wrapper is the only restart owner. An unexpected nonzero
+exit is retried after one minute, up to three times. A run that remains active
+for five minutes resets the consecutive-failure count. Launcher output and
+wrapper start/exit messages are appended to
+`%LOCALAPPDATA%\ActionablesDashboard\dashboard.log`; Task Scheduler's
+Operational event log records the outer task start and exit.
+
+Use Task Scheduler's stop operation for an intentional shutdown. A manually
+stopped task remains stopped, is not treated as a crash, and its cleanup
+watchdog terminates the development process tree. Start it again with:
+
+```powershell
+Start-ScheduledTask -TaskName 'Actionables Dashboard'
+```
+
 If MCP was enabled after the app started, restart the app so the API reads the new token.
 
 ## Production-mode local operation
