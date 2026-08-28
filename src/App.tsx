@@ -1755,7 +1755,7 @@ function AgentClaimPanel({
     !selected.isEffectivelyBlocked &&
     !isTerminal;
   const truncationInstructions =
-    "Before treating the bounded detail as complete, inspect `task.truncation.reconciliationGuidance`. If it is present, follow it and do not move the task forward or edit files until the full Actionable has been reconciled and a newer complete detail is returned; if it is absent, continue normally because any reported loss is noncritical to scope and planned validation.";
+    "Before treating the bounded detail as complete, inspect `task.truncation.reconciliationGuidance`. If it is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field has been reconciled; if guidance is absent, continue normally because any reported loss is noncritical to scope and planned validation.";
   const workItemId = selected.parentId ?? selected.id;
   const splitInstructions =
     selected.parentId === undefined

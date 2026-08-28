@@ -13,6 +13,7 @@ const temporaryHomes: string[] = [];
 const legacySkillPaths = [
   "./fixtures/actionables-workflow-v1.md",
   "./fixtures/actionables-workflow-v2.md",
+  "./fixtures/actionables-workflow-v3.md",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 const latestLegacySkillPath = legacySkillPaths[legacySkillPaths.length - 1]!;
 
@@ -514,6 +515,9 @@ describe("Actionables agent integration", () => {
       });
       await expect(readFile(skillPath, "utf8")).resolves.toContain(
         "## Split researched work",
+      );
+      await expect(readFile(skillPath, "utf8")).resolves.toContain(
+        "actionables.get_task_detail",
       );
     },
   );

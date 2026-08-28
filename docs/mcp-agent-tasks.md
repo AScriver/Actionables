@@ -64,7 +64,7 @@ The server instructions direct agents to use this sequence:
 2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields; never use a direct task as the parent. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
 4. Claim the exact listed version with the same `workItemId`.
-5. Start from the compact task detail returned by claim. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, do not move the task forward or edit files until the full Actionable is reconciled and a newer complete detail is returned; when it is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue. Fetch again only when reconciling newer state because unchanged detail is compacted deterministically.
+5. Start from the compact task detail returned by claim. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. If any page returns `VERSION_CONFLICT`, discard the partial value and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue.
 6. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
 7. For a newly claimed Inbox task, transition to `Researching` before investigation.
 8. Record at least one non-empty Research note, preferably with `appendResearch`, before transitioning from `Researching` to `Ready`.
@@ -133,7 +133,7 @@ from the owning thread returns `OWN_CLAIM_ACTIVE` with `currentVersion` and
 machine-readable guidance to `recover_task_claim`; other threads cannot use
 the recovery operation.
 
-After claim, the token identifies the stored agent claim. Get, update,
+After claim, the token identifies the stored agent claim. Get, detail, update,
 transition, validation, and release calls do not repeat `agentId`; only
 explicit renewal accepts a new `leaseMinutes`. Successful mutations use the
 server's default renewal period.
@@ -175,6 +175,7 @@ The endpoint exposes exactly these tools:
 - `actionables.create_task`
 - `actionables.list_tasks`
 - `actionables.get_task`
+- `actionables.get_task_detail`
 - `actionables.claim_task`
 - `actionables.recover_task_claim`
 - `actionables.renew_task_claim`
@@ -185,7 +186,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return the claim token, renew the claim, or change the task version. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.

@@ -80,6 +80,56 @@ const listTasksSchema = z
 const claimedTaskSchema = releaseAgentTaskClaimRequestSchema.extend({
   id: idSchema,
 });
+const taskDetailFieldSchema = z
+  .enum([
+    "finding",
+    "description",
+    "research",
+    "plannedValidation",
+    "files",
+    "userSources",
+    "parent",
+    "subtasks",
+    "blockedBy",
+  ])
+  .describe("Implementation-critical task field to retrieve exactly.");
+const taskDetailPageCharacters = 8_000;
+const getTaskDetailSchema = claimedTaskSchema
+  .extend({
+    version: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Exact task version from the compact detail; prevents pages from mixing task states.",
+      ),
+    field: taskDetailFieldSchema,
+    offset: z
+      .number()
+      .int()
+      .nonnegative()
+      .default(0)
+      .describe(
+        "Character offset for this page; use 0 first, then each returned nextOffset.",
+      ),
+    contentHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional()
+      .describe(
+        "Content hash returned by the first page; required with every nonzero offset.",
+      ),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.offset > 0 && !input.contentHash) {
+      context.addIssue({
+        code: "custom",
+        path: ["contentHash"],
+        message: "A returned contentHash is required after the first page.",
+      });
+    }
+  });
 const claimTaskSchema = z
   .object({
     id: idSchema,
@@ -230,7 +280,7 @@ const compactTaskSchema = z
     blocks: z.array(compactReferenceSchema).max(5),
     truncation: z
       .object({
-        truncatedFields: z.array(compactTruncatedFieldSchema).max(11),
+        truncatedFields: z.array(compactTruncatedFieldSchema).max(12),
         omitted: z
           .object({
             research: z.number().int().nonnegative(),
@@ -286,16 +336,110 @@ const handoffTaskOutputSchema = z
   })
   .strict();
 
+const taskDetailPageSchema = z
+  .object({
+    id: z.number().int().positive(),
+    version: z.number().int().positive(),
+    field: taskDetailFieldSchema,
+    offset: z.number().int().nonnegative(),
+    totalLength: z.number().int().positive(),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+    json: z.string().max(taskDetailPageCharacters),
+    nextOffset: z.number().int().positive().nullable(),
+  })
+  .strict();
+
 function truncate(value: string, max: number) {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
+function taskReference(item: { id: number; title: string; status: string }) {
+  return { id: item.id, title: item.title, status: item.status };
+}
+
 function compactReference(
-  item: { id: number; title: string; status: string },
+  item: Parameters<typeof taskReference>[0],
   markTruncated: () => void,
 ) {
   if (item.title.length > 160) markTruncated();
-  return { id: item.id, title: truncate(item.title, 160), status: item.status };
+  return { ...taskReference(item), title: truncate(item.title, 160) };
+}
+
+function taskDetailField(
+  task: ActionableDetail,
+  field: z.infer<typeof taskDetailFieldSchema>,
+) {
+  switch (field) {
+    case "finding":
+      return task.finding;
+    case "description":
+      return task.description;
+    case "research":
+      return task.research;
+    case "plannedValidation":
+      return task.validation;
+    case "files":
+      return task.files;
+    case "userSources":
+      return task.userSources.map(({ type, locator, label }) => ({
+        type,
+        locator,
+        ...(label ? { label } : {}),
+      }));
+    case "parent":
+      return task.relationships.parent
+        ? taskReference(task.relationships.parent.parent)
+        : null;
+    case "subtasks":
+      return task.relationships.subtasks.map(({ child }) =>
+        taskReference(child),
+      );
+    case "blockedBy":
+      return task.relationships.blockedBy.map(({ prerequisite }) =>
+        taskReference(prerequisite),
+      );
+  }
+}
+
+function taskDetailPage(
+  task: ActionableDetail,
+  input: Pick<
+    z.infer<typeof getTaskDetailSchema>,
+    "version" | "field" | "offset" | "contentHash"
+  >,
+) {
+  if (task.version !== input.version) throw new VersionConflictError(task);
+  const json = JSON.stringify(taskDetailField(task, input.field));
+  const contentHash = createHash("sha256").update(json).digest("hex");
+  if (input.contentHash && input.contentHash !== contentHash) {
+    throw new AgentTaskClaimError(
+      "VERSION_CONFLICT",
+      "The selected task detail changed while it was being paged.",
+      undefined,
+      task.version,
+    );
+  }
+  if (input.offset >= json.length && input.offset !== 0) {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "The requested detail offset is outside the selected field.",
+      { offset: ["Start at 0, then use only a returned nextOffset."] },
+    );
+  }
+  const nextOffset = Math.min(
+    input.offset + taskDetailPageCharacters,
+    json.length,
+  );
+  return taskDetailPageSchema.parse({
+    id: task.id,
+    version: task.version,
+    field: input.field,
+    offset: input.offset,
+    totalLength: json.length,
+    contentHash,
+    json: json.slice(input.offset, nextOffset),
+    nextOffset: nextOffset < json.length ? nextOffset : null,
+  });
 }
 
 function compactTask(
@@ -335,14 +479,18 @@ function compactTask(
     blockedBy: Math.max(0, task.relationships.blockedBy.length - 5),
     blocks: Math.max(0, task.relationships.blocks.length - 5),
   };
-  requiresReconciliation = [
-    omitted.research,
-    omitted.plannedValidation,
-    omitted.files,
-    omitted.userSources,
-    omitted.subtasks,
-    omitted.blockedBy,
-  ].some((count) => count > 0);
+  for (const [field, count, affectsImplementation] of [
+    ["research", omitted.research, true],
+    ["plannedValidation", omitted.plannedValidation, true],
+    ["files", omitted.files, true],
+    ["userSources", omitted.userSources, true],
+    ["validationRecords", omitted.validationRecords, false],
+    ["subtasks", omitted.subtasks, true],
+    ["blockedBy", omitted.blockedBy, true],
+    ["blocks", omitted.blocks, false],
+  ] as const) {
+    if (count > 0) markTruncated(field, affectsImplementation);
+  }
   const detail = {
     id: task.id,
     recordId: task.recordId,
@@ -421,7 +569,7 @@ function compactTask(
       ...(requiresReconciliation
         ? {
             reconciliationGuidance:
-              "Task detail that can affect scope or planned validation was truncated or omitted. Do not move the task forward or edit files until the full Actionable is reconciled and a newer complete detail is returned. If reconciliation is unavailable, record the blocker and hand off the task.",
+              "Critical task detail was truncated or omitted. For each supported field named in truncation.truncatedFields (finding, description, research, plannedValidation, files, userSources, parent, subtasks, blockedBy), call actionables.get_task_detail with the compact version and claim token at offset 0. Pass contentHash with each nextOffset until null; concatenate json and JSON-parse it. On VERSION_CONFLICT, discard partial json and restart from current compact detail. Do not move the task forward or edit files until every named supported field is reconciled.",
           }
         : {}),
     },
@@ -628,7 +776,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). If it is present, follow it and do not move the task forward or edit files; if it is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only the task ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). When it is present, call actionables.get_task_detail for every supported critical field named in truncation.truncatedFields, start at offset 0, then pass contentHash with each nextOffset until null, concatenate json in offset order, and JSON-parse it; do not move the task forward or edit files until reconciliation is complete. If any page returns VERSION_CONFLICT, discard partial json and restart from the current compact detail; if it is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only its ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -694,6 +842,24 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     ({ id, ...input }) =>
       runTool(async () =>
         compactTask(await getClaimedAgentTask(prisma, id, input)),
+      ),
+  );
+  server.registerTool(
+    "actionables.get_task_detail",
+    {
+      title: "Get exact claimed Actionable detail",
+      description:
+        "Fetch one fixed-size page of an exact implementation-critical task field using the valid claim token and exact task version. Start with offset 0, then pass each nextOffset until null with the first page's contentHash; concatenate json in offset order and JSON-parse the complete value. If VERSION_CONFLICT occurs, discard partial json and restart from current compact detail. A successful page never returns the claim token, renews the claim, or changes the task version.",
+      inputSchema: getTaskDetailSchema,
+      outputSchema: taskDetailPageSchema,
+      annotations: readOnly,
+    },
+    ({ id, claimToken, ...input }) =>
+      runTool(async () =>
+        taskDetailPage(
+          await getClaimedAgentTask(prisma, id, { claimToken }),
+          input,
+        ),
       ),
   );
   server.registerTool(

@@ -15,11 +15,10 @@ Use Actionables as the coordination record for substantive work without letting 
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
 6. Claim only the root or a direct task returned from that work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token, so do not immediately fetch again.
-7. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
-8. For a newly claimed Inbox task, transition to Researching before beginning investigation.
-9. Record at least one non-empty Research note before moving from Researching to Ready.
-10. Transition from Ready to In progress before making any implementation changes.
-11. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
+7. For a newly claimed Inbox task, transition to Researching before beginning investigation.
+8. Record at least one non-empty Research note before moving from Researching to Ready.
+9. Transition from Ready to In progress before making any implementation changes.
+10. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
 
 If the Actionables MCP server or required tool is unavailable, continue the user's work and report the tracking limitation. Never claim a merely adjacent task.
 
@@ -50,7 +49,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 
 - Treat the claim token as a secret capability. Keep it only in tool-call context; never place it in chat, code, files, logs, task text, or validation evidence.
 - After claim, use the task ID, claim token, and latest version where required. Do not repeat the agent ID or mutation lease duration; only explicit renewal accepts `leaseMinutes`.
-- Re-fetch compact detail after a mutation version conflict, reconcile the current record, and retry only if the intended change is still valid. For detail-page version conflicts, discard the partial field and restart its paging from the current compact version.
+- Re-fetch after a version conflict, reconcile the current record, and retry only if the intended change is still valid.
 - Follow structured error `nextAction` guidance. Retry only when `retryable` is true and the stated prerequisite has been satisfied.
 - Prefer `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding material; use replacement fields only for intentional rewrites.
 - Record meaningful state changes, research conclusions, decisions, plans, blockers, and validation evidence. Do not emit heartbeat or narration-only updates.

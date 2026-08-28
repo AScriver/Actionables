@@ -105,7 +105,9 @@ async function connectClient(
 
 function output<T>(value: unknown) {
   const result = value as CallToolResult;
-  expect(result.isError).not.toBe(true);
+  expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(
+    true,
+  );
   return result.structuredContent as T;
 }
 
@@ -242,6 +244,10 @@ describe("Actionables MCP", () => {
       expect(client.getInstructions()).toContain(
         "truncation.reconciliationGuidance",
       );
+      expect(client.getInstructions()).toContain("actionables.get_task_detail");
+      expect(client.getInstructions()).toContain(
+        "pass contentHash with each nextOffset until null",
+      );
       expect(client.getInstructions()).toContain(
         "if it is absent, normal flow may continue",
       );
@@ -273,6 +279,7 @@ describe("Actionables MCP", () => {
           "actionables.create_task",
           "actionables.list_tasks",
           "actionables.get_task",
+          "actionables.get_task_detail",
           "actionables.claim_task",
           "actionables.recover_task_claim",
           "actionables.renew_task_claim",
@@ -360,6 +367,11 @@ describe("Actionables MCP", () => {
         readOnlyHint: true,
         destructiveHint: false,
       });
+      expect(byName["actionables.get_task_detail"]).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
       expect(byName["actionables.create_task"]).toMatchObject({
         readOnlyHint: false,
         destructiveHint: false,
@@ -390,6 +402,9 @@ describe("Actionables MCP", () => {
       });
       const descriptions = Object.fromEntries(
         tools.map((tool) => [tool.name, tool.description]),
+      );
+      expect(descriptions["actionables.get_task_detail"]).toContain(
+        "pass each nextOffset until null",
       );
       expect(descriptions["actionables.transition_task"]).toContain(
         "use Ready when research is sufficient but implementation remains",
@@ -1738,43 +1753,64 @@ describe("Actionables MCP", () => {
   });
 
   it("keeps oversized task detail below the context budget and reports omissions", async () => {
+    const finding = "f".repeat(100_000);
+    const description = "d".repeat(100_000);
+    const research = Array.from(
+      { length: 12 },
+      (_, index) => `research-${index}-${"r".repeat(1_000)}`,
+    );
+    const plannedValidation = Array.from(
+      { length: 12 },
+      (_, index) => `validation-${index}-${"p".repeat(1_000)}`,
+    );
+    const files = Array.from({ length: 12 }, (_, index) => ({
+      path: `file-${index}-${"a".repeat(2_000)}`,
+      lines: `line-${index}-${"1".repeat(500)}`,
+    }));
+    const userSources = Array.from({ length: 10 }, (_, index) => ({
+      type: "URL",
+      locator: `https://example.test/${index}/${"s".repeat(1_000)}`,
+      label: `Source ${index} ${"l".repeat(150)}`,
+    }));
+    const parent = await createTask({
+      title: `Parent ${"p".repeat(180)}`,
+    });
     const task = await createTask({
       title: `Bounded detail ${"x".repeat(180)}`,
     });
     const related = await Promise.all(
-      Array.from({ length: 16 }, (_, index) =>
+      Array.from({ length: 36 }, (_, index) =>
         createTask({
-          title: `Related ${index} ${"r".repeat(180)}`,
+          title: `Related ${index} ${"r".repeat(220)}`,
         }),
       ),
     );
+    await prisma.hierarchyRelationship.create({
+      data: {
+        parentId: parent.id,
+        childId: task.id,
+        provenance: "test",
+      },
+    });
     await prisma.actionable.update({
       where: { id: task.id },
       data: {
-        finding: "f".repeat(100_000),
-        description: "d".repeat(100_000),
+        finding,
+        description,
         resolution: "x".repeat(100_000),
-        researchJson: json(Array.from({ length: 12 }, () => "r".repeat(1_000))),
-        validationJson: json(
-          Array.from({ length: 12 }, () => "p".repeat(1_000)),
-        ),
+        researchJson: json(research),
+        validationJson: json(plannedValidation),
         tagsJson: json(
           Array.from({ length: 20 }, (_, index) => `tag-${index}`),
         ),
-        filesJson: json(
-          Array.from({ length: 12 }, () => ({
-            path: "a".repeat(2_000),
-            lines: "1".repeat(500),
-          })),
-        ),
+        filesJson: json(files),
       },
     });
     await prisma.userSourceReference.createMany({
-      data: Array.from({ length: 10 }, (_, index) => ({
+      data: userSources.map((source, index) => ({
         actionableId: task.id,
-        type: "URL",
-        locator: `https://example.test/${index}/${"s".repeat(1_000)}`,
-        label: "l".repeat(200),
+        ...source,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
       })),
     });
     await prisma.validationRecord.createMany({
@@ -1788,7 +1824,327 @@ describe("Actionables MCP", () => {
       })),
     });
     for (const [index, item] of related.entries()) {
-      if (index < 8) {
+      await prisma.hierarchyRelationship.create({
+        data: {
+          parentId: task.id,
+          childId: item.id,
+          provenance: "test",
+        },
+      });
+      if (index < 18) {
+        await prisma.dependencyRelationship.create({
+          data: {
+            dependentId: task.id,
+            prerequisiteId: item.id,
+            provenance: "test",
+          },
+        });
+      } else {
+        await prisma.dependencyRelationship.create({
+          data: {
+            dependentId: item.id,
+            prerequisiteId: task.id,
+            provenance: "test",
+          },
+        });
+      }
+    }
+
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: {
+          version: number;
+          truncation: {
+            truncatedFields: string[];
+            omitted: Record<string, number>;
+            reconciliationGuidance?: string;
+          };
+        };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: parent.sourceOrdinal,
+            version: task.version,
+            leaseMinutes: 30,
+          },
+        }),
+      );
+      const detail = claimed.task;
+
+      expect(JSON.stringify(detail).length).toBeLessThan(30_000);
+      expect(detail.truncation.truncatedFields).toEqual(
+        expect.arrayContaining([
+          "finding",
+          "description",
+          "resolution",
+          "research",
+          "plannedValidation",
+          "files",
+          "userSources",
+          "validationRecords",
+          "parent",
+          "subtasks",
+          "blockedBy",
+          "blocks",
+        ]),
+      );
+      expect(detail.truncation.omitted).toEqual({
+        research: 6,
+        plannedValidation: 6,
+        tags: 10,
+        files: 6,
+        userSources: 5,
+        validationRecords: 5,
+        subtasks: 31,
+        blockedBy: 13,
+        blocks: 13,
+      });
+      expect(detail.truncation.reconciliationGuidance).toContain(
+        "Do not move the task forward or edit files",
+      );
+      expect(detail.truncation.reconciliationGuidance).toContain(
+        "actionables.get_task_detail",
+      );
+      expect(detail.truncation.reconciliationGuidance).toContain(
+        "On VERSION_CONFLICT",
+      );
+
+      const reference = (item: (typeof related)[number]) => ({
+        id: item.sourceOrdinal,
+        title: item.title,
+        status: item.status,
+      });
+      const expectedFields = {
+        finding,
+        description,
+        research,
+        plannedValidation,
+        files,
+        userSources,
+        parent: reference(parent),
+        subtasks: related.map(reference),
+        blockedBy: related.slice(0, 18).map(reference),
+      };
+      const readField = async (field: keyof typeof expectedFields) => {
+        type DetailPage = {
+          id: number;
+          version: number;
+          field: string;
+          offset: number;
+          totalLength: number;
+          contentHash: string;
+          json: string;
+          nextOffset: number | null;
+        };
+        const chunks: string[] = [];
+        let offset = 0;
+        let pages = 0;
+        let totalLength: number | null = null;
+        let contentHash: string | null = null;
+        while (pages < 100) {
+          const page: DetailPage = output<DetailPage>(
+            await client.callTool({
+              name: "actionables.get_task_detail",
+              arguments: {
+                id: task.sourceOrdinal,
+                claimToken: claimed.claim.claimToken,
+                version: claimed.task.version,
+                field,
+                offset,
+                ...(contentHash ? { contentHash } : {}),
+              },
+            }),
+          );
+          expect(page).toMatchObject({
+            id: task.sourceOrdinal,
+            version: claimed.task.version,
+            field,
+            offset,
+          });
+          expect(page.json.length).toBeLessThanOrEqual(8_000);
+          expect(JSON.stringify(page)).not.toContain(claimed.claim.claimToken);
+          totalLength ??= page.totalLength;
+          contentHash ??= page.contentHash;
+          expect(page.totalLength).toBe(totalLength);
+          expect(page.contentHash).toBe(contentHash);
+          chunks.push(page.json);
+          pages += 1;
+          if (page.nextOffset === null) {
+            const combined = chunks.join("");
+            expect(combined.length).toBe(totalLength);
+            return { value: JSON.parse(combined) as unknown, pages };
+          }
+          expect(page.nextOffset).toBe(offset + page.json.length);
+          offset = page.nextOffset;
+        }
+        throw new Error(`Detail paging did not terminate for ${field}.`);
+      };
+
+      for (const [field, expected] of Object.entries(expectedFields)) {
+        const result = await readField(field as keyof typeof expectedFields);
+        expect(result.value).toEqual(expected);
+        if (JSON.stringify(expected).length > 8_000) {
+          expect(result.pages).toBeGreaterThan(1);
+        }
+      }
+
+      const relationshipFirstPage = output<{
+        contentHash: string;
+        nextOffset: number;
+      }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+            version: claimed.task.version,
+            field: "subtasks",
+            offset: 0,
+          },
+        }),
+      );
+      expect(relationshipFirstPage.nextOffset).toBeGreaterThan(0);
+      await prisma.actionable.update({
+        where: { id: related[0]!.id },
+        data: { title: "Changed related title" },
+      });
+      const changedRelationshipPage = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+            version: claimed.task.version,
+            field: "subtasks",
+            offset: relationshipFirstPage.nextOffset,
+            contentHash: relationshipFirstPage.contentHash,
+          },
+        }),
+      );
+      expect(changedRelationshipPage).toMatchObject({
+        code: "VERSION_CONFLICT",
+        currentVersion: claimed.task.version,
+      });
+
+      const firstPageArguments = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+        field: "finding",
+        offset: 0,
+      };
+      const firstPage = output<{
+        contentHash: string;
+        nextOffset: number;
+      }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: firstPageArguments,
+        }),
+      );
+      const repeatedPage = output<Record<string, unknown>>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: firstPageArguments,
+        }),
+      );
+      expect(repeatedPage).toEqual(firstPage);
+
+      const stale = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            ...firstPageArguments,
+            version: task.version,
+          },
+        }),
+      );
+      expect(stale).toMatchObject({
+        code: "VERSION_CONFLICT",
+        currentVersion: claimed.task.version,
+      });
+      const invalidOffset = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            ...firstPageArguments,
+            offset: 1_000_000,
+            contentHash: firstPage.contentHash,
+          },
+        }),
+      );
+      expect(invalidOffset).toMatchObject({ code: "INVALID_REQUEST" });
+      const missingContentHash = await client.callTool({
+        name: "actionables.get_task_detail",
+        arguments: {
+          ...firstPageArguments,
+          offset: firstPage.nextOffset,
+        },
+      });
+      expect(validationErrorText(missingContentHash)).toContain("contentHash");
+
+      const stored = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+      });
+      expect(stored.version).toBe(claimed.task.version);
+      expect(stored.researchJson).toEqual(research);
+      expect(
+        await prisma.userSourceReference.count({
+          where: { actionableId: task.id, removedAt: null },
+        }),
+      ).toBe(userSources.length);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("names fields whose compact detail omits otherwise short values", async () => {
+    const task = await createTask({ title: "Omission-only detail" });
+    const related = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        createTask({ title: `Short related ${index}` }),
+      ),
+    );
+    await prisma.actionable.update({
+      where: { id: task.id },
+      data: {
+        researchJson: json(
+          Array.from({ length: 7 }, (_, index) => `Research ${index}`),
+        ),
+        validationJson: json(
+          Array.from({ length: 7 }, (_, index) => `Validation ${index}`),
+        ),
+        filesJson: json(
+          Array.from({ length: 7 }, (_, index) => ({
+            path: `file-${index}.ts`,
+          })),
+        ),
+      },
+    });
+    await prisma.userSourceReference.createMany({
+      data: Array.from({ length: 6 }, (_, index) => ({
+        actionableId: task.id,
+        type: "URL",
+        locator: `https://example.test/short/${index}`,
+        createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, index)),
+      })),
+    });
+    await prisma.validationRecord.createMany({
+      data: Array.from({ length: 6 }, () => ({
+        actionableId: task.id,
+        type: "Command",
+        outcome: "Passed",
+        notesMd: "Short note",
+        evidenceMd: "Short evidence",
+        origin: "test",
+      })),
+    });
+    for (const [index, item] of related.entries()) {
+      if (index < 6) {
         await prisma.hierarchyRelationship.create({
           data: {
             parentId: task.id,
@@ -1820,11 +2176,9 @@ describe("Actionables MCP", () => {
         task: {
           truncation: {
             truncatedFields: string[];
-            omitted: Record<string, number>;
             reconciliationGuidance?: string;
           };
         };
-        claim: { claimToken: string };
       }>(
         await client.callTool({
           name: "actionables.claim_task",
@@ -1832,18 +2186,11 @@ describe("Actionables MCP", () => {
             id: task.sourceOrdinal,
             workItemId: task.sourceOrdinal,
             version: task.version,
-            leaseMinutes: 30,
           },
         }),
       );
-      const detail = claimed.task;
-
-      expect(JSON.stringify(detail).length).toBeLessThan(30_000);
-      expect(detail.truncation.truncatedFields).toEqual(
+      expect(claimed.task.truncation.truncatedFields).toEqual(
         expect.arrayContaining([
-          "finding",
-          "description",
-          "resolution",
           "research",
           "plannedValidation",
           "files",
@@ -1854,19 +2201,8 @@ describe("Actionables MCP", () => {
           "blocks",
         ]),
       );
-      expect(detail.truncation.omitted).toEqual({
-        research: 6,
-        plannedValidation: 6,
-        tags: 10,
-        files: 6,
-        userSources: 5,
-        validationRecords: 5,
-        subtasks: 3,
-        blockedBy: 3,
-        blocks: 3,
-      });
-      expect(detail.truncation.reconciliationGuidance).toContain(
-        "Do not move the task forward or edit files",
+      expect(claimed.task.truncation.reconciliationGuidance).toContain(
+        "actionables.get_task_detail",
       );
     } finally {
       await transport.close();
@@ -1998,6 +2334,7 @@ describe("Actionables MCP", () => {
 
   it("returns self-correcting errors for invalid, stale, wrong, and expired claims", async () => {
     const task = await createTask({ title: "MCP error task" });
+    const detailTask = await createTask({ title: "MCP detail error task" });
     const { client, transport } = await connectClient();
     try {
       const invalid = await client.callTool({
@@ -2024,6 +2361,20 @@ describe("Actionables MCP", () => {
           },
         }),
       );
+      const detailClaimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: detailTask.sourceOrdinal,
+            workItemId: detailTask.sourceOrdinal,
+            version: detailTask.version,
+            leaseMinutes: 30,
+          },
+        }),
+      );
       const wrongToken = errorOutput(
         await client.callTool({
           name: "actionables.get_task",
@@ -2038,6 +2389,74 @@ describe("Actionables MCP", () => {
         retryable: true,
         nextAction: expect.stringContaining("Discard the token"),
       });
+      const wrongDetailToken = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: "x".repeat(43),
+            version: claimed.task.version,
+            field: "finding",
+          },
+        }),
+      );
+      expect(wrongDetailToken).toMatchObject({
+        code: "INVALID_CLAIM_TOKEN",
+        retryable: true,
+      });
+      const crossTaskToken = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: detailClaimed.claim.claimToken,
+            version: claimed.task.version,
+            field: "finding",
+          },
+        }),
+      );
+      expect(crossTaskToken.code).toBe("INVALID_CLAIM_TOKEN");
+      const missingDetailToken = await client.callTool({
+        name: "actionables.get_task_detail",
+        arguments: {
+          id: task.sourceOrdinal,
+          version: claimed.task.version,
+          field: "finding",
+        },
+      });
+      expect(missingDetailToken.isError).toBe(true);
+
+      const otherThread = await connectClient(
+        bearerToken,
+        "019fa45f-581d-7bc0-afe3-a2b65171df69",
+      );
+      try {
+        const compactFromOtherThread = output<{ version: number }>(
+          await otherThread.client.callTool({
+            name: "actionables.get_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              claimToken: claimed.claim.claimToken,
+            },
+          }),
+        );
+        const detailFromOtherThread = output<{ version: number }>(
+          await otherThread.client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: {
+              id: task.sourceOrdinal,
+              claimToken: claimed.claim.claimToken,
+              version: claimed.task.version,
+              field: "finding",
+            },
+          }),
+        );
+        expect(detailFromOtherThread.version).toBe(
+          compactFromOtherThread.version,
+        );
+      } finally {
+        await otherThread.transport.close();
+      }
 
       const stale = errorOutput(
         await client.callTool({
@@ -2055,6 +2474,26 @@ describe("Actionables MCP", () => {
         currentVersion: claimed.task.version,
         retryable: true,
         nextAction: expect.stringContaining("current version"),
+      });
+
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: detailTask.id },
+        data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+      });
+      const expiredDetail = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: detailTask.sourceOrdinal,
+            claimToken: detailClaimed.claim.claimToken,
+            version: detailClaimed.task.version,
+            field: "finding",
+          },
+        }),
+      );
+      expect(expiredDetail).toMatchObject({
+        code: "CLAIM_EXPIRED",
+        retryable: true,
       });
 
       await prisma.agentTaskClaim.update({
