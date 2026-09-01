@@ -407,7 +407,10 @@ describe("Actionables MCP", () => {
         "pass each nextOffset until null",
       );
       expect(descriptions["actionables.transition_task"]).toContain(
-        "use Ready when research is sufficient but implementation remains",
+        "Ready requires non-empty finding, description, Research, and planned validation",
+      );
+      expect(descriptions["actionables.transition_task"]).toContain(
+        "If a composed call returns isError, stop",
       );
       expect(descriptions["actionables.handoff_task"]).toContain(
         "If any requested write fails",
@@ -1262,7 +1265,13 @@ describe("Actionables MCP", () => {
     });
     const { client, transport } = await connectClient();
     try {
-      const listed = output<{ items: Array<{ id: number; version: number }> }>(
+      const listed = output<{
+        items: Array<{
+          id: number;
+          version: number;
+          readiness: { requiredForReady: string[] };
+        }>;
+      }>(
         await client.callTool({
           name: "actionables.list_tasks",
           arguments: {
@@ -1276,9 +1285,18 @@ describe("Actionables MCP", () => {
         (item) => item.id === task.sourceOrdinal,
       );
       expect(available).toBeDefined();
+      expect(available!.readiness.requiredForReady).toEqual([
+        "researchPhase",
+        "research",
+      ]);
 
       const claimed = output<{
-        task: { title: string; version: number };
+        task: {
+          title: string;
+          version: number;
+          readiness: { requiredForReady: string[] };
+          permittedTransitions: string[];
+        };
         claim: { claimToken: string };
       }>(
         await client.callTool({
@@ -1292,6 +1310,11 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(claimed.task.title).toBe("End-to-end MCP workflow");
+      expect(claimed.task.readiness.requiredForReady).toEqual([
+        "researchPhase",
+        "research",
+      ]);
+      expect(claimed.task.permittedTransitions).not.toContain("Ready");
       expect(
         (
           await prisma.agentTaskClaim.findUniqueOrThrow({
@@ -1351,8 +1374,9 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(missingResearch).toMatchObject({
-        code: "RESEARCH_REQUIRED",
+        code: "READY_REQUIREMENTS_NOT_MET",
         retryable: true,
+        errors: { research: expect.any(Array) },
         nextAction: expect.stringContaining("appendResearch"),
       });
 
@@ -1375,15 +1399,15 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(researched).toEqual({
+      expect(researched).toMatchObject({
         id: task.sourceOrdinal,
         version: researching.version + 1,
         status: "Researching",
         appended: 1,
         duplicatesIgnored: 0,
-        lifecycleGuidance: expect.stringContaining(
-          "otherwise transition it to Ready",
-        ),
+        readiness: { requiredForReady: [], blockers: [] },
+        permittedTransitions: expect.arrayContaining(["Ready"]),
+        lifecycleGuidance: expect.stringContaining("Ready is now permitted"),
       });
 
       const ready = output<{ status: string; version: number }>(
@@ -1398,7 +1422,7 @@ describe("Actionables MCP", () => {
       );
       expect(ready.status).toBe("Ready");
 
-      const inProgress = output<{ status: string; version: number }>(
+      let inProgress = output<{ status: string; version: number }>(
         await client.callTool({
           name: "actionables.transition_task",
           arguments: {
@@ -1409,6 +1433,62 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(inProgress.status).toBe("In progress");
+
+      const missingRollbackReason = errorOutput(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: inProgress.version,
+            status: "Researching",
+          },
+        }),
+      );
+      expect(missingRollbackReason).toMatchObject({ code: "REASON_REQUIRED" });
+
+      const rolledBack = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: inProgress.version,
+            status: "Researching",
+            reason: "Implementation uncovered a question requiring research.",
+          },
+        }),
+      );
+      expect(rolledBack.status).toBe("Researching");
+      expect(
+        await prisma.activityEvent.findFirstOrThrow({
+          where: { actionableId: task.id, type: "research-reopened" },
+        }),
+      ).toMatchObject({
+        summary: "Returned implementation to Researching",
+        metadataJson: expect.objectContaining({
+          reason: "Implementation uncovered a question requiring research.",
+        }),
+      });
+
+      const readyAgain = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: rolledBack.version,
+            status: "Ready",
+          },
+        }),
+      );
+      inProgress = output<{ status: string; version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: readyAgain.version,
+            status: "In progress",
+          },
+        }),
+      );
 
       const missingResolution = errorOutput(
         await client.callTool({
@@ -1607,6 +1687,10 @@ describe("Actionables MCP", () => {
       status: "Ready",
       title: "Atomic MCP handoff",
     });
+    await prisma.actionable.update({
+      where: { id: task.id },
+      data: { researchJson: json(["The handoff path was investigated."]) },
+    });
     const { client, transport } = await connectClient();
     try {
       const claimed = output<{
@@ -1677,7 +1761,10 @@ describe("Actionables MCP", () => {
         claimReleased: true,
         task: {
           finding: "The atomic MCP handoff completed.",
-          research: ["The transaction boundary is verified."],
+          research: [
+            "The handoff path was investigated.",
+            "The transaction boundary is verified.",
+          ],
           plannedValidation: [
             "Run the MCP integration test.",
             "Run the atomic handoff test.",
@@ -1711,7 +1798,7 @@ describe("Actionables MCP", () => {
     });
     await prisma.actionable.update({
       where: { id: researchingTask.id },
-      data: { researchJson: json(["Existing note"]) },
+      data: { finding: "", researchJson: json(["Existing note"]) },
     });
     const readyTask = await createTask({
       status: "Ready",
@@ -1759,23 +1846,21 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(mixed).toEqual({
+      expect(mixed).toMatchObject({
         id: researchingTask.sourceOrdinal,
         version: researchingClaim.task.version + 1,
         status: "Researching",
         appended: 2,
         duplicatesIgnored: 2,
-        lifecycleGuidance: expect.any(String),
+        readiness: {
+          requiredForReady: ["finding"],
+          blockers: [expect.objectContaining({ field: "finding" })],
+        },
+        permittedTransitions: expect.not.arrayContaining(["Ready"]),
+        lifecycleGuidance: expect.stringContaining("Ready remains unavailable"),
       });
-      expect(mixed.lifecycleGuidance).toContain("Keep this task Researching");
-      expect(mixed.lifecycleGuidance).toContain("remaining questions");
-      expect(mixed.lifecycleGuidance).toContain("next research step");
-      expect(mixed.lifecycleGuidance).toContain(
-        "otherwise transition it to Ready",
-      );
-      expect(mixed.lifecycleGuidance).toContain(
-        "Do not force a transition solely because a turn ended",
-      );
+      expect(mixed.lifecycleGuidance).toContain("Keep the task Researching");
+      expect(mixed.lifecycleGuidance).toContain("finding");
       expect(
         (
           await prisma.actionable.findUniqueOrThrow({
@@ -1794,12 +1879,17 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(duplicatesOnly).toEqual({
+      expect(duplicatesOnly).toMatchObject({
         id: researchingTask.sourceOrdinal,
         version: mixed.version + 1,
         status: "Researching",
         appended: 0,
         duplicatesIgnored: 2,
+        readiness: {
+          requiredForReady: ["finding"],
+        },
+        permittedTransitions: expect.not.arrayContaining(["Ready"]),
+        lifecycleGuidance: expect.stringContaining("Ready remains unavailable"),
       });
 
       const readyClaim = output<{
@@ -1826,12 +1916,14 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(readyReceipt).toEqual({
+      expect(readyReceipt).toMatchObject({
         id: readyTask.sourceOrdinal,
         version: readyClaim.task.version + 1,
         status: "Ready",
         appended: 1,
         duplicatesIgnored: 0,
+        readiness: { requiredForReady: [], blockers: [] },
+        permittedTransitions: expect.not.arrayContaining(["Ready"]),
       });
     } finally {
       await transport.close();

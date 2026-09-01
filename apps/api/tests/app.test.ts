@@ -2259,7 +2259,7 @@ describe("Actionables API", () => {
     });
     expect(missingResearch.statusCode).toBe(422);
     expect(missingResearch.json()).toMatchObject({
-      code: "RESEARCH_REQUIRED",
+      code: "READY_REQUIREMENTS_NOT_MET",
       errors: { research: expect.any(Array) },
     });
   });
@@ -2309,7 +2309,7 @@ describe("Actionables API", () => {
     expect(item.statusHistory).toHaveLength(8);
   });
 
-  it("requires finding, description, and validation before Ready", async () => {
+  it("requires finding, description, Research, and validation before Ready", async () => {
     const created = await app!.inject({
       method: "POST",
       url: "/api/actionables",

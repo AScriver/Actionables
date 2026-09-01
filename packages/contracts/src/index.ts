@@ -187,6 +187,7 @@ export const activityTypeSchema = z.enum([
   "completion-overridden",
   "dismissed",
   "reopened",
+  "research-reopened",
   "source-added",
   "source-removed",
   "hierarchy-attached",
@@ -294,6 +295,30 @@ export const dependencyRelationshipSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const readyRequirementSchema = z.enum([
+  "researchPhase",
+  "finding",
+  "description",
+  "research",
+  "plannedValidation",
+]);
+
+export const actionableReadinessSchema = z
+  .object({
+    requiredForReady: z.array(readyRequirementSchema).max(5),
+    blockers: z
+      .array(
+        z
+          .object({
+            field: readyRequirementSchema,
+            message: z.string().min(1).max(240),
+          })
+          .strict(),
+      )
+      .max(5),
+  })
+  .strict();
+
 export const actionableSummarySchema = z.object({
   id: z.number().int().positive(),
   recordId: z.string().min(1),
@@ -354,6 +379,7 @@ export const actionableDetailSchema = actionableSummarySchema.extend({
   immutableSourceEvidence: immutableSourceEvidenceSchema,
   files: z.array(sourceFileSchema),
   sourceThread: z.string(),
+  readiness: actionableReadinessSchema,
   permittedTransitions: z.array(statusSchema),
   statusHistory: z.array(statusHistoryEntrySchema),
   validationRecords: z.array(validationRecordSchema),
@@ -671,6 +697,7 @@ export const agentTaskSummarySchema = z
     version: z.number().int().positive(),
     scope: scopeSchema,
     updatedAt: z.string().datetime(),
+    readiness: actionableReadinessSchema,
     claim: z
       .object({
         agentId: agentIdSchema,
@@ -1304,7 +1331,9 @@ export const transitionClaimedAgentTaskRequestSchema = z
       .trim()
       .max(10_000)
       .optional()
-      .describe("Required explanation for blocking, dismissal, or reopening."),
+      .describe(
+        "Required explanation for blocking, dismissal, reopening, or returning In progress work to Researching.",
+      ),
   })
   .strict();
 
@@ -2001,6 +2030,7 @@ export const importCommitResponseSchema = z
 
 export type Priority = z.infer<typeof prioritySchema>;
 export type Status = z.infer<typeof statusSchema>;
+export type ActionableReadiness = z.infer<typeof actionableReadinessSchema>;
 export type Effort = z.infer<typeof effortSchema>;
 export type EvidenceState = z.infer<typeof evidenceStateSchema>;
 export type ArchiveState = z.infer<typeof archiveStateSchema>;

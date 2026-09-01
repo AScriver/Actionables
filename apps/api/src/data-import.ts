@@ -707,13 +707,14 @@ function integrityItems(
       actionable.status === "Ready" &&
       (!actionable.finding.trim() ||
         !actionable.description.trim() ||
-        actionable.validation.length === 0)
+        !actionable.research.some((note) => note.trim()) ||
+        !actionable.validation.some((note) => note.trim()))
     ) {
       add(
         "actionable",
         actionable.portableId,
         "integrity-failure",
-        "Ready requires a finding, description, and validation plan.",
+        "Ready requires a finding, description, Research note, and validation plan.",
       );
     }
     if (actionable.status === "Blocked" && !actionable.manualBlocker?.trim()) {

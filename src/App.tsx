@@ -1252,6 +1252,7 @@ function LifecycleControls({
   const needsReason =
     target === "Blocked" ||
     target === "Dismissed" ||
+    (selected.status === "In progress" && target === "Researching") ||
     (target === "Ready" &&
       (selected.status === "Done" || selected.status === "Dismissed"));
 
@@ -1314,6 +1315,16 @@ function LifecycleControls({
           <Markdown>{selected.manualBlocker}</Markdown>
         </div>
       )}
+      {selected.readiness.blockers.length > 0 && (
+        <div className="readiness-blockers" aria-label="Ready requirements">
+          <strong>Before Ready</strong>
+          <ul>
+            {selected.readiness.blockers.map((blocker) => (
+              <li key={blocker.field}>{blocker.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="lifecycle-actions">
         {selected.permittedTransitions.map((status) => (
           <button
@@ -1367,7 +1378,10 @@ function LifecycleControls({
                   ? "Blocker note"
                   : target === "Dismissed"
                     ? "Dismissal reason"
-                    : "Reopening reason"}
+                    : selected.status === "In progress" &&
+                        target === "Researching"
+                      ? "Research rollback reason"
+                      : "Reopening reason"}
               </span>
               <textarea
                 rows={2}
@@ -1749,13 +1763,19 @@ function AgentClaimPanel({
   const claimantUrl = claim ? codexThreadUrlFromAgentId(claim.agentId) : null;
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
+  const hasReadyBlockers = selected.readiness.requiredForReady.length > 0;
   const canRecommendPrompt =
     !claim &&
     !selected.archiveState.isArchived &&
     !selected.isEffectivelyBlocked &&
-    !isTerminal;
+    !isTerminal &&
+    !(selected.status === "Ready" && hasReadyBlockers);
   const truncationInstructions =
     "Before treating the bounded detail as complete, inspect `task.truncation.reconciliationGuidance`. If it is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field has been reconciled; if guidance is absent, continue normally because any reported loss is noncritical to scope and planned validation.";
+  const composedToolInstructions =
+    "After every Actionables MCP call in a composed sequence, inspect `isError`; if it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance.";
+  const readinessInstructions =
+    "Before requesting Ready or moving Ready to In progress, inspect `readiness.requiredForReady` and `permittedTransitions` on the latest result. Supply every named missing finding, description, Research, or planned-validation field, and do not make the transition until the list is empty and the target is permitted.";
   const workItemId = selected.parentId ?? selected.id;
   const splitInstructions =
     selected.parentId === undefined
@@ -1766,7 +1786,7 @@ function AgentClaimPanel({
   const researchPrompt =
     canRecommendPrompt &&
     (selected.status === "Inbox" || selected.status === "Researching")
-      ? `Use Actionables work item #${workItemId}. Claim task #${selected.id} and ${selected.status === "Inbox" ? "begin" : "resume"} the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. ${splitInstructions} ${splitRecordingInstructions} Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently; then move it to Ready, and only move it to In progress before editing.`
+      ? `Use Actionables work item #${workItemId}. Claim task #${selected.id} and ${selected.status === "Inbox" ? "begin" : "resume"} the Researching phase. Treat the task detail returned by the Actionables MCP as the authoritative task record for the description, finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} ${composedToolInstructions} Research this task before implementation, staying within its stated outcome and boundaries. Follow its named files and symbols, use targeted repository searches, inspect the directly relevant implementation path and only the callers, dependencies, conventions, and tests needed to understand it, and run focused read-only commands or reproductions to verify current behavior. Consult authoritative documentation only for technologies or contracts implicated by the task. ${splitInstructions} ${splitRecordingInstructions} Record concrete requirements, current behavior or root cause, relevant file and symbol references, verified assumptions, remaining questions, risks, and a focused validation plan in the Actionable. Do not investigate or propose adjacent cleanup. Keep the task Researching until the evidence is sufficient to implement its stated scope confidently. ${readinessInstructions} Only move it to In progress before editing.`
       : null;
   const isCoordinationRoot =
     selected.parentId === undefined &&
@@ -1781,7 +1801,7 @@ function AgentClaimPanel({
   const implementationPrompt =
     canRecommendPrompt &&
     (selected.status === "Ready" || selected.status === "In progress")
-      ? `Use Actionables work item #${workItemId}. Claim task #${selected.id} and ${selected.status === "Ready" ? "continue from Ready" : "resume implementation from In progress"}. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} ${implementationInstructions}, preserve existing user modifications, run the planned validation, populate Resolution with the completed changes and important implementation decisions, record qualifying validation evidence, and only then move #${selected.id} to Done; otherwise hand off with the blocker.`
+      ? `Use Actionables work item #${workItemId}. Claim task #${selected.id} and ${selected.status === "Ready" ? "continue from Ready" : "resume implementation from In progress"}. Use the task detail returned by the Actionables MCP as the authoritative source for the recorded finding, existing research, sources, file references, relationships, and planned validation. ${truncationInstructions} ${composedToolInstructions} ${selected.status === "Ready" ? `${readinessInstructions} ` : ""}${implementationInstructions}, preserve existing user modifications, run the planned validation, populate Resolution with the completed changes and important implementation decisions, record qualifying validation evidence, and only then move #${selected.id} to Done; otherwise hand off with the blocker. If implementation uncovers a need for more investigation, return In progress directly to Researching with a meaningful reason.`
       : null;
   const startPrompt = researchPrompt ?? implementationPrompt;
   const preparedChatUrl = startPrompt
@@ -1795,7 +1815,9 @@ function AgentClaimPanel({
         ? null
         : selected.isEffectivelyBlocked
           ? "Resolve this Actionable's blockers before starting agent work."
-          : null;
+          : selected.status === "Ready" && hasReadyBlockers
+            ? "Restore every Ready prerequisite before starting implementation."
+            : null;
 
   const copyStartPrompt = async () => {
     if (!startPrompt) return;

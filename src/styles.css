@@ -2802,6 +2802,17 @@ button {
   background: rgba(0, 0, 0, 0.08);
 }
 
+.readiness-blockers {
+  margin: 8px 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.readiness-blockers ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 .lifecycle-heading,
 .section-title-row {
   display: flex;

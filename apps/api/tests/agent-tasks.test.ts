@@ -1219,6 +1219,8 @@ describe("agent task claims", () => {
   it("atomically saves handoff state and releases only after every write succeeds", async () => {
     const task = await createTask({
       finding: "Original finding",
+      description: "Preserve handoff updates atomically.",
+      research: ["The handoff boundary was investigated."],
       validation: ["Run the existing check."],
     });
     const claimed = await claimAgentTask(prisma, task.sourceOrdinal, {
@@ -1296,7 +1298,10 @@ describe("agent task claims", () => {
     expect(handedOff).toMatchObject({
       version: inProgress.version + 2,
       finding: "The implementation is ready for review.",
-      research: ["The claimed mutation is the atomic boundary."],
+      research: [
+        "The handoff boundary was investigated.",
+        "The claimed mutation is the atomic boundary.",
+      ],
       validation: ["Run the existing check.", "Run the focused handoff test."],
       files: [
         {
@@ -1712,7 +1717,10 @@ describe("agent task claims", () => {
         version: researching.version,
         status: "Ready",
       }),
-    ).rejects.toMatchObject({ code: "RESEARCH_REQUIRED" });
+    ).rejects.toMatchObject({
+      code: "READY_REQUIREMENTS_NOT_MET",
+      fieldErrors: { research: expect.any(Array) },
+    });
 
     const researched = await updateClaimedAgentTask(
       prisma,
@@ -1745,6 +1753,10 @@ describe("agent task claims", () => {
   it("preserves lifecycle and validation rules, agent origins, renewal, and terminal release", async () => {
     const task = await createTask({
       status: "Ready",
+      finding: "The agent lifecycle requires validation before completion.",
+      description: "Preserve lifecycle, validation, and renewal behavior.",
+      research: ["The lifecycle transition path was investigated."],
+      validation: ["Run the agent lifecycle test."],
       resolution:
         "The fixture begins resolved so validation requirements remain independently covered.",
     });

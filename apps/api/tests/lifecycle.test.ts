@@ -108,7 +108,7 @@ describe("T-004 lifecycle authority", () => {
       url: `/api/actionables/${item.id}/status-transitions`,
       payload: { version: item.version, status, origin: "user", ...options },
     });
-    expect(response.statusCode).toBe(expectedStatus);
+    expect(response.statusCode, response.body).toBe(expectedStatus);
     return response;
   }
 
@@ -148,7 +148,7 @@ describe("T-004 lifecycle authority", () => {
     Inbox: ["Researching", "Dismissed"],
     Researching: ["Inbox", "Ready", "Blocked", "Dismissed"],
     Ready: ["Inbox", "Researching", "In progress", "Blocked", "Dismissed"],
-    "In progress": ["Ready", "Blocked", "Done", "Dismissed"],
+    "In progress": ["Researching", "Ready", "Blocked", "Done", "Dismissed"],
     Blocked: ["Researching", "Ready", "Dismissed"],
     Done: ["Ready"],
     Dismissed: ["Ready"],
@@ -167,9 +167,11 @@ describe("T-004 lifecycle authority", () => {
               ? "Waiting for a meaningful prerequisite."
               : target === "Dismissed"
                 ? "The outcome is no longer intended."
-                : from === "Done" || from === "Dismissed"
-                  ? "New evidence requires another pass."
-                  : undefined,
+                : from === "In progress" && target === "Researching"
+                  ? "Implementation uncovered a question requiring research."
+                  : from === "Done" || from === "Dismissed"
+                    ? "New evidence requires another pass."
+                    : undefined,
           completionOverrideReason:
             target === "Done"
               ? "Fixture explicitly exercises override completion."
@@ -193,25 +195,104 @@ describe("T-004 lifecycle authority", () => {
     }
   });
 
-  it("requires the Researching phase and a non-empty Research note before Ready", async () => {
+  it("reports every Ready prerequisite and permits Ready only after all are satisfied", async () => {
     let item = await createItem();
+    await prisma!.actionable.update({
+      where: { sourceOrdinal: item.id },
+      data: {
+        finding: "",
+        description: "",
+        researchJson: [],
+        validationJson: [],
+      },
+    });
+    item = (
+      await app!.inject({ method: "GET", url: `/api/actionables/${item.id}` })
+    ).json().item;
+    expect(item.readiness).toEqual({
+      requiredForReady: [
+        "researchPhase",
+        "finding",
+        "description",
+        "research",
+        "plannedValidation",
+      ],
+      blockers: expect.arrayContaining([
+        expect.objectContaining({ field: "researchPhase" }),
+        expect.objectContaining({ field: "finding" }),
+        expect.objectContaining({ field: "description" }),
+        expect.objectContaining({ field: "research" }),
+        expect.objectContaining({ field: "plannedValidation" }),
+      ]),
+    });
+    expect(item.permittedTransitions).not.toContain("Ready");
     expect((await move(item, "Ready", {}, 422)).json()).toMatchObject({
       code: "RESEARCH_PHASE_REQUIRED",
       errors: { status: expect.any(Array) },
     });
 
-    const stored = await prisma!.actionable.update({
-      where: { sourceOrdinal: item.id },
-      data: { researchJson: [] },
-    });
-    expect(stored.version).toBe(item.version);
     item = (await move(item, "Researching")).json().item;
+    expect(item.readiness.requiredForReady).toEqual([
+      "finding",
+      "description",
+      "research",
+      "plannedValidation",
+    ]);
+    expect(item.permittedTransitions).not.toContain("Ready");
     expect((await move(item, "Ready", {}, 422)).json()).toMatchObject({
-      code: "RESEARCH_REQUIRED",
+      code: "READY_REQUIREMENTS_NOT_MET",
       errors: {
+        finding: expect.any(Array),
+        description: expect.any(Array),
         research: expect.any(Array),
+        validation: expect.any(Array),
         status: expect.any(Array),
       },
+    });
+
+    for (const [data, remaining] of [
+      [
+        { finding: "A concrete finding." },
+        ["description", "research", "plannedValidation"],
+      ],
+      [
+        { description: "A bounded intended result." },
+        ["research", "plannedValidation"],
+      ],
+      [
+        { researchJson: ["Investigated the lifecycle boundary."] },
+        ["plannedValidation"],
+      ],
+      [{ validationJson: ["Run the lifecycle suite."] }, []],
+    ] as const) {
+      await prisma!.actionable.update({
+        where: { sourceOrdinal: item.id },
+        data,
+      });
+      item = (
+        await app!.inject({ method: "GET", url: `/api/actionables/${item.id}` })
+      ).json().item;
+      expect(item.readiness.requiredForReady).toEqual(remaining);
+      expect(item.permittedTransitions.includes("Ready")).toBe(
+        remaining.length === 0,
+      );
+    }
+
+    item = (await move(item, "Ready")).json().item;
+    expect(item.status).toBe("Ready");
+
+    await prisma!.actionable.update({
+      where: { sourceOrdinal: item.id },
+      data: { finding: "" },
+    });
+    item = (
+      await app!.inject({ method: "GET", url: `/api/actionables/${item.id}` })
+    ).json().item;
+    expect(item.readiness.requiredForReady).toEqual(["finding"]);
+    expect(item.permittedTransitions).not.toContain("In progress");
+    expect((await move(item, "In progress", {}, 422)).json()).toMatchObject({
+      code: "READY_REQUIREMENTS_NOT_MET",
+      errors: { finding: expect.any(Array) },
     });
   });
 
@@ -242,6 +323,23 @@ describe("T-004 lifecycle authority", () => {
     item = await prepareStatus("Dismissed");
     expect((await move(item, "Ready", {}, 422)).json()).toMatchObject({
       code: "REASON_REQUIRED",
+    });
+
+    item = await prepareStatus("In progress");
+    expect((await move(item, "Researching", {}, 422)).json()).toMatchObject({
+      code: "REASON_REQUIRED",
+    });
+    item = (
+      await move(item, "Researching", {
+        reason: "Implementation uncovered a question requiring research.",
+      })
+    ).json().item;
+    expect(item.activity.at(-1)).toMatchObject({
+      type: "research-reopened",
+      summary: "Returned implementation to Researching",
+      context: {
+        reason: "Implementation uncovered a question requiring research.",
+      },
     });
 
     item = await prepareStatus("In progress");

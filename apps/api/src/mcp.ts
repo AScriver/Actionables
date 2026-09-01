@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  actionableReadinessSchema,
   agentTaskClaimCredentialSchema,
   agentTaskLeaseMinutesSchema,
   agentTaskListViewSchema,
@@ -257,6 +258,7 @@ const compactTaskSchema = z
           .strict(),
       )
       .max(5),
+    readiness: actionableReadinessSchema,
     permittedTransitions: z.array(z.string().max(40)).max(20),
     validationRecords: z
       .array(
@@ -307,6 +309,8 @@ const researchUpdateReceiptSchema = z
     status: z.string().max(40),
     appended: z.number().int().nonnegative(),
     duplicatesIgnored: z.number().int().nonnegative(),
+    readiness: actionableReadinessSchema,
+    permittedTransitions: z.array(z.string().max(40)).max(20),
     lifecycleGuidance: z.string().min(1).max(600).optional(),
   })
   .strict();
@@ -529,6 +533,7 @@ function compactTask(
         ? { label: compactText(source.label, 100, "userSources") }
         : {}),
     })),
+    readiness: task.readiness,
     permittedTransitions: task.permittedTransitions,
     validationRecords: task.validationRecords.slice(-5).map((record) => ({
       id: record.id,
@@ -636,6 +641,18 @@ function recovery(code: string) {
         retryable: true,
         nextAction:
           "Call actionables.update_task with appendResearch, then retry Ready using the returned version.",
+      };
+    case "READY_REQUIREMENTS_NOT_MET":
+      return {
+        retryable: true,
+        nextAction:
+          "Inspect readiness.requiredForReady on the latest task. Supply only the named missing fields with finding, description, appendResearch, or appendPlannedValidation, then use the returned version and confirm Ready appears in permittedTransitions before transitioning.",
+      };
+    case "INVALID_STATUS_TRANSITION":
+      return {
+        retryable: false,
+        nextAction:
+          "Do not repeat the unchanged transition. Inspect permittedTransitions on the latest task and choose a legal target; returning In progress to Researching requires a meaningful reason.",
       };
     case "RESOLUTION_REQUIRED":
       return {
@@ -776,7 +793,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). When it is present, call actionables.get_task_detail for every supported critical field named in truncation.truncatedFields, start at offset 0, then pass contentHash with each nextOffset until null, concatenate json in offset order, and JSON-parse it; do not move the task forward or edit files until reconciliation is complete. If any page returns VERSION_CONFLICT, discard partial json and restart from the current compact detail; if it is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only its ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, record at least one non-empty note with appendResearch before Ready, and do not make implementation changes until the task is In progress. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
+        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. Claim within that same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. After every composed tool call, inspect `isError`; when it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). When it is present, call actionables.get_task_detail for every supported critical field named in truncation.truncatedFields, start at offset 0, then pass contentHash with each nextOffset until null, concatenate json in offset order, and JSON-parse it; do not move the task forward or edit files until reconciliation is complete. If any page returns VERSION_CONFLICT, discard partial json and restart from the current compact detail; if it is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only its ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, and do not make implementation changes until the task is In progress. Before requesting Ready or moving Ready to In progress, inspect readiness.requiredForReady and permittedTransitions; Ready requires non-empty finding, description, Research, and planned validation, and the transition must wait until requiredForReady is empty and the target is permitted. Return In progress directly to Researching only with a meaningful audited reason. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
   const readOnly = {
@@ -926,7 +943,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Update claimed Actionable",
       description:
-        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts; newly persisted research on a Researching task also returns conditional lifecycle guidance.",
+        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts, current readiness, permitted transitions, and conditional lifecycle guidance. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
       inputSchema: updateTaskSchema,
       outputSchema: updateTaskOutputSchema,
       annotations: { ...mutation, destructiveHint: true },
@@ -939,19 +956,22 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
           input,
         );
         if (!result.researchAppend) return compactTask(result.task);
-        const shouldGuideLifecycle =
-          result.researchAppend.appended > 0 &&
-          result.task.status === "Researching";
+        const shouldGuideLifecycle = result.task.status === "Researching";
+        const missing = result.task.readiness.requiredForReady;
         return researchUpdateReceiptSchema.parse({
           id: result.task.id,
           version: result.task.version,
           status: result.task.status,
           appended: result.researchAppend.appended,
           duplicatesIgnored: result.researchAppend.duplicatesIgnored,
+          readiness: result.task.readiness,
+          permittedTransitions: result.task.permittedTransitions,
           ...(shouldGuideLifecycle
             ? {
                 lifecycleGuidance:
-                  "Keep this task Researching and record remaining questions and the next research step when investigation remains; otherwise transition it to Ready before reporting research complete. Do not force a transition solely because a turn ended.",
+                  missing.length > 0
+                    ? `Ready remains unavailable. Satisfy every field in readiness.requiredForReady (${missing.join(", ")}) before transitioning; use finding, description, appendResearch, or appendPlannedValidation as named. Keep the task Researching and record remaining questions while investigation remains.`
+                    : "All persisted Ready prerequisites are satisfied. Keep this task Researching and record remaining questions while investigation remains; otherwise Ready is now permitted. Do not force a transition solely because a turn ended.",
               }
             : {}),
         });
@@ -962,7 +982,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Transition claimed Actionable",
       description:
-        "Move a claimed task through Inbox to Researching to Ready to In progress. Keep Researching while investigation remains; use Ready when research is sufficient but implementation remains. Ready requires a non-empty Research note, and implementation changes must wait until In progress. Done requires non-empty Resolution content plus qualifying validation and releases the claim.",
+        "Move a claimed task through Inbox to Researching to Ready to In progress. Ready requires non-empty finding, description, Research, and planned validation; use readiness.requiredForReady and permittedTransitions before requesting Ready or moving Ready to In progress. Return In progress directly to Researching only with a meaningful reason. Implementation changes must wait until In progress. Done requires non-empty Resolution plus qualifying validation and releases the claim. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
       inputSchema: transitionTaskSchema,
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, destructiveHint: true },

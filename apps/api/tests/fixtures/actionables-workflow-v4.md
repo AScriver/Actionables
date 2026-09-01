@@ -15,12 +15,11 @@ Use Actionables as the coordination record for substantive work without letting 
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
 6. Claim only the root or a direct task returned from that work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token, so do not immediately fetch again.
-7. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing any dependent mutation, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
-8. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
-9. For a newly claimed Inbox task, transition to Researching before beginning investigation.
-10. Before moving to Ready or advancing Ready to In progress, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
-11. Transition from Ready to In progress before making any implementation changes.
-12. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
+7. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
+8. For a newly claimed Inbox task, transition to Researching before beginning investigation.
+9. Record at least one non-empty Research note before moving from Researching to Ready.
+10. Transition from Ready to In progress before making any implementation changes.
+11. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
 
 If the Actionables MCP server or required tool is unavailable, continue the user's work and report the tracking limitation. Never claim a merely adjacent task.
 
@@ -52,11 +51,11 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Treat the claim token as a secret capability. Keep it only in tool-call context; never place it in chat, code, files, logs, task text, or validation evidence.
 - After claim, use the task ID, claim token, and latest version where required. Do not repeat the agent ID or mutation lease duration; only explicit renewal accepts `leaseMinutes`.
 - Re-fetch compact detail after a mutation version conflict, reconcile the current record, and retry only if the intended change is still valid. For detail-page version conflicts, discard the partial field and restart its paging from the current compact version.
-- After each composed tool result, branch on `isError` before accessing fields such as `version`. Stop dependent calls when it is true, then follow structured `nextAction` guidance. Retry only when `retryable` is true and the stated prerequisite has been satisfied.
+- Follow structured error `nextAction` guidance. Retry only when `retryable` is true and the stated prerequisite has been satisfied.
 - Prefer `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding material; use replacement fields only for intentional rewrites.
 - Record meaningful state changes, research conclusions, decisions, plans, blockers, and validation evidence. Do not emit heartbeat or narration-only updates.
 - Renew explicitly during long periods without mutations. Successful claimed mutations may renew the lease automatically.
-- Follow `permittedTransitions` instead of forcing a status. Return In progress directly to Researching only when investigation must resume, and include a meaningful reason for the activity audit.
+- Follow permitted lifecycle transitions instead of forcing a status.
 - Do not edit implementation files until the claimed task is In progress. Inbox is untriaged, Researching is investigation, and Ready means implementation may begin after the explicit transition.
 - Before transitioning a task to Done, populate its Resolution with the completed changes and important implementation decisions.
 - Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem writes outside the MCP. A hard write gate requires orchestration support and is outside this workflow unless separately authorized.
@@ -66,7 +65,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Track every Actionable created, claimed, or transitioned during the task, including accidental creations. Read-only inspection does not create lifecycle ownership.
 - Treat user-provided reports as sources, not research. Recording, restating, or paraphrasing a report does not satisfy the Researching phase.
 - A claimed Actionable may remain Researching between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, remaining questions, and the next research step. Do not force a status transition merely because a turn ended.
-- Move an Actionable to Ready only after at least one independent investigative action, such as inspecting relevant code, reproducing the behavior, or consulting authoritative documentation. Record the action and its observed result; an unverified research note is insufficient. Confirm the latest `readiness.requiredForReady` is empty and the intended target appears in `permittedTransitions` before moving to Ready or from Ready to In progress.
+- Move an Actionable to Ready only after at least one independent investigative action, such as inspecting relevant code, reproducing the behavior, or consulting authoritative documentation. Record the action and its observed result; an unverified research note is insufficient.
 - Before reporting completion, reconcile every lifecycle-owned Actionable:
   - Completed work: record Resolution content and actual validation, then move it to Done.
   - Research complete but implementation remains: move it from Researching to Ready.
@@ -79,7 +78,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 Use lifecycle states consistently:
 
 - Researching: active investigation is needed; save durable findings and research notes.
-- Ready: finding, intended result, Research, and planned validation are all non-empty and sufficient for implementation.
+- Ready: research and the planned validation are sufficient for implementation.
 - In progress: implementation or active execution has begun.
 - Blocked: progress cannot continue; include the concrete blocker and needed resolution.
 - Done: the requested outcome is complete, Resolution content is populated, and qualifying validation evidence has been recorded.

@@ -33,6 +33,7 @@ import type { AppPrismaClient } from "./database.js";
 import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import {
   canTransition,
+  lifecycleReadiness,
   parsePersistedStatus,
   permittedTransitions,
   transitionExplanation,
@@ -328,6 +329,14 @@ function toDetail(row: ActionableRow): ActionableDetail {
   const status = parsePersistedStatus(row.status);
   const imported = row.importProvider !== "MANUAL";
   const qualifying = qualifyingValidationIds(row);
+  const research = stringArray(row.researchJson);
+  const validation = stringArray(row.validationJson);
+  const readiness = lifecycleReadiness(status, {
+    finding: row.finding,
+    description: row.description,
+    research,
+    plannedValidation: validation,
+  });
   const now = new Date();
   return actionableDetailSchema.parse({
     ...toSummary(row),
@@ -345,8 +354,8 @@ function toDetail(row: ActionableRow): ActionableDetail {
       : null,
     description: row.description,
     resolution: row.resolution,
-    research: stringArray(row.researchJson),
-    validation: stringArray(row.validationJson),
+    research,
+    validation,
     userSources: row.userSources.map((source) => ({
       id: source.id,
       type: source.type,
@@ -366,7 +375,8 @@ function toDetail(row: ActionableRow): ActionableDetail {
     },
     files: sourceFiles(row.filesJson),
     sourceThread: row.sourceThread,
-    permittedTransitions: permittedTransitions(status),
+    readiness,
+    permittedTransitions: permittedTransitions(status, readiness),
     statusHistory: row.statusHistory.map((entry) => ({
       id: entry.id,
       previousStatus: entry.previousStatus,
@@ -1674,7 +1684,16 @@ function validateTransition(
   request: Pick<StatusTransitionRequest, "reason" | "completionOverrideReason">,
 ): TransitionDecision {
   const previousStatus = parsePersistedStatus(current.status);
-  if (previousStatus === "Inbox" && nextStatus === "Ready") {
+  const readyState = lifecycleReadiness(previousStatus, {
+    finding: readiness.finding,
+    description: readiness.description,
+    research: readiness.research,
+    plannedValidation: readiness.validation,
+  });
+  if (
+    nextStatus === "Ready" &&
+    readyState.requiredForReady.includes("researchPhase")
+  ) {
     throw new DomainValidationError(
       "RESEARCH_PHASE_REQUIRED",
       {
@@ -1697,49 +1716,27 @@ function validateTransition(
     );
   }
 
-  if (
-    nextStatus === "Ready" &&
-    previousStatus !== "Done" &&
-    previousStatus !== "Dismissed"
-  ) {
-    if (!readiness.research.some((note) => note.trim())) {
-      throw new DomainValidationError(
-        "RESEARCH_REQUIRED",
-        {
-          research: [
-            "Add at least one non-empty Research note before moving to Ready.",
-          ],
-          status: ["Ready requires a recorded Research note."],
-        },
-        "This actionable needs recorded research before it can be ready.",
-      );
-    }
+  const requiresReadyContent =
+    (nextStatus === "Ready" &&
+      previousStatus !== "Done" &&
+      previousStatus !== "Dismissed") ||
+    (previousStatus === "Ready" && nextStatus === "In progress");
+  if (requiresReadyContent && readyState.requiredForReady.length > 0) {
     const errors: Record<string, string[]> = {};
-    if (!readiness.finding.trim()) {
-      errors.finding = [
-        "Add the finding before moving this actionable to Ready.",
-      ];
+    for (const blocker of readyState.blockers) {
+      if (blocker.field === "researchPhase") continue;
+      const field =
+        blocker.field === "plannedValidation" ? "validation" : blocker.field;
+      errors[field] = [blocker.message];
     }
-    if (!readiness.description.trim()) {
-      errors.description = [
-        "Add the intended result before moving this actionable to Ready.",
-      ];
-    }
-    if (readiness.validation.length === 0) {
-      errors.validation = [
-        "Add at least one validation step before moving to Ready.",
-      ];
-    }
-    if (Object.keys(errors).length > 0) {
-      errors.status = [
-        "Ready requires a finding, description, and validation plan.",
-      ];
-      throw new DomainValidationError(
-        "READY_REQUIREMENTS_NOT_MET",
-        errors,
-        "This actionable is not ready yet.",
-      );
-    }
+    errors.status = [
+      `${nextStatus} requires Ready prerequisites: ${readyState.requiredForReady.join(", ")}.`,
+    ];
+    throw new DomainValidationError(
+      "READY_REQUIREMENTS_NOT_MET",
+      errors,
+      "This actionable is not ready for implementation yet.",
+    );
   }
 
   let reason = "";
@@ -1764,6 +1761,13 @@ function validateTransition(
       request.reason,
       "reason",
       `Enter a reason for reopening this ${previousStatus} actionable.`,
+    );
+  } else if (previousStatus === "In progress" && nextStatus === "Researching") {
+    reason = requiredReason(
+      request.reason,
+      "reason",
+      "Explain why implementation is returning to Researching.",
+      true,
     );
   }
 
@@ -1872,6 +1876,10 @@ async function writeTransitionHistory(
   ) {
     type = "reopened";
     summary = `Reopened ${previousStatus} to Ready`;
+    context.reason = decision.reason;
+  } else if (previousStatus === "In progress" && nextStatus === "Researching") {
+    type = "research-reopened";
+    summary = "Returned implementation to Researching";
     context.reason = decision.reason;
   } else if (decision.completionMode === "validated") {
     type = "completion-validated";

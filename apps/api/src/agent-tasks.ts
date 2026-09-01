@@ -48,6 +48,10 @@ import {
 } from "@actionables/contracts";
 import type { AppPrismaClient } from "./database.js";
 import type { Prisma } from "./generated/prisma/client.js";
+import {
+  lifecycleReadiness,
+  parsePersistedStatus,
+} from "./actionable-transitions.js";
 import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import {
   createActionable,
@@ -245,6 +249,12 @@ function toAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
       relationship.waivedAt === null &&
       relationship.prerequisite.status !== "Done",
   ).length;
+  const readiness = lifecycleReadiness(parsePersistedStatus(row.status), {
+    finding: row.finding,
+    description: row.description,
+    research: persistedStringArray(row.researchJson),
+    plannedValidation: persistedStringArray(row.validationJson),
+  });
   return agentTaskSummarySchema.parse({
     id: row.sourceOrdinal,
     recordId: row.id,
@@ -274,6 +284,7 @@ function toAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
       worktreeName: row.worktree.name,
     },
     updatedAt: row.updatedAt.toISOString(),
+    readiness,
     claim: row.agentTaskClaim
       ? {
           agentId: row.agentTaskClaim.agentId,

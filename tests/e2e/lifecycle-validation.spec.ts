@@ -290,6 +290,50 @@ test("a stale lifecycle action returns the current version without losing the pe
   await secondContext.close();
 });
 
+test("Ready blockers clear incrementally and research rollback records its reason", async ({
+  page,
+}) => {
+  await createReadyCandidate(page, "Lifecycle readiness browser test", "");
+  const inspector = page.getByRole("complementary", {
+    name: "Selected actionable",
+  });
+
+  await expect(inspector.getByLabel("Ready requirements")).toContainText(
+    "Add a non-empty finding before Ready.",
+  );
+  await expect(
+    inspector.getByRole("button", { name: "Ready", exact: true }),
+  ).toHaveCount(0);
+
+  await inspector.getByRole("button", { name: "Edit actionable" }).click();
+  await page.locator("#finding").fill("The lifecycle lacked preflight state.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(inspector.getByLabel("Ready requirements")).toHaveCount(0);
+
+  await inspector.getByRole("button", { name: "Ready", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Ready" }).click();
+  await inspector
+    .getByRole("button", { name: "In progress", exact: true })
+    .click();
+  await inspector.getByRole("button", { name: "Confirm In progress" }).click();
+
+  await inspector
+    .getByRole("button", { name: "Researching", exact: true })
+    .click();
+  await inspector
+    .getByLabel("Research rollback reason")
+    .fill("Implementation uncovered a lifecycle question.");
+  await inspector.getByRole("button", { name: "Confirm Researching" }).click();
+  await expect(inspector.getByLabel(/^Researching\./)).toBeVisible();
+  await inspector.getByRole("tab", { name: "Activity" }).click();
+  await expect(
+    inspector.getByText("Returned implementation to Researching"),
+  ).toBeVisible();
+  await expect(
+    inspector.getByText("Implementation uncovered a lifecycle question."),
+  ).toBeVisible();
+});
+
 test("lifecycle controls remain usable at laptop and mobile sizes with keyboard access", async ({
   page,
 }) => {
