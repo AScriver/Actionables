@@ -38,30 +38,6 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Creation records the calling Codex thread as creator provenance. Do not dismiss, archive, or delete an invalid, accidental, or disposable task without explicit user authorization. When dismissal is authorized and a task created by this same thread is still active and unclaimed, call `actionables.dismiss_task` with only its ID and a required reason.
 - Automatic scope provisioning does not authorize arbitrary backlog discovery or creation outside the repository and task content the user placed in scope.
 
-For 2–25 authorized tasks, use `actionables.bulk_create_tasks` instead of
-individual create calls. Supply only the explicit intended items and one
-caller-stable UUID per item. Call `mode: "preview"` first; correct every
-reported item error, then call `mode: "apply"`. Keep a UUID when correcting the
-same intended task; use a new one only for a different task.
-Preview does not write. Apply is ordered and non-atomic across items, but each
-schema-valid item is atomic: earlier successes remain when a later item fails.
-The whole request must satisfy the published input schema before per-item
-validation; a malformed item rejects the request without applying siblings.
-Inspect every compact per-item result. An exact UUID replay is safe; changing an
-applied item using its UUID is a conflict. Bulk operations never discover work.
-
-Use `actionables.bulk_prepare_tasks` only for explicit unclaimed Inbox tasks
-created by the current Codex thread within the authorized `workItemId`. Use the
-normal list, claim, and reconciliation workflow for pre-existing tasks. Each
-item must carry that `workItemId`, its current `version`, and its own UUID; it
-neither accepts nor returns claim tokens. Preview first, then apply only after correcting every item error and
-keeping the UUID for the same intended task. Preparation may move an Inbox task
-only through `Researching` and `Ready` when the supplied content
-satisfies readiness, then releases it for normal available-work discovery. It
-cannot leave or expose a claim, claim unlisted work, or bypass repository scope,
-hierarchy, lifecycle, or version checks. Split 139 items into six chunks per
-phase.
-
 ## Split researched work
 
 - Split only when research confirms multiple independently implementable outcomes. A task with one outcome remains one task.
@@ -122,6 +98,4 @@ Use lifecycle states consistently:
 6. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.
 7. Include the final Actionables status in the user-facing handoff without exposing credentials.
 
-Do not create or prepare tasks beyond the authorized single or bulk operations,
-modify other hierarchy or dependencies, archive records, bypass validation, or
-broaden scope unless dedicated tools and explicit user authority exist.
+Do not create tasks beyond the authorized `create_task` operation, modify other hierarchy or dependencies, archive records, bypass validation, or broaden scope unless dedicated tools and explicit user authority exist.

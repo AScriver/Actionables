@@ -308,6 +308,8 @@ describe("Actionables MCP", () => {
       expect(names).toEqual(
         [
           "actionables.create_task",
+          "actionables.bulk_create_tasks",
+          "actionables.bulk_prepare_tasks",
           "actionables.list_tasks",
           "actionables.get_task",
           "actionables.get_task_detail",
@@ -383,6 +385,44 @@ describe("Actionables MCP", () => {
           "Required grouping tags; provide at least one meaningful tag.",
         minItems: 1,
       });
+      for (const name of [
+        "actionables.bulk_create_tasks",
+        "actionables.bulk_prepare_tasks",
+      ]) {
+        const schema = tools.find((tool) => tool.name === name)
+          ?.inputSchema as {
+          required?: string[];
+          properties?: Record<
+            string,
+            { enum?: string[]; minItems?: number; maxItems?: number }
+          >;
+        };
+        expect(schema.required, name).toEqual(
+          expect.arrayContaining(["mode", "items"]),
+        );
+        expect(schema.properties?.mode, name).toMatchObject({
+          enum: ["preview", "apply"],
+        });
+        expect(schema.properties?.items, name).toMatchObject({
+          minItems: 1,
+          maxItems: 25,
+        });
+      }
+      const bulkCreateOutput = JSON.stringify(
+        tools.find((tool) => tool.name === "actionables.bulk_create_tasks")
+          ?.outputSchema,
+      );
+      const bulkPrepareOutput = JSON.stringify(
+        tools.find((tool) => tool.name === "actionables.bulk_prepare_tasks")
+          ?.outputSchema,
+      );
+      expect(bulkCreateOutput).toContain('"const":"created"');
+      expect(bulkCreateOutput).not.toContain('"const":"prepared"');
+      expect(bulkPrepareOutput).toContain('"const":"prepared"');
+      expect(bulkPrepareOutput).not.toContain('"const":"created"');
+      expect(bulkPrepareOutput).toContain(
+        '"claimReleased","changedFields","counts"',
+      );
       const handoffTaskTool = tools.find(
         (tool) => tool.name === "actionables.handoff_task",
       );
@@ -426,6 +466,16 @@ describe("Actionables MCP", () => {
         destructiveHint: false,
         idempotentHint: true,
       });
+      expect(byName["actionables.bulk_create_tasks"]).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
+      expect(byName["actionables.bulk_prepare_tasks"]).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      });
       expect(byName["actionables.update_task"]).toMatchObject({
         readOnlyHint: false,
         destructiveHint: true,
@@ -454,6 +504,18 @@ describe("Actionables MCP", () => {
       );
       expect(descriptions["actionables.get_task_detail"]).toContain(
         "pass each nextOffset until null",
+      );
+      expect(descriptions["actionables.bulk_create_tasks"]).toContain(
+        "1 through 25",
+      );
+      expect(descriptions["actionables.bulk_create_tasks"]).toContain(
+        "commits each schema-valid item atomically",
+      );
+      expect(descriptions["actionables.bulk_prepare_tasks"]).toContain(
+        "claims for the current Codex thread",
+      );
+      expect(descriptions["actionables.bulk_prepare_tasks"]).toContain(
+        "Claim credentials are never accepted or returned",
       );
       expect(descriptions["actionables.transition_task"]).toContain(
         "Ready requires non-empty finding, description, Research, and planned validation",
@@ -930,6 +992,424 @@ describe("Actionables MCP", () => {
         tagsJson: childArguments.tags,
         agentTaskClaim: null,
       });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("previews and applies bounded bulk creation with ordered compact replay receipts", async () => {
+    const { client, transport } = await connectClient();
+    const batchMarker = randomUUID();
+    const items = Array.from({ length: 3 }, (_, index) => ({
+      idempotencyKey: randomUUID(),
+      ...scope,
+      title: `Bulk create ${batchMarker} ${index}`,
+      priority: "Medium" as const,
+      description: `Prepared in bounded bulk item ${index}.`,
+      effort: "S" as const,
+      plannedValidation: [`Validate bounded item ${index}.`],
+      tags: ["mcp", "bulk"],
+    }));
+    const titleWhere = { startsWith: `Bulk create ${batchMarker}` };
+    type BulkItem = {
+      index: number;
+      outcome: "valid" | "created" | "replayed" | "failed";
+      id?: number;
+      version?: number;
+      status?: string;
+      error?: { code: string; detail: string };
+    };
+    type BulkResponse = {
+      mode: "preview" | "apply";
+      summary: {
+        requested: number;
+        succeeded: number;
+        replayed: number;
+        failed: number;
+      };
+      items: BulkItem[];
+    };
+
+    try {
+      const before = await prisma.actionable.count({
+        where: { title: titleWhere },
+      });
+      const preview = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_create_tasks",
+          arguments: { mode: "preview", items },
+        }),
+      );
+      expect(preview).toMatchObject({
+        mode: "preview",
+        summary: {
+          requested: 3,
+          succeeded: 3,
+          replayed: 0,
+          failed: 0,
+        },
+      });
+      expect(preview.items).toHaveLength(3);
+      expect(
+        preview.items.map(({ index, outcome }) => ({ index, outcome })),
+      ).toEqual(
+        Array.from({ length: 3 }, (_, index) => ({
+          index,
+          outcome: "valid",
+        })),
+      );
+      expect(
+        await prisma.actionable.count({ where: { title: titleWhere } }),
+      ).toBe(before);
+
+      const applied = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_create_tasks",
+          arguments: { mode: "apply", items },
+        }),
+      );
+      expect(applied).toMatchObject({
+        mode: "apply",
+        summary: {
+          requested: 3,
+          succeeded: 3,
+          replayed: 0,
+          failed: 0,
+        },
+      });
+      expect(applied.items.map((item) => item.index)).toEqual(
+        Array.from({ length: 3 }, (_, index) => index),
+      );
+      expect(applied.items.every((item) => item.outcome === "created")).toBe(
+        true,
+      );
+      expect(new Set(applied.items.map((item) => item.id)).size).toBe(3);
+      expect(
+        await prisma.actionable.count({ where: { title: titleWhere } }),
+      ).toBe(before + 3);
+      const serialized = JSON.stringify(applied);
+      expect(serialized.length).toBeLessThan(64 * 1024);
+      expect(serialized).not.toContain(items[0]!.description);
+      expect(serialized).not.toContain("claimToken");
+
+      const replayed = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_create_tasks",
+          arguments: { mode: "apply", items },
+        }),
+      );
+      expect(replayed.summary).toEqual({
+        requested: 3,
+        succeeded: 3,
+        replayed: 3,
+        failed: 0,
+      });
+      expect(replayed.items.every((item) => item.outcome === "replayed")).toBe(
+        true,
+      );
+      expect(replayed.items.map((item) => item.id)).toEqual(
+        applied.items.map((item) => item.id),
+      );
+      expect(
+        await prisma.actionable.count({ where: { title: titleWhere } }),
+      ).toBe(before + 3);
+
+      const additional = {
+        ...items[1]!,
+        idempotencyKey: randomUUID(),
+        title: `Bulk create ${batchMarker} additional`,
+      };
+      const mixed = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_create_tasks",
+          arguments: {
+            mode: "apply",
+            items: [
+              { ...items[0]!, title: `${items[0]!.title} changed` },
+              additional,
+            ],
+          },
+        }),
+      );
+      expect(mixed).toMatchObject({
+        summary: { requested: 2, succeeded: 1, replayed: 0, failed: 1 },
+        items: [
+          {
+            index: 0,
+            outcome: "failed",
+            error: { code: "IDEMPOTENCY_CONFLICT" },
+          },
+          { index: 1, outcome: "created" },
+        ],
+      });
+
+      const beforeOversized = await prisma.actionable.count({
+        where: { title: titleWhere },
+      });
+      const oversized = await client.callTool({
+        name: "actionables.bulk_create_tasks",
+        arguments: {
+          mode: "apply",
+          items: Array.from({ length: 26 }, (_, index) => ({
+            ...items[index % items.length]!,
+            idempotencyKey: randomUUID(),
+            title: `Bulk create ${batchMarker} oversized ${index}`,
+          })),
+        },
+      });
+      expect(oversized.isError).toBe(true);
+      expect(
+        await prisma.actionable.count({ where: { title: titleWhere } }),
+      ).toBe(beforeOversized);
+
+      const malformed = await client.callTool({
+        name: "actionables.bulk_create_tasks",
+        arguments: {
+          mode: "apply",
+          items: [
+            {
+              ...items[0]!,
+              idempotencyKey: randomUUID(),
+              title: `Bulk create ${batchMarker} schema-valid sibling`,
+            },
+            {
+              ...items[1]!,
+              idempotencyKey: randomUUID(),
+              title: `Bulk create ${batchMarker} malformed sibling`,
+              tags: [],
+            },
+          ],
+        },
+      });
+      expect(malformed.isError).toBe(true);
+      expect(
+        await prisma.actionable.count({ where: { title: titleWhere } }),
+      ).toBe(beforeOversized);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("previews and atomically prepares bulk siblings with replay-safe partial results", async () => {
+    const { client, transport } = await connectClient();
+    const batchMarker = randomUUID();
+    const createItems = Array.from({ length: 3 }, (_, index) => ({
+      idempotencyKey: randomUUID(),
+      ...scope,
+      title: `Bulk prepare ${batchMarker} ${index}`,
+      priority: "High" as const,
+      description: `Bounded preparation task ${index}.`,
+      effort: "S" as const,
+      plannedValidation: [`Run initial check ${index}.`],
+      tags: ["mcp", "bulk-prepare"],
+    }));
+    type BulkItem = {
+      index: number;
+      outcome: "created" | "valid" | "prepared" | "replayed" | "failed";
+      id?: number;
+      version?: number;
+      status?: string;
+      claimReleased?: boolean;
+      error?: { code: string; detail: string };
+    };
+    type BulkResponse = {
+      mode: "preview" | "apply";
+      summary: {
+        requested: number;
+        succeeded: number;
+        replayed: number;
+        failed: number;
+      };
+      items: BulkItem[];
+    };
+
+    try {
+      const created = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_create_tasks",
+          arguments: { mode: "apply", items: createItems },
+        }),
+      );
+      const createdTasks = created.items.map((item) => ({
+        id: item.id!,
+        version: item.version!,
+      }));
+      const preparationItems = createdTasks.map((task, index) => ({
+        idempotencyKey: randomUUID(),
+        id: task.id,
+        workItemId: task.id,
+        version: task.version,
+        ...(index === 1
+          ? {}
+          : { finding: `Independently confirmed finding ${index}.` }),
+        appendResearch: [`Inspected the relevant source for item ${index}.`],
+        appendPlannedValidation: [`Run the focused regression ${index}.`],
+        addUserSources: [
+          {
+            type: "File" as const,
+            locator: `apps/api/src/bulk-${index}.ts`,
+          },
+        ],
+      }));
+      const beforePreview = await prisma.actionable.findMany({
+        where: { sourceOrdinal: { in: createdTasks.map((task) => task.id) } },
+        orderBy: { sourceOrdinal: "asc" },
+        select: {
+          sourceOrdinal: true,
+          version: true,
+          status: true,
+          finding: true,
+          researchJson: true,
+          validationJson: true,
+          agentTaskClaim: true,
+          _count: { select: { statusHistory: true, activityEvents: true } },
+        },
+      });
+
+      const preview = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_prepare_tasks",
+          arguments: { mode: "preview", items: preparationItems },
+        }),
+      );
+      expect(preview).toMatchObject({
+        mode: "preview",
+        summary: { requested: 3, succeeded: 2, replayed: 0, failed: 1 },
+        items: [
+          { index: 0, outcome: "valid" },
+          {
+            index: 1,
+            outcome: "failed",
+            error: { code: "READY_REQUIREMENTS_NOT_MET" },
+          },
+          { index: 2, outcome: "valid" },
+        ],
+      });
+      expect(
+        await prisma.actionable.findMany({
+          where: { sourceOrdinal: { in: createdTasks.map((task) => task.id) } },
+          orderBy: { sourceOrdinal: "asc" },
+          select: {
+            sourceOrdinal: true,
+            version: true,
+            status: true,
+            finding: true,
+            researchJson: true,
+            validationJson: true,
+            agentTaskClaim: true,
+            _count: { select: { statusHistory: true, activityEvents: true } },
+          },
+        }),
+      ).toEqual(beforePreview);
+
+      const applied = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_prepare_tasks",
+          arguments: { mode: "apply", items: preparationItems },
+        }),
+      );
+      expect(applied).toMatchObject({
+        mode: "apply",
+        summary: { requested: 3, succeeded: 2, replayed: 0, failed: 1 },
+        items: [
+          {
+            index: 0,
+            outcome: "prepared",
+            status: "Ready",
+            claimReleased: true,
+          },
+          {
+            index: 1,
+            outcome: "failed",
+            error: { code: "READY_REQUIREMENTS_NOT_MET" },
+          },
+          {
+            index: 2,
+            outcome: "prepared",
+            status: "Ready",
+            claimReleased: true,
+          },
+        ],
+      });
+      const serialized = JSON.stringify(applied);
+      expect(serialized.length).toBeLessThan(64 * 1024);
+      expect(serialized).not.toContain("claimToken");
+      expect(serialized).not.toContain("Inspected the relevant source");
+
+      const stored = await prisma.actionable.findMany({
+        where: { sourceOrdinal: { in: createdTasks.map((task) => task.id) } },
+        orderBy: { sourceOrdinal: "asc" },
+        include: { agentTaskClaim: true },
+      });
+      expect(stored[0]).toMatchObject({
+        status: "Ready",
+        finding: "Independently confirmed finding 0.",
+        researchJson: ["Inspected the relevant source for item 0."],
+        validationJson: [
+          "Run initial check 0.",
+          "Run the focused regression 0.",
+        ],
+        agentTaskClaim: null,
+      });
+      expect(stored[1]).toMatchObject({
+        version: createdTasks[1]!.version,
+        status: "Inbox",
+        finding: "",
+        researchJson: [],
+        validationJson: ["Run initial check 1."],
+        agentTaskClaim: null,
+      });
+      expect(stored[2]).toMatchObject({
+        status: "Ready",
+        finding: "Independently confirmed finding 2.",
+        researchJson: ["Inspected the relevant source for item 2."],
+        validationJson: [
+          "Run initial check 2.",
+          "Run the focused regression 2.",
+        ],
+        agentTaskClaim: null,
+      });
+      const successfulBeforeReplay = await prisma.actionable.findMany({
+        where: {
+          sourceOrdinal: { in: [createdTasks[0]!.id, createdTasks[2]!.id] },
+        },
+        orderBy: { sourceOrdinal: "asc" },
+        select: {
+          version: true,
+          status: true,
+          _count: { select: { statusHistory: true, activityEvents: true } },
+        },
+      });
+
+      const replayed = output<BulkResponse>(
+        await client.callTool({
+          name: "actionables.bulk_prepare_tasks",
+          arguments: { mode: "apply", items: preparationItems },
+        }),
+      );
+      expect(replayed).toMatchObject({
+        summary: { requested: 3, succeeded: 2, replayed: 2, failed: 1 },
+        items: [
+          { index: 0, outcome: "replayed", status: "Ready" },
+          { index: 1, outcome: "failed" },
+          { index: 2, outcome: "replayed", status: "Ready" },
+        ],
+      });
+      expect(
+        await prisma.actionable.findMany({
+          where: {
+            sourceOrdinal: {
+              in: [createdTasks[0]!.id, createdTasks[2]!.id],
+            },
+          },
+          orderBy: { sourceOrdinal: "asc" },
+          select: {
+            version: true,
+            status: true,
+            _count: { select: { statusHistory: true, activityEvents: true } },
+          },
+        }),
+      ).toEqual(successfulBeforeReplay);
     } finally {
       await transport.close();
     }

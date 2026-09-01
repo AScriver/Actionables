@@ -1660,6 +1660,311 @@ export const dependencyActionRequestSchema = z
   .strict();
 
 export const fieldErrorsSchema = z.record(z.string(), z.array(z.string()));
+
+export const bulkAgentTaskLimit = 25;
+export const bulkAgentTaskModeSchema = z
+  .enum(["preview", "apply"])
+  .describe("Preview validates without writes; apply executes valid items.");
+
+export const bulkCreateAgentTasksRequestSchema = z
+  .object({
+    mode: bulkAgentTaskModeSchema,
+    items: z
+      .array(createAgentTaskRequestSchema)
+      .min(1)
+      .max(bulkAgentTaskLimit)
+      .describe("One through 25 independently idempotent task creations."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const seen = new Set<string>();
+    input.items.forEach((item, index) => {
+      if (seen.has(item.idempotencyKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["items", index, "idempotencyKey"],
+          message: "Use a unique idempotency key for each batch item.",
+        });
+      }
+      seen.add(item.idempotencyKey);
+    });
+  });
+
+export const bulkPrepareAgentTaskItemSchema = z
+  .object({
+    idempotencyKey: z
+      .string()
+      .uuid()
+      .describe(
+        "Caller-generated UUID; reuse it only when retrying this exact preparation request.",
+      ),
+    id: z.number().int().positive().describe("Actionable ID to prepare."),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Top-level Actionable authorizing this preparation."),
+    version: agentTaskVersionInputSchema.describe(
+      "Task version from the preceding list or creation result.",
+    ),
+    finding: markdownField
+      .optional()
+      .describe("Optional finding Markdown to replace before Ready."),
+    description: markdownField
+      .optional()
+      .describe("Optional intended-result Markdown to replace before Ready."),
+    appendResearch: notesSchema
+      .min(1, "Provide at least one research note.")
+      .optional()
+      .describe("Research notes to append with exact deduplication."),
+    appendPlannedValidation: notesSchema
+      .min(1, "Provide at least one planned validation step.")
+      .optional()
+      .describe("Planned checks to append before Ready."),
+    addUserSources: z
+      .array(userSourceReferenceInputSchema)
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("User sources to add with exact deduplication."),
+  })
+  .strict();
+
+export const bulkPrepareAgentTasksRequestSchema = z
+  .object({
+    mode: bulkAgentTaskModeSchema,
+    items: z
+      .array(bulkPrepareAgentTaskItemSchema)
+      .min(1)
+      .max(bulkAgentTaskLimit)
+      .describe("One through 25 atomic Inbox-to-Ready preparations."),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const keys = new Set<string>();
+    const ids = new Set<number>();
+    input.items.forEach((item, index) => {
+      if (keys.has(item.idempotencyKey)) {
+        context.addIssue({
+          code: "custom",
+          path: ["items", index, "idempotencyKey"],
+          message: "Use a unique idempotency key for each batch item.",
+        });
+      }
+      if (ids.has(item.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["items", index, "id"],
+          message: "Prepare each Actionable at most once per batch.",
+        });
+      }
+      keys.add(item.idempotencyKey);
+      ids.add(item.id);
+    });
+  });
+
+export const bulkAgentTaskChangedFieldSchema = z.enum([
+  "finding",
+  "description",
+  "research",
+  "plannedValidation",
+  "userSources",
+  "status",
+]);
+
+export const bulkAgentTaskCountSchema = z
+  .object({
+    field: z.enum(["research", "plannedValidation", "userSources"]),
+    persisted: z.number().int().nonnegative(),
+    duplicatesIgnored: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const bulkAgentTaskIndexSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(bulkAgentTaskLimit - 1);
+
+const bulkAgentTaskReceiptFields = {
+  id: z.number().int().positive(),
+  version: z.number().int().positive(),
+  status: statusSchema,
+};
+
+const bulkPreparedAgentTaskReceiptFields = {
+  id: z.number().int().positive(),
+  version: z.number().int().positive(),
+  status: z.literal("Ready"),
+  claimReleased: z.literal(true),
+  changedFields: z
+    .array(bulkAgentTaskChangedFieldSchema)
+    .max(bulkAgentTaskChangedFieldSchema.options.length),
+  counts: z.array(bulkAgentTaskCountSchema).max(3),
+};
+
+export const bulkPreparedAgentTaskReceiptSchema = z
+  .object(bulkPreparedAgentTaskReceiptFields)
+  .strict();
+
+export const bulkCreateAgentTaskSuccessSchema = z.discriminatedUnion(
+  "outcome",
+  [
+    z
+      .object({ index: bulkAgentTaskIndexSchema, outcome: z.literal("valid") })
+      .strict(),
+    z
+      .object({
+        index: bulkAgentTaskIndexSchema,
+        outcome: z.literal("created"),
+        ...bulkAgentTaskReceiptFields,
+      })
+      .strict(),
+    z
+      .object({
+        index: bulkAgentTaskIndexSchema,
+        outcome: z.literal("replayed"),
+        ...bulkAgentTaskReceiptFields,
+      })
+      .strict(),
+  ],
+);
+
+export const bulkPrepareAgentTaskSuccessSchema = z.discriminatedUnion(
+  "outcome",
+  [
+    z
+      .object({
+        index: bulkAgentTaskIndexSchema,
+        outcome: z.literal("valid"),
+        ...bulkAgentTaskReceiptFields,
+      })
+      .strict(),
+    z
+      .object({
+        index: bulkAgentTaskIndexSchema,
+        outcome: z.literal("prepared"),
+        ...bulkPreparedAgentTaskReceiptFields,
+      })
+      .strict(),
+    z
+      .object({
+        index: bulkAgentTaskIndexSchema,
+        outcome: z.literal("replayed"),
+        ...bulkPreparedAgentTaskReceiptFields,
+      })
+      .strict(),
+  ],
+);
+
+export const bulkAgentTaskFailureSchema = z
+  .object({
+    index: bulkAgentTaskIndexSchema,
+    outcome: z.literal("failed"),
+    error: z
+      .object({
+        code: z.string().trim().min(1).max(100),
+        detail: z.string().trim().min(1).max(600),
+        errors: z
+          .record(z.string(), z.array(z.string().max(600)).max(5))
+          .superRefine((errors, context) => {
+            if (Object.keys(errors).length > 20) {
+              context.addIssue({
+                code: "custom",
+                message: "Return at most 20 field-error groups.",
+              });
+            }
+          })
+          .optional(),
+        currentVersion: z.number().int().positive().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const bulkCreateAgentTaskItemResultSchema = z.union([
+  bulkCreateAgentTaskSuccessSchema,
+  bulkAgentTaskFailureSchema,
+]);
+
+export const bulkPrepareAgentTaskItemResultSchema = z.union([
+  bulkPrepareAgentTaskSuccessSchema,
+  bulkAgentTaskFailureSchema,
+]);
+
+export const bulkAgentTaskItemResultSchema = z.union([
+  bulkCreateAgentTaskItemResultSchema,
+  bulkPrepareAgentTaskItemResultSchema,
+]);
+
+export const bulkAgentTaskSummarySchema = z
+  .object({
+    requested: z.number().int().min(1).max(bulkAgentTaskLimit),
+    succeeded: z.number().int().nonnegative().max(bulkAgentTaskLimit),
+    replayed: z.number().int().nonnegative().max(bulkAgentTaskLimit),
+    failed: z.number().int().nonnegative().max(bulkAgentTaskLimit),
+  })
+  .strict();
+
+function validateBulkAgentTasksResponse(
+  response: {
+    mode: z.infer<typeof bulkAgentTaskModeSchema>;
+    summary: z.infer<typeof bulkAgentTaskSummarySchema>;
+    items: z.infer<typeof bulkAgentTaskItemResultSchema>[];
+  },
+  context: z.RefinementCtx,
+) {
+  const succeeded = response.items.filter(
+    (item) => item.outcome !== "failed",
+  ).length;
+  const replayed = response.items.filter(
+    (item) => item.outcome === "replayed",
+  ).length;
+  if (
+    response.items.length !== response.summary.requested ||
+    succeeded !== response.summary.succeeded ||
+    response.items.length - succeeded !== response.summary.failed ||
+    replayed !== response.summary.replayed
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["summary"],
+      message: "Bulk summary counts must match the ordered item results.",
+    });
+  }
+  if (response.items.some((item, index) => item.index !== index)) {
+    context.addIssue({
+      code: "custom",
+      path: ["items"],
+      message: "Bulk item results must preserve request order and indices.",
+    });
+  }
+}
+
+export const bulkCreateAgentTasksResponseSchema = z
+  .object({
+    mode: bulkAgentTaskModeSchema,
+    summary: bulkAgentTaskSummarySchema,
+    items: z
+      .array(bulkCreateAgentTaskItemResultSchema)
+      .min(1)
+      .max(bulkAgentTaskLimit),
+  })
+  .strict()
+  .superRefine(validateBulkAgentTasksResponse);
+
+export const bulkPrepareAgentTasksResponseSchema = z
+  .object({
+    mode: bulkAgentTaskModeSchema,
+    summary: bulkAgentTaskSummarySchema,
+    items: z
+      .array(bulkPrepareAgentTaskItemResultSchema)
+      .min(1)
+      .max(bulkAgentTaskLimit),
+  })
+  .strict()
+  .superRefine(validateBulkAgentTasksResponse);
+
 export const problemDetailsSchema = z.object({
   type: z.string().min(1),
   title: z.string().min(1),
@@ -2204,6 +2509,27 @@ export type CreateTaskBreakdownRequest = z.infer<
 >;
 export type CreateAgentTaskRequest = z.infer<
   typeof createAgentTaskRequestSchema
+>;
+export type BulkCreateAgentTasksRequest = z.infer<
+  typeof bulkCreateAgentTasksRequestSchema
+>;
+export type BulkPrepareAgentTaskItem = z.infer<
+  typeof bulkPrepareAgentTaskItemSchema
+>;
+export type BulkPrepareAgentTasksRequest = z.infer<
+  typeof bulkPrepareAgentTasksRequestSchema
+>;
+export type BulkAgentTaskItemResult = z.infer<
+  typeof bulkAgentTaskItemResultSchema
+>;
+export type BulkPreparedAgentTaskReceipt = z.infer<
+  typeof bulkPreparedAgentTaskReceiptSchema
+>;
+export type BulkCreateAgentTasksResponse = z.infer<
+  typeof bulkCreateAgentTasksResponseSchema
+>;
+export type BulkPrepareAgentTasksResponse = z.infer<
+  typeof bulkPrepareAgentTasksResponseSchema
 >;
 export type SetParentRequest = z.infer<typeof setParentRequestSchema>;
 export type DetachParentRequest = z.infer<typeof detachParentRequestSchema>;

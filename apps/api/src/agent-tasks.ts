@@ -6,6 +6,14 @@ import { promisify } from "node:util";
 import {
   agentTaskSummaryChildIdsLimit,
   agentTaskSummarySchema,
+  bulkAgentTaskFailureSchema,
+  bulkCreateAgentTaskSuccessSchema,
+  bulkCreateAgentTasksRequestSchema,
+  bulkCreateAgentTasksResponseSchema,
+  bulkPreparedAgentTaskReceiptSchema,
+  bulkPrepareAgentTaskSuccessSchema,
+  bulkPrepareAgentTasksRequestSchema,
+  bulkPrepareAgentTasksResponseSchema,
   claimAgentTaskRequestSchema,
   claimAgentTaskResponseSchema,
   createAgentTaskRequestSchema,
@@ -27,6 +35,13 @@ import {
   updateClaimedAgentTaskRequestSchema,
   type ActionableDetail,
   type AgentTaskSummary,
+  type BulkAgentTaskItemResult,
+  type BulkCreateAgentTasksRequest,
+  type BulkCreateAgentTasksResponse,
+  type BulkPreparedAgentTaskReceipt,
+  type BulkPrepareAgentTaskItem,
+  type BulkPrepareAgentTasksRequest,
+  type BulkPrepareAgentTasksResponse,
   type ClaimAgentTaskRequest,
   type ClaimAgentTaskResponse,
   type CreateAgentTaskRequest,
@@ -55,6 +70,7 @@ import {
 import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import {
   createActionable,
+  DomainValidationError,
   getActionable,
   normalizedLocalPath,
   recordValidationWithRecord,
@@ -794,6 +810,7 @@ export type AgentTaskScopeProvisioning = {
 
 export type CreateAgentTaskResult = {
   task: ActionableDetail;
+  idempotentReplay: boolean;
   scopeProvisioning?: AgentTaskScopeProvisioning;
 };
 
@@ -880,11 +897,11 @@ async function resolveRepositoryPlacement(
   };
 }
 
-async function ensureAgentTaskScope(
-  transaction: TransactionClient,
+async function findResolvedAgentTaskScope(
+  client: AppPrismaClient | TransactionClient,
   placement: ResolvedRepositoryPlacement,
 ) {
-  const repositories = await transaction.repository.findMany({
+  const repositories = await client.repository.findMany({
     include: { project: true, worktrees: true },
   });
   const repository = repositories.find(
@@ -894,33 +911,48 @@ async function ensureAgentTaskScope(
         sameLocalPath(worktree.localPath, placement.worktreePath),
       ),
   );
+  const worktree = repository?.worktrees.find((candidate) =>
+    sameLocalPath(candidate.localPath, placement.worktreePath),
+  );
+  return { repository, worktree };
+}
+
+function requireUsableResolvedAgentTaskScope(
+  scope: Awaited<ReturnType<typeof findResolvedAgentTaskScope>>,
+) {
+  if (scope.repository?.archivedAt || scope.repository?.project.archivedAt) {
+    throw new AgentTaskClaimError(
+      "ARCHIVED",
+      "The repository scope resolved from repositoryPath is archived.",
+      {
+        repositoryPath: [
+          "Restore the existing project and repository scope before creating a task.",
+        ],
+      },
+    );
+  }
+  if (scope.worktree?.archivedAt) {
+    throw new AgentTaskClaimError(
+      "ARCHIVED",
+      "The worktree scope resolved from repositoryPath is archived.",
+      {
+        repositoryPath: [
+          "Restore the existing worktree scope before creating a task.",
+        ],
+      },
+    );
+  }
+}
+
+async function ensureAgentTaskScope(
+  transaction: TransactionClient,
+  placement: ResolvedRepositoryPlacement,
+) {
+  const scope = await findResolvedAgentTaskScope(transaction, placement);
+  requireUsableResolvedAgentTaskScope(scope);
+  const { repository, worktree } = scope;
 
   if (repository) {
-    if (repository.archivedAt || repository.project.archivedAt) {
-      throw new AgentTaskClaimError(
-        "ARCHIVED",
-        "The repository scope resolved from repositoryPath is archived.",
-        {
-          repositoryPath: [
-            "Restore the existing project and repository scope before creating a task.",
-          ],
-        },
-      );
-    }
-    const worktree = repository.worktrees.find((candidate) =>
-      sameLocalPath(candidate.localPath, placement.worktreePath),
-    );
-    if (worktree?.archivedAt) {
-      throw new AgentTaskClaimError(
-        "ARCHIVED",
-        "The worktree scope resolved from repositoryPath is archived.",
-        {
-          repositoryPath: [
-            "Restore the existing worktree scope before creating a task.",
-          ],
-        },
-      );
-    }
     if (worktree) {
       return {
         scope: {
@@ -981,7 +1013,7 @@ async function ensureAgentTaskScope(
       projectId: project.id,
     },
   });
-  const worktree = await transaction.worktree.create({
+  const createdWorktree = await transaction.worktree.create({
     data: {
       externalKey: `agent-scope-worktree-${hashToken(
         placement.worktreePath.toLowerCase(),
@@ -996,7 +1028,7 @@ async function ensureAgentTaskScope(
     scope: {
       projectId: project.id,
       repositoryId: createdRepository.id,
-      worktreeId: worktree.id,
+      worktreeId: createdWorktree.id,
     },
     provisioning: {
       ensured: true as const,
@@ -1075,7 +1107,7 @@ export async function createAgentTask(
       fingerprint,
       caller,
     );
-    if (existing) return { task: existing };
+    if (existing) return { task: existing, idempotentReplay: true };
 
     let scopeProvisioning: AgentTaskScopeProvisioning | undefined;
     if (request.parentId === undefined) {
@@ -1182,7 +1214,732 @@ export async function createAgentTask(
       caller,
     );
     if (!created) throw new Error("Created agent task could not be read.");
-    return { task: created, scopeProvisioning };
+    return {
+      task: created,
+      idempotentReplay: false,
+      scopeProvisioning,
+    };
+  });
+}
+
+function compactBulkFieldErrors(errors: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(errors)
+      .slice(0, 20)
+      .map(([field, messages]) => [
+        field,
+        messages.slice(0, 5).map((message) => message.slice(0, 600)),
+      ]),
+  );
+}
+
+function bulkFailure(index: number, error: unknown): BulkAgentTaskItemResult {
+  let payload:
+    | {
+        code: string;
+        detail: string;
+        errors?: Record<string, string[]>;
+        currentVersion?: number;
+      }
+    | undefined;
+  if (error instanceof AgentTaskClaimError) {
+    payload = {
+      code: error.code,
+      detail: error.message,
+      ...(error.fieldErrors
+        ? { errors: compactBulkFieldErrors(error.fieldErrors) }
+        : {}),
+      ...(error.currentVersion ? { currentVersion: error.currentVersion } : {}),
+    };
+  } else if (error instanceof DomainValidationError) {
+    payload = {
+      code: error.code,
+      detail: error.message,
+      errors: compactBulkFieldErrors(error.fieldErrors),
+    };
+  } else if (error instanceof VersionConflictError) {
+    payload = {
+      code: "VERSION_CONFLICT",
+      detail: error.message,
+      currentVersion: error.current.version,
+    };
+  }
+  if (!payload) {
+    payload = {
+      code: "INTERNAL_ERROR",
+      detail: "The batch item could not be completed.",
+    };
+  }
+  return bulkAgentTaskFailureSchema.parse({
+    index,
+    outcome: "failed",
+    error: { ...payload, detail: payload.detail.slice(0, 600) },
+  });
+}
+
+function bulkSummary(items: BulkAgentTaskItemResult[]) {
+  const succeeded = items.filter((item) => item.outcome !== "failed").length;
+  return {
+    requested: items.length,
+    succeeded,
+    replayed: items.filter((item) => item.outcome === "replayed").length,
+    failed: items.length - succeeded,
+  };
+}
+
+async function validateExistingAgentTaskScope(
+  prisma: AppPrismaClient,
+  request: CreateAgentTaskRequest,
+) {
+  const [project, repository, worktree] = await Promise.all([
+    prisma.project.findUnique({ where: { id: request.projectId! } }),
+    prisma.repository.findUnique({ where: { id: request.repositoryId! } }),
+    prisma.worktree.findUnique({ where: { id: request.worktreeId! } }),
+  ]);
+  const errors: Record<string, string[]> = {};
+  if (!project) errors.projectId = ["Choose an existing project."];
+  if (!repository || repository.projectId !== request.projectId) {
+    errors.repositoryId = ["Choose a repository in the selected project."];
+  }
+  if (
+    !worktree ||
+    worktree.projectId !== request.projectId ||
+    worktree.repositoryId !== request.repositoryId
+  ) {
+    errors.worktreeId = ["Choose a worktree in the selected repository."];
+  }
+  if (Object.keys(errors).length) {
+    throw new DomainValidationError(
+      "INVALID_SCOPE",
+      errors,
+      "The selected scope is invalid.",
+    );
+  }
+}
+
+async function preflightAgentTaskCreate(
+  prisma: AppPrismaClient,
+  request: CreateAgentTaskRequest,
+  caller: AgentTaskCaller,
+) {
+  const externalKey = `agent-task-${hashToken(request.idempotencyKey)}`;
+  const fingerprint = agentTaskCreateFingerprint(request);
+  const existing = await existingCreatedAgentTask(
+    prisma,
+    externalKey,
+    request.parentId,
+    fingerprint,
+    caller,
+  );
+  if (existing) return existing;
+
+  if (request.parentId === undefined) {
+    if (request.ensureScope) {
+      const placement = await resolveRepositoryPlacement(
+        request.repositoryPath!,
+      );
+      requireUsableResolvedAgentTaskScope(
+        await findResolvedAgentTaskScope(prisma, placement),
+      );
+    } else {
+      await validateExistingAgentTaskScope(prisma, request);
+    }
+    return null;
+  }
+
+  const parent = await getActionable(prisma, request.parentId);
+  if (!parent) {
+    throw new AgentTaskClaimError(
+      "NOT_FOUND",
+      "The requested parent Actionable was not found.",
+      { parentId: ["Choose an existing Actionable."] },
+    );
+  }
+  const workItem = await requireWorkItem(prisma, request.workItemId!);
+  if (parent.recordId !== workItem.id) {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "The requested parent is not the authorized feature or bug work item.",
+      {
+        parentId: [
+          `Choose top-level Actionable ${workItem.sourceOrdinal} as the parent.`,
+        ],
+      },
+    );
+  }
+  return null;
+}
+
+export async function bulkCreateAgentTasks(
+  prisma: AppPrismaClient,
+  input: BulkCreateAgentTasksRequest,
+  caller: AgentTaskCaller,
+): Promise<BulkCreateAgentTasksResponse> {
+  const request = parseInput(bulkCreateAgentTasksRequestSchema, input);
+  const preflight: Array<ActionableDetail | BulkAgentTaskItemResult | null> =
+    [];
+  for (const [index, item] of request.items.entries()) {
+    try {
+      preflight.push(await preflightAgentTaskCreate(prisma, item, caller));
+    } catch (error) {
+      preflight.push(bulkFailure(index, error));
+    }
+  }
+
+  const items: BulkAgentTaskItemResult[] = [];
+  for (const [index, item] of request.items.entries()) {
+    const planned = preflight[index]!;
+    if (planned && "outcome" in planned) {
+      items.push(planned);
+      continue;
+    }
+    if (planned) {
+      items.push(
+        bulkCreateAgentTaskSuccessSchema.parse({
+          index,
+          outcome: "replayed",
+          id: planned.id,
+          version: planned.version,
+          status: planned.status,
+        }),
+      );
+      continue;
+    }
+    if (request.mode === "preview") {
+      items.push(
+        bulkCreateAgentTaskSuccessSchema.parse({ index, outcome: "valid" }),
+      );
+      continue;
+    }
+    try {
+      const created = await createAgentTask(prisma, item, caller);
+      items.push(
+        bulkCreateAgentTaskSuccessSchema.parse({
+          index,
+          outcome: created.idempotentReplay ? "replayed" : "created",
+          id: created.task.id,
+          version: created.task.version,
+          status: created.task.status,
+        }),
+      );
+    } catch (error) {
+      items.push(bulkFailure(index, error));
+    }
+  }
+
+  return bulkCreateAgentTasksResponseSchema.parse({
+    mode: request.mode,
+    summary: bulkSummary(items),
+    items,
+  });
+}
+
+const preparationActivityPrefix = "agent-bulk-prepare-";
+
+function agentTaskPreparationFingerprint(request: BulkPrepareAgentTaskItem) {
+  return hashToken(
+    JSON.stringify({
+      id: request.id,
+      workItemId: request.workItemId,
+      version: request.version,
+      finding: request.finding ?? null,
+      description: request.description ?? null,
+      appendResearch: request.appendResearch ?? null,
+      appendPlannedValidation: request.appendPlannedValidation ?? null,
+      addUserSources: request.addUserSources ?? null,
+    }),
+  );
+}
+
+function preparationActivityId(idempotencyKey: string) {
+  return `${preparationActivityPrefix}${hashToken(idempotencyKey)}`;
+}
+
+function jsonRecord(value: Prisma.JsonValue) {
+  return value && !Array.isArray(value) && typeof value === "object"
+    ? value
+    : null;
+}
+
+function preparedReceiptFromActivity(
+  activity: { type: string; metadataJson: Prisma.JsonValue },
+  fingerprint: string,
+  caller: AgentTaskCaller,
+) {
+  const metadata = jsonRecord(activity.metadataJson);
+  const receipt = bulkPreparedAgentTaskReceiptSchema.safeParse(
+    metadata?.receipt,
+  );
+  if (
+    activity.type !== "agent-bulk-prepared" ||
+    metadata?.fingerprint !== fingerprint ||
+    metadata?.creatorThreadId !== caller.threadId ||
+    !receipt.success
+  ) {
+    throw new AgentTaskClaimError(
+      "IDEMPOTENCY_CONFLICT",
+      "The idempotency key was already used for a different preparation request.",
+      {
+        idempotencyKey: [
+          "Reuse a key only for an identical retry; use a new UUID for a new preparation.",
+        ],
+      },
+    );
+  }
+  return receipt.data;
+}
+
+type AgentTaskPreparationPlan =
+  | { kind: "replay"; receipt: BulkPreparedAgentTaskReceipt }
+  | {
+      kind: "prepare";
+      row: AgentTaskMutationRow;
+      finding: string;
+      description: string;
+      research: string[];
+      plannedValidation: string[];
+      userSources: Array<{
+        type: string;
+        locator: string;
+        label?: string;
+      }>;
+      changedFields: BulkPreparedAgentTaskReceipt["changedFields"];
+      counts: BulkPreparedAgentTaskReceipt["counts"];
+    };
+
+async function planAgentTaskPreparation(
+  tx: TransactionClient,
+  request: BulkPrepareAgentTaskItem,
+  caller: AgentTaskCaller,
+  now: Date,
+): Promise<AgentTaskPreparationPlan> {
+  const fingerprint = agentTaskPreparationFingerprint(request);
+  const existingActivity = await tx.activityEvent.findUnique({
+    where: { id: preparationActivityId(request.idempotencyKey) },
+  });
+  if (existingActivity) {
+    return {
+      kind: "replay",
+      receipt: preparedReceiptFromActivity(
+        existingActivity,
+        fingerprint,
+        caller,
+      ),
+    };
+  }
+
+  const row = await findMutationTask(tx, request.id);
+  requireClaimable(row);
+  const workItem = await requireWorkItem(tx, request.workItemId);
+  requireTaskInWorkItem(row, workItem);
+  if (creatorThreadId(row.rawFragmentJson) !== caller.threadId) {
+    throw new AgentTaskClaimError(
+      "CREATOR_THREAD_MISMATCH",
+      "Bulk preparation accepts only Actionables created by the current Codex thread.",
+      {
+        id: [
+          "Use the normal list, claim, reconcile, research, and lifecycle workflow for an existing task.",
+        ],
+      },
+    );
+  }
+  if (row.status !== "Inbox") {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "Bulk preparation accepts only Inbox Actionables.",
+      {
+        id: ["Use the normal claimed-task workflow for work already started."],
+      },
+    );
+  }
+  if (
+    row.dependenciesAsDependent.some(
+      (relationship) =>
+        relationship.waivedAt === null &&
+        relationship.prerequisite.status !== "Done",
+    )
+  ) {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "An Actionable with unresolved dependencies cannot be bulk prepared.",
+      { id: ["Resolve or waive every prerequisite before preparation."] },
+    );
+  }
+  const agentId = `codex:${caller.threadId}`;
+  if (row.agentTaskClaim && row.agentTaskClaim.leaseExpiresAt > now) {
+    throw new AgentTaskClaimError(
+      row.agentTaskClaim.agentId === agentId
+        ? "OWN_CLAIM_ACTIVE"
+        : "ALREADY_CLAIMED",
+      row.agentTaskClaim.agentId === agentId
+        ? "This Actionable already has an active claim owned by the current Codex thread."
+        : "This Actionable already has an active claim.",
+      undefined,
+      row.version,
+    );
+  }
+  if (row.version !== request.version) {
+    throw new AgentTaskClaimError(
+      "VERSION_CONFLICT",
+      "This Actionable changed after it was listed.",
+      undefined,
+      row.version,
+    );
+  }
+
+  const currentResearch = persistedStringArray(row.researchJson);
+  const currentPlannedValidation = persistedStringArray(row.validationJson);
+  const currentSources = row.userSources.map((source) => ({
+    type: source.type,
+    locator: source.locator,
+    ...(source.label ? { label: source.label } : {}),
+  }));
+  const research = request.appendResearch
+    ? appendUniqueStrings(currentResearch, request.appendResearch)
+    : undefined;
+  const plannedValidation = request.appendPlannedValidation
+    ? appendUniqueStrings(
+        currentPlannedValidation,
+        request.appendPlannedValidation,
+      )
+    : undefined;
+  const sources = request.addUserSources
+    ? appendUniqueUserSources(currentSources, request.addUserSources)
+    : undefined;
+  const finding = request.finding ?? row.finding;
+  const description = request.description ?? row.description;
+  const nextResearch = research?.values ?? currentResearch;
+  const nextPlannedValidation =
+    plannedValidation?.values ?? currentPlannedValidation;
+  const nextSources = sources?.values ?? currentSources;
+  const readiness = lifecycleReadiness("Researching", {
+    finding,
+    description,
+    research: nextResearch,
+    plannedValidation: nextPlannedValidation,
+  });
+  if (readiness.requiredForReady.length) {
+    const errors = Object.fromEntries(
+      readiness.blockers.map((blocker) => [
+        blocker.field === "research"
+          ? "appendResearch"
+          : blocker.field === "plannedValidation"
+            ? "appendPlannedValidation"
+            : blocker.field,
+        [blocker.message],
+      ]),
+    );
+    throw new DomainValidationError(
+      "READY_REQUIREMENTS_NOT_MET",
+      errors,
+      `Ready requires: ${readiness.requiredForReady.join(", ")}.`,
+    );
+  }
+
+  const changedFields: BulkPreparedAgentTaskReceipt["changedFields"] = [
+    request.finding !== undefined && request.finding !== row.finding
+      ? "finding"
+      : null,
+    request.description !== undefined && request.description !== row.description
+      ? "description"
+      : null,
+    !sameJson(nextResearch, currentResearch) ? "research" : null,
+    !sameJson(nextPlannedValidation, currentPlannedValidation)
+      ? "plannedValidation"
+      : null,
+    !sameJson(nextSources, currentSources) ? "userSources" : null,
+    "status",
+  ].filter(
+    (field): field is BulkPreparedAgentTaskReceipt["changedFields"][number] =>
+      field !== null,
+  );
+  const counts: BulkPreparedAgentTaskReceipt["counts"] = [
+    ...(research
+      ? [
+          {
+            field: "research" as const,
+            persisted: research.appended,
+            duplicatesIgnored: research.duplicatesIgnored,
+          },
+        ]
+      : []),
+    ...(plannedValidation
+      ? [
+          {
+            field: "plannedValidation" as const,
+            persisted: plannedValidation.appended,
+            duplicatesIgnored: plannedValidation.duplicatesIgnored,
+          },
+        ]
+      : []),
+    ...(sources
+      ? [
+          {
+            field: "userSources" as const,
+            persisted: sources.appended,
+            duplicatesIgnored: sources.duplicatesIgnored,
+          },
+        ]
+      : []),
+  ];
+  return {
+    kind: "prepare",
+    row,
+    finding,
+    description,
+    research: nextResearch,
+    plannedValidation: nextPlannedValidation,
+    userSources: nextSources,
+    changedFields,
+    counts,
+  };
+}
+
+async function applyAgentTaskPreparation(
+  prisma: AppPrismaClient,
+  request: BulkPrepareAgentTaskItem,
+  caller: AgentTaskCaller,
+  now: Date,
+) {
+  return withClaimLock(String(request.id), () =>
+    prisma.$transaction(async (tx) => {
+      const plan = await planAgentTaskPreparation(tx, request, caller, now);
+      if (plan.kind === "replay") {
+        return { replayed: true as const, receipt: plan.receipt };
+      }
+
+      const { row } = plan;
+      const agentId = `codex:${caller.threadId}`;
+      let version = row.version;
+      if (row.agentTaskClaim) {
+        await recordObservedExpiry(tx, row, now);
+        await tx.actionable.update({
+          where: { id: row.id },
+          data: {
+            version: { increment: 1 },
+            updatedLabel: "agent claim expired",
+          },
+        });
+        version += 1;
+      }
+
+      const leaseMinutes = (await getAgentCoordinationSettings(tx))
+        .agentClaimLeaseMinutes;
+      await tx.agentTaskClaim.create({
+        data: {
+          actionableId: row.id,
+          agentId,
+          claimTokenHash: hashToken(randomBytes(32).toString("base64url")),
+          claimedAt: now,
+          leaseExpiresAt: leaseExpiry(now, leaseMinutes),
+        },
+      });
+      await tx.actionable.update({
+        where: { id: row.id },
+        data: { version: { increment: 1 }, updatedLabel: "agent claim" },
+      });
+      version += 1;
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-claimed",
+          summary: `Claimed by agent ${agentId}`,
+          metadataJson: { agentId },
+          occurredAt: now,
+        },
+      });
+
+      const researching = await transitionActionable(
+        prisma,
+        request.id,
+        {
+          version,
+          status: "Researching",
+          origin: agentOrigin(agentId),
+        },
+        tx,
+      );
+      if (!researching) {
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      }
+      version = researching.version;
+
+      const updated = await updateActionable(
+        prisma,
+        request.id,
+        parseInput(updateActionableRequestSchema, {
+          version,
+          title: row.title,
+          priority: row.priority,
+          effort: row.effort,
+          evidenceState: row.evidenceState,
+          projectId: row.projectId,
+          repositoryId: row.repositoryId,
+          worktreeId: row.worktreeId,
+          status: "Researching",
+          finding: plan.finding,
+          description: plan.description,
+          resolution: row.resolution,
+          research: plan.research,
+          validation: plan.plannedValidation,
+          tags: persistedStringArray(row.tagsJson),
+          userSources: plan.userSources,
+        }),
+        tx,
+        "agent-added",
+      );
+      if (!updated) {
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      }
+      version = updated.version;
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-updated",
+          summary: `Updated by agent ${agentId}`,
+          metadataJson: {
+            origin: agentOrigin(agentId),
+            fields: plan.changedFields
+              .filter((field) => field !== "status")
+              .join(","),
+            operation: "bulk-prepare",
+          },
+          occurredAt: now,
+        },
+      });
+
+      const ready = await transitionActionable(
+        prisma,
+        request.id,
+        {
+          version,
+          status: "Ready",
+          origin: agentOrigin(agentId),
+        },
+        tx,
+      );
+      if (!ready) {
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      }
+
+      await tx.agentTaskClaim.delete({ where: { actionableId: row.id } });
+      await tx.actionable.update({
+        where: { id: row.id },
+        data: { version: { increment: 1 }, updatedLabel: "agent release" },
+      });
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-released",
+          summary: `Released by agent ${agentId}`,
+          metadataJson: { agentId, operation: "bulk-prepare" },
+          occurredAt: now,
+        },
+      });
+      const saved = await getActionable(tx, request.id);
+      if (!saved) {
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      }
+      const receipt = bulkPreparedAgentTaskReceiptSchema.parse({
+        id: saved.id,
+        version: saved.version,
+        status: saved.status,
+        claimReleased: true,
+        changedFields: plan.changedFields,
+        counts: plan.counts,
+      });
+      await tx.activityEvent.create({
+        data: {
+          id: preparationActivityId(request.idempotencyKey),
+          actionableId: row.id,
+          type: "agent-bulk-prepared",
+          summary: `Bulk prepared by agent ${agentId}`,
+          metadataJson: {
+            fingerprint: agentTaskPreparationFingerprint(request),
+            creatorThreadId: caller.threadId,
+            receipt,
+          },
+          occurredAt: now,
+        },
+      });
+      return { replayed: false as const, receipt };
+    }),
+  );
+}
+
+export async function bulkPrepareAgentTasks(
+  prisma: AppPrismaClient,
+  input: BulkPrepareAgentTasksRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+): Promise<BulkPrepareAgentTasksResponse> {
+  const request = parseInput(bulkPrepareAgentTasksRequestSchema, input);
+  const preflight: Array<AgentTaskPreparationPlan | BulkAgentTaskItemResult> =
+    [];
+  for (const [index, item] of request.items.entries()) {
+    try {
+      preflight.push(
+        await prisma.$transaction((tx) =>
+          planAgentTaskPreparation(tx, item, caller, now),
+        ),
+      );
+    } catch (error) {
+      preflight.push(bulkFailure(index, error));
+    }
+  }
+
+  const items: BulkAgentTaskItemResult[] = [];
+  for (const [index, item] of request.items.entries()) {
+    const planned = preflight[index]!;
+    if ("outcome" in planned) {
+      items.push(planned);
+      continue;
+    }
+    if (planned.kind === "replay") {
+      items.push(
+        bulkPrepareAgentTaskSuccessSchema.parse({
+          index,
+          outcome: "replayed",
+          ...planned.receipt,
+        }),
+      );
+      continue;
+    }
+    if (request.mode === "preview") {
+      items.push(
+        bulkPrepareAgentTaskSuccessSchema.parse({
+          index,
+          outcome: "valid",
+          id: planned.row.sourceOrdinal,
+          version: planned.row.version,
+          status: planned.row.status,
+        }),
+      );
+      continue;
+    }
+    try {
+      const applied = await applyAgentTaskPreparation(
+        prisma,
+        item,
+        caller,
+        now,
+      );
+      items.push(
+        bulkPrepareAgentTaskSuccessSchema.parse({
+          index,
+          outcome: applied.replayed ? "replayed" : "prepared",
+          ...applied.receipt,
+        }),
+      );
+    } catch (error) {
+      items.push(bulkFailure(index, error));
+    }
+  }
+
+  return bulkPrepareAgentTasksResponseSchema.parse({
+    mode: request.mode,
+    summary: bulkSummary(items),
+    items,
   });
 }
 

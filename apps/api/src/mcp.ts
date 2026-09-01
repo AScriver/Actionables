@@ -6,6 +6,10 @@ import {
   agentTaskLeaseMinutesSchema,
   agentTaskListViewSchema,
   agentTaskVersionInputSchema,
+  bulkCreateAgentTasksRequestSchema,
+  bulkCreateAgentTasksResponseSchema,
+  bulkPrepareAgentTasksRequestSchema,
+  bulkPrepareAgentTasksResponseSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
   handoffClaimedAgentTaskRequestSchema,
@@ -28,6 +32,8 @@ import { z } from "zod/v4";
 import type { AppPrismaClient } from "./database.js";
 import {
   AgentTaskClaimError,
+  bulkCreateAgentTasks,
+  bulkPrepareAgentTasks,
   type AgentTaskScopeProvisioning,
   claimAgentTaskWithProjection,
   createAgentTask,
@@ -993,6 +999,44 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
         });
         return compactTask(created.task, created.scopeProvisioning);
       }),
+  );
+  server.registerTool(
+    "actionables.bulk_create_tasks",
+    {
+      title: "Preview or create Actionables in bulk",
+      description:
+        "Preview or create 1 through 25 explicitly authorized tasks in one ordered call. Every item uses the normal create_task scope, hierarchy, classification, and caller-stable idempotency-key rules. The whole request must first satisfy the published input schema. mode preview performs no writes; mode apply commits each schema-valid item atomically while allowing valid siblings to succeed when another item fails. Read every compact per-item outcome and retry an applied request only with the same keys and identical item content. No claim credential is returned.",
+      inputSchema: bulkCreateAgentTasksRequestSchema,
+      outputSchema: bulkCreateAgentTasksResponseSchema,
+      annotations: { ...mutation, idempotentHint: true },
+    },
+    (input, extra) =>
+      runTool(() =>
+        bulkCreateAgentTasks(prisma, input, {
+          threadId: requestThreadId(extra),
+        }),
+      ),
+  );
+  server.registerTool(
+    "actionables.bulk_prepare_tasks",
+    {
+      title: "Preview or prepare Actionables in bulk",
+      description:
+        "Preview or prepare 1 through 25 explicit Inbox tasks created by the current Codex thread in one ordered call. The whole request must first satisfy the published input schema. mode preview validates current scope, hierarchy, lifecycle, version, claim availability, content, and idempotency without writing. mode apply handles each schema-valid item atomically: it claims for the current Codex thread, enters Researching when needed, saves the supplied preparation, reaches Ready only when every prerequisite passes, and releases the claim. A failed item is fully rolled back while valid siblings may succeed. Use the normal list, claim, and reconciliation workflow for pre-existing tasks. Read every compact per-item outcome; exact retries replay without duplicate writes. Claim credentials are never accepted or returned.",
+      inputSchema: bulkPrepareAgentTasksRequestSchema,
+      outputSchema: bulkPrepareAgentTasksResponseSchema,
+      annotations: {
+        ...mutation,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    (input, extra) =>
+      runTool(() =>
+        bulkPrepareAgentTasks(prisma, input, {
+          threadId: requestThreadId(extra),
+        }),
+      ),
   );
   server.registerTool(
     "actionables.list_tasks",

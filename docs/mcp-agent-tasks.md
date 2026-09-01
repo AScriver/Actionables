@@ -61,7 +61,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse the UUID only for an exact retry.
+2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse a UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
@@ -105,6 +105,32 @@ instead, the server verifies the local Git path, resolves its repository and
 worktree roots, reuses matching active scope records, and atomically creates
 any missing project, repository, or worktree with the task. The response
 reports which scope records were created. Creation does not claim the new task.
+
+`actionables.bulk_create_tasks` and `actionables.bulk_prepare_tasks` accept
+only an explicit ordered list of 1–25 items: they never discover, select, or
+modify unlisted work. Call each first with `mode: "preview"`; preview validates
+and returns ordered per-item results without writing. Correct every reported
+item failure before applying the list with `mode: "apply"`. Keep an item's UUID
+when correcting the same intended task; use a new UUID only for a different
+task. The whole request must satisfy the published input schema before per-item
+validation begins; malformed items reject the request without applying siblings.
+Application processes items in order, is non-atomic across the list, and is
+atomic per item: an item failure does not roll back earlier successful items.
+The compact result identifies every item as valid during preview or as created,
+prepared, replayed, or failed during apply. Each item has its own caller-stable
+UUID; an exact replay returns that item's prior result, while changing an
+applied item using its UUID conflicts.
+
+Bulk preparation is limited to explicit, unclaimed top-level or direct tasks
+created by the current Codex thread within the authorized `workItemId`. Use the
+normal list, claim, and reconciliation workflow for pre-existing tasks. Each
+bulk item supplies that `workItemId` and its current `version`; it neither
+accepts nor returns a claim token. It can only take an Inbox task through
+`Researching` and `Ready` after its supplied content satisfies readiness, then
+releases it for normal available-work discovery. It cannot bypass scope,
+hierarchy, version, or lifecycle checks, or prepare a task outside its
+named work item. It cannot leave or expose a claim, or claim unlisted work. A
+139-item intake therefore uses six chunks per phase.
 
 `actionables.dismiss_task` resolves the current version internally and reuses
 the same lifecycle, reason, optimistic-concurrency, status-history, and activity
@@ -219,6 +245,8 @@ write gate requires orchestration support and is outside this endpoint.
 The endpoint exposes exactly these tools:
 
 - `actionables.create_task`
+- `actionables.bulk_create_tasks`
+- `actionables.bulk_prepare_tasks`
 - `actionables.list_tasks`
 - `actionables.get_task`
 - `actionables.get_task_detail`
@@ -236,10 +264,11 @@ List results are limited to 100 active tasks, report `hasMore` when another matc
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.
-Annotations mark reads as read-only, exact-retry-safe creation as idempotent,
-content replacement and lifecycle transitions (including dismissal) as
-potentially destructive, and claim release as a non-destructive coordination
-mutation.
+Mode-based bulk tools carry conservative mutation annotations even though their
+`preview` mode writes nothing. Annotations otherwise mark reads as read-only,
+exact-retry-safe creation and preparation as idempotent, content replacement and
+lifecycle transitions (including dismissal) as potentially destructive, and
+claim release as a non-destructive coordination mutation.
 
 ## Security boundary
 

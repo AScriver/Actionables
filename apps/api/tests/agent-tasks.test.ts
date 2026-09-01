@@ -3,9 +3,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { open, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  bulkCreateAgentTasksResponseSchema,
+  bulkPrepareAgentTasksResponseSchema,
+} from "@actionables/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   AgentTaskClaimError,
+  bulkCreateAgentTasks,
+  bulkPrepareAgentTasks,
   claimAgentTask,
   claimAgentTaskWithProjection,
   dismissAgentTask,
@@ -55,7 +61,11 @@ async function createTask(
     validation?: string[];
   } = {},
 ) {
-  const ordinal = nextOrdinal++;
+  const highest = await prisma.actionable.aggregate({
+    _max: { sourceOrdinal: true },
+  });
+  const ordinal = Math.max(nextOrdinal, (highest._max.sourceOrdinal ?? 0) + 1);
+  nextOrdinal = ordinal + 1;
   return prisma.actionable.create({
     data: {
       externalKey: `agent-task-${ordinal}`,
@@ -2207,5 +2217,327 @@ describe("agent task claims", () => {
           activity.type === "agent-claimed",
       ),
     ).toBe(true);
+  });
+
+  it("previews, partially creates, and exactly replays bounded batches", async () => {
+    const caller = { threadId: `bulk-create-${randomUUID()}` };
+    const firstKey = randomUUID();
+    const invalidKey = randomUUID();
+    const input = {
+      mode: "preview" as const,
+      items: [
+        {
+          idempotencyKey: firstKey,
+          ...scope,
+          title: "Bulk-created task",
+          priority: "High" as const,
+          description: "Create this valid task.",
+          effort: "S" as const,
+          plannedValidation: ["Verify bulk creation."],
+          tags: ["bulk"],
+        },
+        {
+          idempotencyKey: invalidKey,
+          projectId: "missing-project",
+          repositoryId: "missing-repository",
+          worktreeId: "missing-worktree",
+          title: "Invalid bulk-created task",
+          priority: "Medium" as const,
+          description: "This invalid task must not be created.",
+          effort: "M" as const,
+          plannedValidation: [],
+          tags: ["bulk"],
+        },
+      ],
+    };
+    const before = await prisma.actionable.count();
+
+    const preview = await bulkCreateAgentTasks(prisma, input, caller);
+    expect(preview).toMatchObject({
+      mode: "preview",
+      summary: { requested: 2, succeeded: 1, replayed: 0, failed: 1 },
+      items: [
+        { index: 0, outcome: "valid" },
+        {
+          index: 1,
+          outcome: "failed",
+          error: { code: "INVALID_SCOPE" },
+        },
+      ],
+    });
+    expect(await prisma.actionable.count()).toBe(before);
+
+    const applied = await bulkCreateAgentTasks(
+      prisma,
+      { ...input, mode: "apply" },
+      caller,
+    );
+    expect(applied.summary).toEqual({
+      requested: 2,
+      succeeded: 1,
+      replayed: 0,
+      failed: 1,
+    });
+    expect(applied.items).toEqual([
+      expect.objectContaining({ index: 0, outcome: "created" }),
+      expect.objectContaining({
+        index: 1,
+        outcome: "failed",
+        error: expect.objectContaining({ code: "INVALID_SCOPE" }),
+      }),
+    ]);
+    expect(await prisma.actionable.count()).toBe(before + 1);
+
+    const replayed = await bulkCreateAgentTasks(
+      prisma,
+      { ...input, mode: "apply" },
+      caller,
+    );
+    expect(replayed.summary).toEqual({
+      requested: 2,
+      succeeded: 1,
+      replayed: 1,
+      failed: 1,
+    });
+    expect(replayed.items[0]).toMatchObject({
+      outcome: "replayed",
+      id: (applied.items[0] as { id: number }).id,
+    });
+    expect(await prisma.actionable.count()).toBe(before + 1);
+  });
+
+  it("rejects impossible or out-of-order bulk receipts", () => {
+    const summary = { requested: 1, succeeded: 1, replayed: 0, failed: 0 };
+    expect(
+      bulkCreateAgentTasksResponseSchema.safeParse({
+        mode: "apply",
+        summary,
+        items: [
+          {
+            index: 0,
+            outcome: "prepared",
+            id: 1,
+            version: 1,
+            status: "Ready",
+            claimReleased: true,
+            changedFields: ["status"],
+            counts: [],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      bulkPrepareAgentTasksResponseSchema.safeParse({
+        mode: "apply",
+        summary,
+        items: [
+          {
+            index: 1,
+            outcome: "prepared",
+            id: 1,
+            version: 1,
+            status: "Ready",
+            claimReleased: true,
+            changedFields: ["status"],
+            counts: [],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("atomically prepares valid Inbox items and leaves invalid siblings untouched", async () => {
+    const caller = { threadId: `bulk-prepare-${randomUUID()}` };
+    const valid = await createTask({
+      status: "Inbox",
+      creatorThreadId: caller.threadId,
+      description: "Prepare this task.",
+    });
+    const invalid = await createTask({
+      status: "Inbox",
+      creatorThreadId: caller.threadId,
+      description: "This task is missing its finding.",
+    });
+    const secondValid = await createTask({
+      status: "Inbox",
+      creatorThreadId: caller.threadId,
+      description: "Prepare this second task.",
+    });
+    const items = [
+      {
+        idempotencyKey: randomUUID(),
+        id: valid.sourceOrdinal,
+        workItemId: valid.sourceOrdinal,
+        version: valid.version,
+        finding: "The first task is independently researched.",
+        appendResearch: ["Inspected the first task's implementation path."],
+        appendPlannedValidation: ["Run the focused first-task check."],
+        addUserSources: [{ type: "Text" as const, locator: "bulk:first" }],
+      },
+      {
+        idempotencyKey: randomUUID(),
+        id: invalid.sourceOrdinal,
+        workItemId: invalid.sourceOrdinal,
+        version: invalid.version,
+        appendResearch: ["Inspected the invalid task."],
+        appendPlannedValidation: ["This must not persist."],
+      },
+      {
+        idempotencyKey: randomUUID(),
+        id: secondValid.sourceOrdinal,
+        workItemId: secondValid.sourceOrdinal,
+        version: secondValid.version,
+        finding: "The second task is independently researched.",
+        appendResearch: ["Inspected the second task's implementation path."],
+        appendPlannedValidation: ["Run the focused second-task check."],
+      },
+    ];
+
+    const preview = await bulkPrepareAgentTasks(
+      prisma,
+      { mode: "preview", items },
+      caller,
+    );
+    expect(preview.summary).toEqual({
+      requested: 3,
+      succeeded: 2,
+      replayed: 0,
+      failed: 1,
+    });
+    expect(preview.items.map((item) => item.outcome)).toEqual([
+      "valid",
+      "failed",
+      "valid",
+    ]);
+    expect(
+      (await prisma.actionable.findUniqueOrThrow({ where: { id: valid.id } }))
+        .version,
+    ).toBe(valid.version);
+
+    const applied = await bulkPrepareAgentTasks(
+      prisma,
+      { mode: "apply", items },
+      caller,
+    );
+    expect(applied.summary).toEqual({
+      requested: 3,
+      succeeded: 2,
+      replayed: 0,
+      failed: 1,
+    });
+    expect(applied.items.map((item) => item.outcome)).toEqual([
+      "prepared",
+      "failed",
+      "prepared",
+    ]);
+    expect(applied.items[1]).toMatchObject({
+      error: {
+        code: "READY_REQUIREMENTS_NOT_MET",
+        errors: { finding: expect.any(Array) },
+      },
+    });
+
+    const storedValid = await prisma.actionable.findUniqueOrThrow({
+      where: { id: valid.id },
+      include: { agentTaskClaim: true, activityEvents: true },
+    });
+    expect(storedValid).toMatchObject({
+      status: "Ready",
+      version: valid.version + 5,
+      finding: items[0]!.finding,
+      researchJson: items[0]!.appendResearch,
+      validationJson: items[0]!.appendPlannedValidation,
+      agentTaskClaim: null,
+    });
+    expect(storedValid.activityEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "agent-claimed",
+        "agent-updated",
+        "status-transition",
+        "agent-released",
+        "agent-bulk-prepared",
+      ]),
+    );
+    expect(JSON.stringify(applied)).not.toContain("claimToken");
+    expect(JSON.stringify(storedValid.activityEvents)).not.toContain(
+      "claimToken",
+    );
+
+    const storedInvalid = await prisma.actionable.findUniqueOrThrow({
+      where: { id: invalid.id },
+      include: { agentTaskClaim: true, activityEvents: true },
+    });
+    expect(storedInvalid).toMatchObject({
+      status: "Inbox",
+      version: invalid.version,
+      finding: "",
+      researchJson: [],
+      validationJson: [],
+      agentTaskClaim: null,
+      activityEvents: [],
+    });
+
+    const eventCount = await prisma.activityEvent.count({
+      where: { actionableId: valid.id },
+    });
+    const replayed = await bulkPrepareAgentTasks(
+      prisma,
+      { mode: "apply", items },
+      caller,
+    );
+    expect(replayed.summary).toEqual({
+      requested: 3,
+      succeeded: 2,
+      replayed: 2,
+      failed: 1,
+    });
+    expect(replayed.items.map((item) => item.outcome)).toEqual([
+      "replayed",
+      "failed",
+      "replayed",
+    ]);
+    expect(
+      await prisma.activityEvent.count({
+        where: { actionableId: valid.id },
+      }),
+    ).toBe(eventCount);
+  });
+
+  it("rejects bulk preparation for a task created by another thread", async () => {
+    const task = await createTask({
+      status: "Inbox",
+      creatorThreadId: `other-thread-${randomUUID()}`,
+      description: "Use the claimed workflow for this existing task.",
+    });
+
+    const result = await bulkPrepareAgentTasks(
+      prisma,
+      {
+        mode: "preview",
+        items: [
+          {
+            idempotencyKey: randomUUID(),
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+            finding: "This must not bypass task-detail reconciliation.",
+            appendResearch: ["Attempted bounded preparation."],
+            appendPlannedValidation: ["Verify no lifecycle change."],
+          },
+        ],
+      },
+      { threadId: `requesting-thread-${randomUUID()}` },
+    );
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        index: 0,
+        outcome: "failed",
+        error: expect.objectContaining({ code: "CREATOR_THREAD_MISMATCH" }),
+      }),
+    ]);
+    expect(
+      await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }),
+    ).toMatchObject({ status: "Inbox", version: task.version });
   });
 });
