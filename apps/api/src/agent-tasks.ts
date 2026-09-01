@@ -4,6 +4,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { promisify } from "node:util";
 import {
+  agentTaskSummaryChildIdsLimit,
   agentTaskSummarySchema,
   claimAgentTaskRequestSchema,
   claimAgentTaskResponseSchema,
@@ -67,8 +68,15 @@ const agentTaskInclude = {
   repository: true,
   worktree: true,
   agentTaskClaim: true,
+  _count: {
+    select: {
+      hierarchyAsParent: { where: { detachedAt: null } },
+    },
+  },
   hierarchyAsParent: {
     where: { detachedAt: null },
+    orderBy: { child: { sourceOrdinal: "asc" } },
+    take: agentTaskSummaryChildIdsLimit,
     include: {
       child: {
         select: { sourceOrdinal: true },
@@ -245,6 +253,7 @@ function toAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     childIds: row.hierarchyAsParent.map(
       (relationship) => relationship.child.sourceOrdinal,
     ),
+    childCount: row._count.hierarchyAsParent,
     title: row.title,
     findingExcerpt: truncateExcerpt(row.finding, 300),
     tags: persistedStringArray(row.tagsJson).slice(0, 10),
@@ -1561,18 +1570,37 @@ export function claimAgentTask(
   );
 }
 
-async function claimAgentTaskUnlocked(
+export function claimAgentTaskWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: ClaimAgentTaskRequest,
+  projectResponse: (
+    task: ActionableDetail,
+    claim: ClaimAgentTaskResponse["claim"],
+  ) => T,
+  now = new Date(),
+): Promise<T> {
+  return withClaimLock(String(sourceOrdinal), () =>
+    claimAgentTaskUnlocked(prisma, sourceOrdinal, input, now, projectResponse),
+  ) as Promise<T>;
+}
+
+async function claimAgentTaskUnlocked<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: ClaimAgentTaskRequest,
   now: Date,
-): Promise<ClaimAgentTaskResponse> {
+  projectResponse?: (
+    task: ActionableDetail,
+    claim: ClaimAgentTaskResponse["claim"],
+  ) => T,
+): Promise<ClaimAgentTaskResponse | T> {
   const request = parseInput(claimAgentTaskRequestSchema, input);
   const claimToken = randomBytes(32).toString("base64url");
   const claimTokenHash = hashToken(claimToken);
 
   try {
-    const task = await prisma.$transaction(async (tx) => {
+    const response = await prisma.$transaction(async (tx) => {
       const row = await findTask(tx, sourceOrdinal);
       requireClaimable(row);
       const workItem = await requireWorkItem(tx, request.workItemId);
@@ -1629,21 +1657,28 @@ async function claimAgentTaskUnlocked(
           occurredAt: now,
         },
       });
-      return findTask(tx, sourceOrdinal);
+      const task = await findTask(tx, sourceOrdinal);
+      if (!task?.agentTaskClaim) {
+        throw new Error("Claim transaction did not return the created claim.");
+      }
+      const response = claimAgentTaskResponseSchema.parse({
+        task: toAgentTaskSummary(task),
+        claim: {
+          agentId: request.agentId,
+          claimToken,
+          claimedAt: task.agentTaskClaim.claimedAt.toISOString(),
+          renewedAt: task.agentTaskClaim.renewedAt.toISOString(),
+          leaseExpiresAt: task.agentTaskClaim.leaseExpiresAt.toISOString(),
+        },
+      });
+      if (!projectResponse) return response;
+      const detail = await getActionable(tx, sourceOrdinal);
+      if (!detail) {
+        throw new Error("Claim transaction did not return the claimed task.");
+      }
+      return projectResponse(detail, response.claim);
     });
-    if (!task?.agentTaskClaim) {
-      throw new Error("Claim transaction did not return the created claim.");
-    }
-    return claimAgentTaskResponseSchema.parse({
-      task: toAgentTaskSummary(task),
-      claim: {
-        agentId: request.agentId,
-        claimToken,
-        claimedAt: task.agentTaskClaim.claimedAt.toISOString(),
-        renewedAt: task.agentTaskClaim.renewedAt.toISOString(),
-        leaseExpiresAt: task.agentTaskClaim.leaseExpiresAt.toISOString(),
-      },
-    });
+    return response;
   } catch (error) {
     if (error instanceof AgentTaskClaimError) throw error;
     const current = await findTask(prisma, sourceOrdinal);
@@ -1673,6 +1708,41 @@ export async function recoverAgentTaskClaim(
   caller: AgentTaskCaller,
   now = new Date(),
 ): Promise<RecoverAgentTaskClaimResponse> {
+  return recoverAgentTaskClaimResult(prisma, sourceOrdinal, input, caller, now);
+}
+
+export async function recoverAgentTaskClaimWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RecoverAgentTaskClaimRequest,
+  caller: AgentTaskCaller,
+  projectResponse: (
+    task: ActionableDetail,
+    claim: RecoverAgentTaskClaimResponse["claim"],
+  ) => T,
+  now = new Date(),
+): Promise<T> {
+  return recoverAgentTaskClaimResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    caller,
+    now,
+    projectResponse,
+  ) as Promise<T>;
+}
+
+async function recoverAgentTaskClaimResult<T = never>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RecoverAgentTaskClaimRequest,
+  caller: AgentTaskCaller,
+  now: Date,
+  projectResponse?: (
+    task: ActionableDetail,
+    claim: RecoverAgentTaskClaimResponse["claim"],
+  ) => T,
+): Promise<RecoverAgentTaskClaimResponse | T> {
   const request = parseInput(recoverAgentTaskClaimRequestSchema, input);
   const agentId = `codex:${caller.threadId}`;
   const claimToken = randomBytes(32).toString("base64url");
@@ -1750,9 +1820,33 @@ export async function recoverAgentTaskClaim(
           occurredAt: now,
         },
       });
+      const task = await findTask(tx, sourceOrdinal);
+      if (!task?.agentTaskClaim) {
+        throw new Error("Claim recovery did not return the active claim.");
+      }
+      const response = recoverAgentTaskClaimResponseSchema.parse({
+        task: toAgentTaskSummary(task),
+        claim: {
+          agentId,
+          claimToken,
+          claimedAt: task.agentTaskClaim.claimedAt.toISOString(),
+          renewedAt: task.agentTaskClaim.renewedAt.toISOString(),
+          leaseExpiresAt: task.agentTaskClaim.leaseExpiresAt.toISOString(),
+        },
+      });
+      if (projectResponse) {
+        const detail = await getActionable(tx, sourceOrdinal);
+        if (!detail) {
+          throw new Error("Claim recovery did not return the claimed task.");
+        }
+        return {
+          expired: false as const,
+          response: projectResponse(detail, response.claim),
+        };
+      }
       return {
         expired: false as const,
-        task: await findTask(tx, sourceOrdinal),
+        response,
       };
     }),
   );
@@ -1763,19 +1857,7 @@ export async function recoverAgentTaskClaim(
       "The claim lease expired and must be reacquired.",
     );
   }
-  if (!result.task?.agentTaskClaim) {
-    throw new Error("Claim recovery did not return the active claim.");
-  }
-  return recoverAgentTaskClaimResponseSchema.parse({
-    task: toAgentTaskSummary(result.task),
-    claim: {
-      agentId,
-      claimToken,
-      claimedAt: result.task.agentTaskClaim.claimedAt.toISOString(),
-      renewedAt: result.task.agentTaskClaim.renewedAt.toISOString(),
-      leaseExpiresAt: result.task.agentTaskClaim.leaseExpiresAt.toISOString(),
-    },
-  });
+  return result.response;
 }
 
 export async function renewAgentTaskClaim(
@@ -1806,7 +1888,14 @@ export async function renewAgentTaskClaim(
       where: { actionableId: row!.id },
       data: { leaseExpiresAt: leaseExpiry(now, leaseMinutes) },
     });
-    return { expired: false as const, task: await findTask(tx, sourceOrdinal) };
+    const task = await findTask(tx, sourceOrdinal);
+    if (!task) throw new Error("Renewed agent task could not be read.");
+    return {
+      expired: false as const,
+      response: renewAgentTaskClaimResponseSchema.parse({
+        task: toAgentTaskSummary(task),
+      }),
+    };
   });
   if (result.expired) {
     throw new AgentTaskClaimError(
@@ -1814,9 +1903,7 @@ export async function renewAgentTaskClaim(
       "The claim lease expired and must be reacquired.",
     );
   }
-  return renewAgentTaskClaimResponseSchema.parse({
-    task: toAgentTaskSummary(result.task!),
-  });
+  return result.response;
 }
 
 export async function releaseAgentTaskClaim(
@@ -1854,7 +1941,14 @@ export async function releaseAgentTaskClaim(
         occurredAt: now,
       },
     });
-    return { expired: false as const, task: await findTask(tx, sourceOrdinal) };
+    const task = await findTask(tx, sourceOrdinal);
+    if (!task) throw new Error("Released agent task could not be read.");
+    return {
+      expired: false as const,
+      response: releaseAgentTaskClaimResponseSchema.parse({
+        task: toAgentTaskSummary(task),
+      }),
+    };
   });
   if (result.expired) {
     throw new AgentTaskClaimError(
@@ -1862,9 +1956,7 @@ export async function releaseAgentTaskClaim(
       "The claim lease expired and must be reacquired.",
     );
   }
-  return releaseAgentTaskClaimResponseSchema.parse({
-    task: toAgentTaskSummary(result.task!),
-  });
+  return result.response;
 }
 
 export async function forceReleaseAgentTaskClaim(

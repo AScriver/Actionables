@@ -7,11 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   AgentTaskClaimError,
   claimAgentTask,
+  claimAgentTaskWithProjection,
   dismissAgentTask,
   forceReleaseAgentTaskClaim,
   handoffClaimedAgentTask,
   listAgentTasks,
   recoverAgentTaskClaim,
+  recoverAgentTaskClaimWithProjection,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
   renewAgentTaskClaim,
@@ -291,6 +293,182 @@ describe("agent task claims", () => {
       limit: 100,
     });
     expect(mine.items.map((item) => item.id)).toEqual([child.sourceOrdinal]);
+  });
+
+  it("bounds child summaries across the claim lifecycle", async () => {
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df99";
+    const root = await createTask({ title: "Large work item" });
+    const children = await Promise.all(
+      Array.from({ length: 101 }, (_, index) =>
+        createTask({ title: `Large work item child ${index + 1}` }),
+      ),
+    );
+    await prisma.hierarchyRelationship.createMany({
+      data: children.map((child) => ({
+        parentId: root.id,
+        childId: child.id,
+        provenance: "test",
+      })),
+    });
+    const expectedChildIds = children
+      .map((child) => child.sourceOrdinal)
+      .sort((left, right) => left - right)
+      .slice(0, 100);
+    const expectBoundedChildren = (summary: {
+      childIds: number[];
+      childCount: number;
+    }) => {
+      expect(summary.childIds).toEqual(expectedChildIds);
+      expect(summary.childCount).toBe(101);
+    };
+
+    const claimed = await claimAgentTask(
+      prisma,
+      root.sourceOrdinal,
+      {
+        agentId: `codex:${threadId}`,
+        workItemId: root.sourceOrdinal,
+        version: root.version,
+        leaseMinutes: 30,
+      },
+      new Date("2026-07-25T12:00:00.000Z"),
+    );
+    expectBoundedChildren(claimed.task);
+
+    const mine = await listAgentTasks(
+      prisma,
+      {
+        agentId: `codex:${threadId}`,
+        view: "mine",
+        workItemId: root.sourceOrdinal,
+        limit: 100,
+      },
+      new Date("2026-07-25T12:00:30.000Z"),
+    );
+    expect(mine.items).toHaveLength(1);
+    expectBoundedChildren(mine.items[0]!);
+
+    const recovered = await recoverAgentTaskClaim(
+      prisma,
+      root.sourceOrdinal,
+      { version: claimed.task.version, leaseMinutes: 30 },
+      { threadId },
+      new Date("2026-07-25T12:01:00.000Z"),
+    );
+    expectBoundedChildren(recovered.task);
+
+    const renewed = await renewAgentTaskClaim(
+      prisma,
+      root.sourceOrdinal,
+      { claimToken: recovered.claim.claimToken, leaseMinutes: 30 },
+      new Date("2026-07-25T12:02:00.000Z"),
+    );
+    expectBoundedChildren(renewed.task);
+
+    const released = await releaseAgentTaskClaim(
+      prisma,
+      root.sourceOrdinal,
+      { claimToken: recovered.claim.claimToken },
+      new Date("2026-07-25T12:03:00.000Z"),
+    );
+    expectBoundedChildren(released.task);
+    expect(released.task).toMatchObject({
+      claim: null,
+      version: recovered.task.version + 1,
+    });
+    expect(
+      await prisma.agentTaskClaim.findUnique({
+        where: { actionableId: root.id },
+      }),
+    ).toBeNull();
+    expect(
+      await prisma.activityEvent.count({
+        where: { actionableId: root.id, type: "agent-released" },
+      }),
+    ).toBe(1);
+  });
+
+  it("rolls back claim credential changes when response projection fails", async () => {
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df98";
+    const task = await createTask({ title: "Projection rollback" });
+    const projectionError = new Error("Simulated response projection failure");
+
+    await expect(
+      claimAgentTaskWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        {
+          agentId: `codex:${threadId}`,
+          workItemId: task.sourceOrdinal,
+          version: task.version,
+        },
+        () => {
+          throw projectionError;
+        },
+        new Date("2026-07-25T12:10:00.000Z"),
+      ),
+    ).rejects.toBe(projectionError);
+    expect(
+      await prisma.agentTaskClaim.findUnique({
+        where: { actionableId: task.id },
+      }),
+    ).toBeNull();
+    expect(
+      await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }),
+    ).toMatchObject({ version: task.version });
+    expect(
+      await prisma.activityEvent.count({
+        where: { actionableId: task.id, type: "agent-claimed" },
+      }),
+    ).toBe(0);
+
+    const claimed = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: `codex:${threadId}`,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+      },
+      new Date("2026-07-25T12:11:00.000Z"),
+    );
+    const persistedClaim = await prisma.agentTaskClaim.findUniqueOrThrow({
+      where: { actionableId: task.id },
+    });
+
+    await expect(
+      recoverAgentTaskClaimWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { version: claimed.task.version },
+        { threadId },
+        () => {
+          throw projectionError;
+        },
+        new Date("2026-07-25T12:12:00.000Z"),
+      ),
+    ).rejects.toBe(projectionError);
+    expect(
+      await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }),
+    ).toMatchObject({ version: claimed.task.version });
+    expect(
+      await prisma.agentTaskClaim.findUniqueOrThrow({
+        where: { actionableId: task.id },
+      }),
+    ).toMatchObject({
+      claimTokenHash: persistedClaim.claimTokenHash,
+      leaseExpiresAt: persistedClaim.leaseExpiresAt,
+      renewedAt: persistedClaim.renewedAt,
+    });
+    expect(
+      await prisma.activityEvent.count({
+        where: {
+          actionableId: task.id,
+          type: "agent-updated",
+          summary: { contains: "Recovered claim credential" },
+        },
+      }),
+    ).toBe(0);
   });
 
   it("stores only a token hash, increments version, and records a bounded claim event", async () => {

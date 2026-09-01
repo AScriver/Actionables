@@ -26,13 +26,13 @@ import type { AppPrismaClient } from "./database.js";
 import {
   AgentTaskClaimError,
   type AgentTaskScopeProvisioning,
-  claimAgentTask,
+  claimAgentTaskWithProjection,
   createAgentTask,
   dismissAgentTask,
   getClaimedAgentTask,
   handoffClaimedAgentTask,
   listAgentTasks,
-  recoverAgentTaskClaim,
+  recoverAgentTaskClaimWithProjection,
   recordClaimedAgentTaskValidation,
   releaseAgentTaskClaim,
   renewAgentTaskClaim,
@@ -875,18 +875,16 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     ({ id, ...input }, extra) =>
       runTool(async () => {
         const threadId = requestThreadId(extra);
-        const claimed = await claimAgentTask(prisma, id, {
-          ...input,
-          agentId: threadAgentId(threadId),
-        });
-        return {
-          task: compactTask(
-            await getClaimedAgentTask(prisma, id, {
-              claimToken: claimed.claim.claimToken,
-            }),
-          ),
-          claim: claimed.claim,
-        };
+        return claimAgentTaskWithProjection(
+          prisma,
+          id,
+          {
+            ...input,
+            agentId: threadAgentId(threadId),
+          },
+          (task, claim) =>
+            claimTaskOutputSchema.parse({ task: compactTask(task), claim }),
+        );
       }),
   );
   server.registerTool(
@@ -913,17 +911,14 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     },
     ({ id, ...input }, extra) =>
       runTool(async () => {
-        const recovered = await recoverAgentTaskClaim(prisma, id, input, {
-          threadId: requestThreadId(extra),
-        });
-        return {
-          task: compactTask(
-            await getClaimedAgentTask(prisma, id, {
-              claimToken: recovered.claim.claimToken,
-            }),
-          ),
-          claim: recovered.claim,
-        };
+        return recoverAgentTaskClaimWithProjection(
+          prisma,
+          id,
+          input,
+          { threadId: requestThreadId(extra) },
+          (task, claim) =>
+            claimTaskOutputSchema.parse({ task: compactTask(task), claim }),
+        );
       }),
   );
   server.registerTool(

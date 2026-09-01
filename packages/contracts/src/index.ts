@@ -647,13 +647,18 @@ export const agentTaskListViewSchema = z
   .enum(["available", "mine"])
   .describe("Use mine for owned claims or available within one work item.");
 
+export const agentTaskSummaryChildIdsLimit = 100;
+
 export const agentTaskSummarySchema = z
   .object({
     id: z.number().int().positive(),
     recordId: z.string().min(1),
     workItemId: z.number().int().positive(),
     parentId: z.number().int().positive().nullable(),
-    childIds: z.array(z.number().int().positive()).max(100),
+    childIds: z
+      .array(z.number().int().positive())
+      .max(agentTaskSummaryChildIdsLimit),
+    childCount: z.number().int().nonnegative(),
     title: z.string().min(1).max(240),
     findingExcerpt: z.string().max(300),
     tags: z.array(z.string().min(1).max(60)).max(10),

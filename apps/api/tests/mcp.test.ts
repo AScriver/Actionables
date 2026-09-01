@@ -1169,6 +1169,92 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("returns bounded public claim and recovery responses for a large work item", async () => {
+    const root = await createTask({
+      status: "Ready",
+      title: "Large MCP work item",
+    });
+    const children = await Promise.all(
+      Array.from({ length: 101 }, (_, index) =>
+        createTask({ title: `Large MCP child ${index + 1}` }),
+      ),
+    );
+    await prisma.hierarchyRelationship.createMany({
+      data: children.map((child) => ({
+        parentId: root.id,
+        childId: child.id,
+        provenance: "test",
+      })),
+    });
+
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: {
+          version: number;
+          subtasks: Array<{ id: number }>;
+          truncation: { omitted: { subtasks: number } };
+        };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: root.sourceOrdinal,
+            workItemId: root.sourceOrdinal,
+            version: root.version,
+          },
+        }),
+      );
+      expect(claimed.task.subtasks).toHaveLength(5);
+      expect(claimed.task.truncation.omitted.subtasks).toBe(96);
+
+      const recovered = output<{
+        task: {
+          version: number;
+          subtasks: Array<{ id: number }>;
+          truncation: { omitted: { subtasks: number } };
+        };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.recover_task_claim",
+          arguments: {
+            id: root.sourceOrdinal,
+            version: claimed.task.version,
+          },
+        }),
+      );
+      expect(recovered.task).toMatchObject({
+        version: claimed.task.version + 1,
+        truncation: { omitted: { subtasks: 96 } },
+      });
+      expect(recovered.task.subtasks).toHaveLength(5);
+      expect(recovered.claim.claimToken).not.toBe(claimed.claim.claimToken);
+
+      const released = output<{ task: { claim: null; version: number } }>(
+        await client.callTool({
+          name: "actionables.release_task",
+          arguments: {
+            id: root.sourceOrdinal,
+            claimToken: recovered.claim.claimToken,
+          },
+        }),
+      );
+      expect(released.task).toMatchObject({
+        claim: null,
+        version: recovered.task.version + 1,
+      });
+      expect(
+        await prisma.activityEvent.count({
+          where: { actionableId: root.id, type: "agent-released" },
+        }),
+      ).toBe(1);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("runs list, claim-with-detail, update, transition, validation, and release", async () => {
     const task = await createTask({
       status: "Inbox",
