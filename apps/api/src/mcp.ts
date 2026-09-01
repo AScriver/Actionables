@@ -11,12 +11,12 @@ import {
   recoverAgentTaskClaimRequestSchema,
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
-  releaseAgentTaskClaimResponseSchema,
   renewAgentTaskClaimRequestSchema,
-  renewAgentTaskClaimResponseSchema,
+  statusSchema,
   transitionClaimedAgentTaskRequestSchema,
   updateClaimedAgentTaskRequestSchema,
   type ActionableDetail,
+  type AgentTaskSummary,
 } from "@actionables/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -29,18 +29,22 @@ import {
   type AgentTaskScopeProvisioning,
   claimAgentTaskWithProjection,
   createAgentTask,
-  dismissAgentTask,
+  dismissAgentTaskWithProjection,
   getClaimedAgentTask,
   getScopedTerminalAgentTask,
-  handoffClaimedAgentTask,
+  handoffClaimedAgentTaskWithProjection,
   listAgentTasks,
   recoverAgentTaskClaimWithProjection,
-  recordClaimedAgentTaskValidation,
-  releaseAgentTaskClaim,
-  renewAgentTaskClaim,
-  transitionClaimedAgentTask,
-  updateClaimedAgentTaskWithReceipt,
+  recordClaimedAgentTaskValidationWithProjection,
+  releaseAgentTaskClaimWithProjection,
+  renewAgentTaskClaimWithProjection,
+  transitionClaimedAgentTaskWithProjection,
+  updateClaimedAgentTaskWithProjection,
 } from "./agent-tasks.js";
+import {
+  parsePersistedStatus,
+  permittedTransitions,
+} from "./actionable-transitions.js";
 import { DomainValidationError, VersionConflictError } from "./repository.js";
 
 const idSchema = z
@@ -337,41 +341,80 @@ const compactTaskSchema = z
   })
   .strict();
 
-const researchUpdateReceiptSchema = z
+const mutationChangedFieldSchema = z.enum([
+  "title",
+  "priority",
+  "effort",
+  "evidenceState",
+  "finding",
+  "description",
+  "resolution",
+  "research",
+  "plannedValidation",
+  "tags",
+  "userSources",
+  "files",
+  "status",
+  "validationRecords",
+]);
+const reconciliationFieldSchema = z.enum([
+  "finding",
+  "description",
+  "research",
+  "plannedValidation",
+  "files",
+  "userSources",
+]);
+const mutationCountFieldSchema = z.enum([
+  "research",
+  "plannedValidation",
+  "userSources",
+  "files",
+  "validationRecords",
+]);
+const mutationReceiptSchema = z
   .object({
     id: z.number().int().positive(),
     version: z.number().int().positive(),
-    status: z.string().max(40),
-    appended: z.number().int().nonnegative(),
-    duplicatesIgnored: z.number().int().nonnegative(),
+    status: statusSchema,
+    changedFields: z.array(mutationChangedFieldSchema).max(14),
+    claimReleased: z.boolean(),
+    reconciliationFields: z.array(reconciliationFieldSchema).max(6),
     readiness: actionableReadinessSchema,
-    permittedTransitions: z.array(z.string().max(40)).max(20),
+    permittedTransitions: z.array(statusSchema).max(20),
+    counts: z
+      .array(
+        z
+          .object({
+            field: mutationCountFieldSchema,
+            persisted: z.number().int().nonnegative(),
+            duplicatesIgnored: z.number().int().nonnegative(),
+          })
+          .strict(),
+      )
+      .max(5),
     lifecycleGuidance: z.string().min(1).max(600).optional(),
+    claimLease: z
+      .object({
+        renewedAt: z.string().datetime(),
+        leaseExpiresAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
+    validation: z
+      .object({
+        id: z.string().min(1),
+        qualifiesForCompletion: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
-
-const updateTaskOutputSchema = compactTaskSchema.partial().extend({
-  id: compactTaskSchema.shape.id,
-  version: compactTaskSchema.shape.version,
-  status: compactTaskSchema.shape.status,
-  appended: researchUpdateReceiptSchema.shape.appended.optional(),
-  duplicatesIgnored:
-    researchUpdateReceiptSchema.shape.duplicatesIgnored.optional(),
-  lifecycleGuidance:
-    researchUpdateReceiptSchema.shape.lifecycleGuidance.optional(),
-});
 
 const claimTaskOutputSchema = z
   .object({
     task: compactTaskSchema,
     claim: agentTaskClaimCredentialSchema,
-  })
-  .strict();
-
-const handoffTaskOutputSchema = z
-  .object({
-    task: compactTaskSchema,
-    claimReleased: z.literal(true),
   })
   .strict();
 
@@ -617,9 +660,84 @@ function compactTask(
   });
 }
 
+type MutationReceiptTask = Pick<
+  ActionableDetail | AgentTaskSummary,
+  "id" | "version" | "status" | "readiness"
+> &
+  Partial<Pick<ActionableDetail, "permittedTransitions">>;
+
+function mutationReceipt(
+  task: MutationReceiptTask,
+  options: {
+    changedFields: string[];
+    claimReleased: boolean;
+    counts?: Array<{
+      field: string;
+      persisted: number;
+      duplicatesIgnored: number;
+    }>;
+    claimLease?: {
+      renewedAt: string;
+      leaseExpiresAt: string;
+    };
+    validation?: {
+      id: string;
+      qualifiesForCompletion: boolean;
+    };
+  },
+) {
+  const changedFields = z
+    .array(mutationChangedFieldSchema)
+    .parse(options.changedFields)
+    .sort(
+      (left, right) =>
+        mutationChangedFieldSchema.options.indexOf(left) -
+        mutationChangedFieldSchema.options.indexOf(right),
+    );
+  const counts = mutationReceiptSchema.shape.counts
+    .parse(options.counts ?? [])
+    .sort(
+      (left, right) =>
+        mutationCountFieldSchema.options.indexOf(left.field) -
+        mutationCountFieldSchema.options.indexOf(right.field),
+    );
+  const reconciliationFields = changedFields.filter(
+    (field) => reconciliationFieldSchema.safeParse(field).success,
+  );
+  const missing = task.readiness.requiredForReady;
+  return mutationReceiptSchema.parse({
+    id: task.id,
+    version: task.version,
+    status: task.status,
+    changedFields,
+    claimReleased: options.claimReleased,
+    reconciliationFields,
+    readiness: task.readiness,
+    permittedTransitions:
+      task.permittedTransitions ??
+      permittedTransitions(parsePersistedStatus(task.status), task.readiness),
+    counts,
+    ...(task.status === "Researching"
+      ? {
+          lifecycleGuidance:
+            missing.length > 0
+              ? `Ready remains unavailable. Satisfy every field in readiness.requiredForReady (${missing.join(", ")}) before transitioning; use finding, description, appendResearch, or appendPlannedValidation as named. Keep the task Researching and record remaining questions while investigation remains.`
+              : "All persisted Ready prerequisites are satisfied. Keep this task Researching and record remaining questions while investigation remains; otherwise Ready is now permitted. Do not force a transition solely because a turn ended.",
+        }
+      : {}),
+    ...(options.claimLease ? { claimLease: options.claimLease } : {}),
+    ...(options.validation ? { validation: options.validation } : {}),
+  });
+}
+
 function success(output: object): CallToolResult {
   return {
-    content: [{ type: "text", text: JSON.stringify(output) }],
+    content: [
+      {
+        type: "text",
+        text: "Actionables operation succeeded. Read structuredContent for the authoritative result.",
+      },
+    ],
     structuredContent: output as Record<string, unknown>,
   };
 }
@@ -845,6 +963,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
+        "Successful structuredContent is authoritative; content.text is only a short compatibility notice. Routine mutations return a lean receipt: continue with its version, status, readiness, and permittedTransitions; inspect counts; and fetch only fields named by reconciliationFields before relying on their stored values. An empty reconciliationFields does not require a defensive readback. Inspect hasMore before treating list_tasks items as exhaustive. " +
         "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. A scoped list of a terminal work item is a valid read and returns workItem status with terminal true even when items is empty. Inspect a known Done or Dismissed task with get_task using its top-level workItemId; use the same authorization for get_task_detail pages. Terminal inspection is read-only and does not reopen work. Continued work requires an explicitly authorized dashboard reopen with a reason before normal list and claim. Claim active work within the same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. After every composed tool call, inspect `isError`; when it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). When it is present, call actionables.get_task_detail for every supported critical field named in truncation.truncatedFields, start at offset 0, then pass contentHash with each nextOffset until null, concatenate json in offset order, and JSON-parse it; do not move the task forward or edit files until reconciliation is complete. If a page returns VERSION_CONFLICT, discard partial json and restart from current compact detail. If a terminal page returns TERMINAL_READ_INVALIDATED, discard partial pages and stop; use the normal authorized list and claim flow before reading active work with claimToken. If reconciliationGuidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only its ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, and do not make implementation changes until the task is In progress. Before requesting Ready or moving Ready to In progress, inspect readiness.requiredForReady and permittedTransitions; Ready requires non-empty finding, description, Research, and planned validation, and the transition must wait until requiredForReady is empty and the target is permitted. Return In progress directly to Researching only with a meaningful audited reason. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
     },
   );
@@ -974,10 +1093,24 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Extend a valid claim during long read-only work. Successful mutations already renew the lease.",
       inputSchema: renewTaskSchema,
-      outputSchema: renewAgentTaskClaimResponseSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: mutation,
     },
-    ({ id, ...input }) => runTool(() => renewAgentTaskClaim(prisma, id, input)),
+    ({ id, ...input }) =>
+      runTool(() =>
+        renewAgentTaskClaimWithProjection(prisma, id, input, (response) => {
+          const claim = response.task.claim;
+          if (!claim) throw new Error("Renewed claim could not be read.");
+          return mutationReceipt(response.task, {
+            changedFields: [],
+            claimReleased: false,
+            claimLease: {
+              renewedAt: claim.renewedAt,
+              leaseExpiresAt: claim.leaseExpiresAt,
+            },
+          });
+        }),
+      ),
   );
   server.registerTool(
     "actionables.recover_task_claim",
@@ -1006,38 +1139,24 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Update claimed Actionable",
       description:
-        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. Calls with appendResearch return a lean authoritative receipt with persisted and duplicate-ignored counts, current readiness, permitted transitions, and conditional lifecycle guidance. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
+        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. The receipt reports changedFields, reconciliationFields, persisted and duplicate-ignored counts, readiness, and permitted transitions. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
       inputSchema: updateTaskSchema,
-      outputSchema: updateTaskOutputSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
       runTool(async () => {
-        const result = await updateClaimedAgentTaskWithReceipt(
+        return updateClaimedAgentTaskWithProjection(
           prisma,
           id,
           input,
+          (result) =>
+            mutationReceipt(result.task, {
+              changedFields: result.changedFields,
+              claimReleased: false,
+              counts: result.counts,
+            }),
         );
-        if (!result.researchAppend) return compactTask(result.task);
-        const shouldGuideLifecycle = result.task.status === "Researching";
-        const missing = result.task.readiness.requiredForReady;
-        return researchUpdateReceiptSchema.parse({
-          id: result.task.id,
-          version: result.task.version,
-          status: result.task.status,
-          appended: result.researchAppend.appended,
-          duplicatesIgnored: result.researchAppend.duplicatesIgnored,
-          readiness: result.task.readiness,
-          permittedTransitions: result.task.permittedTransitions,
-          ...(shouldGuideLifecycle
-            ? {
-                lifecycleGuidance:
-                  missing.length > 0
-                    ? `Ready remains unavailable. Satisfy every field in readiness.requiredForReady (${missing.join(", ")}) before transitioning; use finding, description, appendResearch, or appendPlannedValidation as named. Keep the task Researching and record remaining questions while investigation remains.`
-                    : "All persisted Ready prerequisites are satisfied. Keep this task Researching and record remaining questions while investigation remains; otherwise Ready is now permitted. Do not force a transition solely because a turn ended.",
-              }
-            : {}),
-        });
       }),
   );
   server.registerTool(
@@ -1047,12 +1166,18 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Move a claimed task through Inbox to Researching to Ready to In progress. Ready requires non-empty finding, description, Research, and planned validation; use readiness.requiredForReady and permittedTransitions before requesting Ready or moving Ready to In progress. Return In progress directly to Researching only with a meaningful reason. Implementation changes must wait until In progress. Done requires non-empty Resolution plus qualifying validation and releases the claim. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
       inputSchema: transitionTaskSchema,
-      outputSchema: compactTaskSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(async () =>
-        compactTask(await transitionClaimedAgentTask(prisma, id, input)),
+      runTool(() =>
+        transitionClaimedAgentTaskWithProjection(prisma, id, input, (task) =>
+          mutationReceipt(task, {
+            changedFields: ["status"],
+            claimReleased:
+              task.status === "Done" || task.status === "Dismissed",
+          }),
+        ),
       ),
   );
   server.registerTool(
@@ -1062,15 +1187,23 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Dismiss one active unclaimed task created by the current Codex thread. Accepts only the public task ID and a required reason; thread identity and current version are resolved internally. Claimed work must use transition_task.",
       inputSchema: dismissTaskSchema,
-      outputSchema: compactTaskSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }, extra) =>
-      runTool(async () =>
-        compactTask(
-          await dismissAgentTask(prisma, id, input, {
+      runTool(() =>
+        dismissAgentTaskWithProjection(
+          prisma,
+          id,
+          input,
+          {
             threadId: requestThreadId(extra),
-          }),
+          },
+          (task) =>
+            mutationReceipt(task, {
+              changedFields: ["status"],
+              claimReleased: false,
+            }),
         ),
       ),
   );
@@ -1081,12 +1214,23 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Record actual validation evidence for a claimed task. A current Passed record can qualify an In progress task for Done.",
       inputSchema: recordValidationSchema,
-      outputSchema: compactTaskSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: mutation,
     },
     ({ id, ...input }) =>
-      runTool(async () =>
-        compactTask(await recordClaimedAgentTaskValidation(prisma, id, input)),
+      runTool(() =>
+        recordClaimedAgentTaskValidationWithProjection(
+          prisma,
+          id,
+          input,
+          (result) =>
+            mutationReceipt(result.task, {
+              changedFields: ["validationRecords"],
+              claimReleased: false,
+              counts: result.counts,
+              validation: result.validation,
+            }),
+        ),
       ),
   );
   server.registerTool(
@@ -1096,14 +1240,20 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Atomically save handoff findings, additive file references, research, planned checks, and optional actual validation, then release the claim. If any requested write fails, no handoff content is saved and the claim remains active.",
       inputSchema: handoffTaskSchema,
-      outputSchema: handoffTaskOutputSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(async () => ({
-        task: compactTask(await handoffClaimedAgentTask(prisma, id, input)),
-        claimReleased: true as const,
-      })),
+      runTool(() =>
+        handoffClaimedAgentTaskWithProjection(prisma, id, input, (result) =>
+          mutationReceipt(result.task, {
+            changedFields: result.changedFields,
+            claimReleased: true,
+            counts: result.counts,
+            validation: result.validation,
+          }),
+        ),
+      ),
   );
   server.registerTool(
     "actionables.release_task",
@@ -1112,14 +1262,21 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       description:
         "Release a valid nonterminal claim when abandoning or handing off work. Before releasing a Researching task, record findings so far, remaining questions, and the next research step.",
       inputSchema: releaseTaskSchema,
-      outputSchema: releaseAgentTaskClaimResponseSchema,
+      outputSchema: mutationReceiptSchema,
       annotations: {
         ...mutation,
         destructiveHint: false,
       },
     },
     ({ id, ...input }) =>
-      runTool(() => releaseAgentTaskClaim(prisma, id, input)),
+      runTool(() =>
+        releaseAgentTaskClaimWithProjection(prisma, id, input, (response) =>
+          mutationReceipt(response.task, {
+            changedFields: [],
+            claimReleased: true,
+          }),
+        ),
+      ),
   );
 
   return server;

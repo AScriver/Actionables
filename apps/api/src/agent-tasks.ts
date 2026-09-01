@@ -57,7 +57,7 @@ import {
   createActionable,
   getActionable,
   normalizedLocalPath,
-  recordValidation,
+  recordValidationWithRecord,
   transitionActionable,
   updateActionable,
   VersionConflictError,
@@ -125,10 +125,33 @@ type AgentTaskMutationRow = Prisma.ActionableGetPayload<{
 type TransactionClient = Prisma.TransactionClient;
 export type UpdateClaimedAgentTaskResult = {
   task: ActionableDetail;
-  researchAppend?: {
-    appended: number;
-    duplicatesIgnored: number;
+  changedFields: string[];
+  counts: AgentTaskMutationCount[];
+};
+export type AgentTaskMutationCount = {
+  field: string;
+  persisted: number;
+  duplicatesIgnored: number;
+};
+export type HandoffClaimedAgentTaskResult = UpdateClaimedAgentTaskResult & {
+  validation?: {
+    id: string;
+    qualifiesForCompletion: boolean;
   };
+};
+export type RecordClaimedAgentTaskValidationResult = {
+  task: ActionableDetail;
+  validation: {
+    id: string;
+    qualifiesForCompletion: boolean;
+  };
+  counts: [
+    {
+      field: "validationRecords";
+      persisted: 1;
+      duplicatesIgnored: number;
+    },
+  ];
 };
 
 export class AgentTaskClaimError extends Error {
@@ -453,7 +476,7 @@ type ClaimedMutationCredentials = {
   version: number;
 };
 
-async function runClaimedMutation<T>(
+async function runClaimedMutation<T, U = T>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   credentials: ClaimedMutationCredentials,
@@ -463,7 +486,8 @@ async function runClaimedMutation<T>(
     row: AgentTaskMutationRow,
     claim: NonNullable<AgentTaskMutationRow["agentTaskClaim"]>,
   ) => Promise<T>,
-): Promise<T> {
+  projectResponse?: (value: T) => U,
+): Promise<T | U> {
   return withClaimLock(String(sourceOrdinal), async () => {
     const result = await prisma.$transaction(async (tx) => {
       const row = await findMutationTask(tx, sourceOrdinal);
@@ -499,9 +523,10 @@ async function runClaimedMutation<T>(
           row!.version,
         );
       }
+      const value = await operation(tx, row!, claim);
       return {
         expired: false as const,
-        value: await operation(tx, row!, claim),
+        value: projectResponse ? projectResponse(value) : value,
       };
     });
     if (result.expired) {
@@ -538,15 +563,17 @@ function appendUniqueUserSources<
   const key = (source: T) =>
     JSON.stringify([source.type, source.locator, source.label ?? ""]);
   const seen = new Set(current.map(key));
-  return [
-    ...current,
-    ...additions.filter((source) => {
-      const sourceKey = key(source);
-      if (seen.has(sourceKey)) return false;
-      seen.add(sourceKey);
-      return true;
-    }),
-  ];
+  const appended = additions.filter((source) => {
+    const sourceKey = key(source);
+    if (seen.has(sourceKey)) return false;
+    seen.add(sourceKey);
+    return true;
+  });
+  return {
+    values: [...current, ...appended],
+    appended: appended.length,
+    duplicatesIgnored: additions.length - appended.length,
+  };
 }
 
 function appendUniqueStrings(current: string[], additions: string[]) {
@@ -572,15 +599,21 @@ function appendUniqueFiles(current: SourceFile[], additions: SourceFile[]) {
   const key = (file: SourceFile) =>
     JSON.stringify([file.path, file.lines ?? "", file.symbol ?? ""]);
   const seen = new Set(current.map(key));
-  return [
-    ...current,
-    ...additions.filter((file) => {
-      const fileKey = key(file);
-      if (seen.has(fileKey)) return false;
-      seen.add(fileKey);
-      return true;
-    }),
-  ];
+  const appended = additions.filter((file) => {
+    const fileKey = key(file);
+    if (seen.has(fileKey)) return false;
+    seen.add(fileKey);
+    return true;
+  });
+  return {
+    values: [...current, ...appended],
+    appended: appended.length,
+    duplicatesIgnored: additions.length - appended.length,
+  };
+}
+
+function sameJson(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 async function renewClaimAfterMutation(
@@ -642,6 +675,7 @@ export async function listAgentTasks(
   if (workItemState?.terminal) {
     return listAgentTasksResponseSchema.parse({
       items: [],
+      hasMore: false,
       workItem: workItemState,
     });
   }
@@ -709,10 +743,11 @@ export async function listAgentTasks(
       { updatedAt: "desc" },
       { sourceOrdinal: "asc" },
     ],
-    take: request.limit,
+    take: request.limit + 1,
   });
+  const hasMore = rows.length > request.limit;
   return listAgentTasksResponseSchema.parse({
-    items: rows.map((row) => {
+    items: rows.slice(0, request.limit).map((row) => {
       const summary = toAgentTaskSummary(row);
       if (
         request.view === "available" &&
@@ -723,6 +758,7 @@ export async function listAgentTasks(
       }
       return summary;
     }),
+    hasMore,
     workItem: workItemState,
   });
 }
@@ -1257,12 +1293,13 @@ export async function getScopedTerminalAgentTask(
   });
 }
 
-async function updateClaimedAgentTaskResult(
+async function updateClaimedAgentTaskResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: UpdateClaimedAgentTaskRequest,
   now = new Date(),
-): Promise<UpdateClaimedAgentTaskResult> {
+  projectResponse?: (result: UpdateClaimedAgentTaskResult) => T,
+): Promise<UpdateClaimedAgentTaskResult | T> {
   const request = parseInput(updateClaimedAgentTaskRequestSchema, input);
   return runClaimedMutation(
     prisma,
@@ -1280,6 +1317,27 @@ async function updateClaimedAgentTaskResult(
       const researchAppend = request.appendResearch
         ? appendUniqueStrings(currentResearch, request.appendResearch)
         : undefined;
+      const plannedValidationAppend = request.appendPlannedValidation
+        ? {
+            values: [
+              ...currentPlannedValidation,
+              ...request.appendPlannedValidation,
+            ],
+            appended: request.appendPlannedValidation.length,
+            duplicatesIgnored: 0,
+          }
+        : undefined;
+      const sourceAppend = request.addUserSources
+        ? appendUniqueUserSources(currentSources, request.addUserSources)
+        : undefined;
+      const nextResearch =
+        request.research ?? researchAppend?.values ?? currentResearch;
+      const nextPlannedValidation =
+        request.plannedValidation ??
+        plannedValidationAppend?.values ??
+        currentPlannedValidation;
+      const nextSources =
+        request.userSources ?? sourceAppend?.values ?? currentSources;
       const update = parseInput(updateActionableRequestSchema, {
         version: request.version,
         title: request.title ?? row.title,
@@ -1293,18 +1351,10 @@ async function updateClaimedAgentTaskResult(
         finding: request.finding ?? row.finding,
         description: request.description ?? row.description,
         resolution: request.resolution ?? row.resolution,
-        research: request.research ?? researchAppend?.values ?? currentResearch,
-        validation:
-          request.plannedValidation ??
-          (request.appendPlannedValidation
-            ? [...currentPlannedValidation, ...request.appendPlannedValidation]
-            : currentPlannedValidation),
+        research: nextResearch,
+        validation: nextPlannedValidation,
         tags: request.tags ?? persistedStringArray(row.tagsJson),
-        userSources:
-          request.userSources ??
-          (request.addUserSources
-            ? appendUniqueUserSources(currentSources, request.addUserSources)
-            : currentSources),
+        userSources: nextSources,
       });
       const saved = await updateActionable(
         prisma,
@@ -1317,21 +1367,69 @@ async function updateClaimedAgentTaskResult(
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
 
       const changedFields = [
-        "title",
-        "priority",
-        "effort",
-        "evidenceState",
-        "finding",
-        "description",
-        "resolution",
-        "research",
-        "appendResearch",
-        "plannedValidation",
-        "appendPlannedValidation",
-        "tags",
-        "userSources",
-        "addUserSources",
-      ].filter((field) => request[field as keyof typeof request] !== undefined);
+        request.title !== undefined && request.title !== row.title
+          ? "title"
+          : null,
+        request.priority !== undefined && request.priority !== row.priority
+          ? "priority"
+          : null,
+        request.effort !== undefined && request.effort !== row.effort
+          ? "effort"
+          : null,
+        request.evidenceState !== undefined &&
+        request.evidenceState !== row.evidenceState
+          ? "evidenceState"
+          : null,
+        request.finding !== undefined && request.finding !== row.finding
+          ? "finding"
+          : null,
+        request.description !== undefined &&
+        request.description !== row.description
+          ? "description"
+          : null,
+        request.resolution !== undefined &&
+        request.resolution !== row.resolution
+          ? "resolution"
+          : null,
+        !sameJson(nextResearch, currentResearch) ? "research" : null,
+        !sameJson(nextPlannedValidation, currentPlannedValidation)
+          ? "plannedValidation"
+          : null,
+        request.tags !== undefined &&
+        !sameJson(request.tags, persistedStringArray(row.tagsJson))
+          ? "tags"
+          : null,
+        !sameJson(nextSources, currentSources) ? "userSources" : null,
+      ].filter((field): field is string => field !== null);
+      const counts: AgentTaskMutationCount[] = [
+        ...(researchAppend
+          ? [
+              {
+                field: "research",
+                persisted: researchAppend.appended,
+                duplicatesIgnored: researchAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+        ...(plannedValidationAppend
+          ? [
+              {
+                field: "plannedValidation",
+                persisted: plannedValidationAppend.appended,
+                duplicatesIgnored: plannedValidationAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+        ...(sourceAppend
+          ? [
+              {
+                field: "userSources",
+                persisted: sourceAppend.appended,
+                duplicatesIgnored: sourceAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+      ];
       await tx.activityEvent.create({
         data: {
           actionableId: row.id,
@@ -1347,16 +1445,11 @@ async function updateClaimedAgentTaskResult(
       await renewClaimAfterMutation(tx, row, now);
       return {
         task: saved,
-        ...(researchAppend
-          ? {
-              researchAppend: {
-                appended: researchAppend.appended,
-                duplicatesIgnored: researchAppend.duplicatesIgnored,
-              },
-            }
-          : {}),
+        changedFields,
+        counts,
       };
     },
+    projectResponse,
   );
 }
 
@@ -1366,25 +1459,38 @@ export async function updateClaimedAgentTask(
   input: UpdateClaimedAgentTaskRequest,
   now = new Date(),
 ): Promise<ActionableDetail> {
-  return (await updateClaimedAgentTaskResult(prisma, sourceOrdinal, input, now))
-    .task;
+  const result = await updateClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  );
+  return (result as UpdateClaimedAgentTaskResult).task;
 }
 
-export function updateClaimedAgentTaskWithReceipt(
+export function updateClaimedAgentTaskWithProjection<T>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: UpdateClaimedAgentTaskRequest,
+  projectResponse: (result: UpdateClaimedAgentTaskResult) => T,
   now = new Date(),
-) {
-  return updateClaimedAgentTaskResult(prisma, sourceOrdinal, input, now);
+): Promise<T> {
+  return updateClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
 }
 
-export async function transitionClaimedAgentTask(
+async function transitionClaimedAgentTaskResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: TransitionClaimedAgentTaskRequest,
   now = new Date(),
-): Promise<ActionableDetail> {
+  projectResponse?: (task: ActionableDetail) => T,
+): Promise<ActionableDetail | T> {
   const request = parseInput(transitionClaimedAgentTaskRequestSchema, input);
   return runClaimedMutation(
     prisma,
@@ -1419,16 +1525,48 @@ export async function transitionClaimedAgentTask(
       }
       return saved;
     },
+    projectResponse,
   );
 }
 
-export async function dismissAgentTask(
+export function transitionClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: TransitionClaimedAgentTaskRequest,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  return transitionClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  ) as Promise<ActionableDetail>;
+}
+
+export function transitionClaimedAgentTaskWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: TransitionClaimedAgentTaskRequest,
+  projectResponse: (task: ActionableDetail) => T,
+  now = new Date(),
+): Promise<T> {
+  return transitionClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
+}
+
+async function dismissAgentTaskResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: DismissAgentTaskRequest,
   caller: AgentTaskCaller,
   now = new Date(),
-): Promise<ActionableDetail> {
+  projectResponse?: (task: ActionableDetail) => T,
+): Promise<ActionableDetail | T> {
   const request = parseInput(dismissAgentTaskRequestSchema, input);
   return withClaimLock(String(sourceOrdinal), () =>
     prisma.$transaction(async (tx) => {
@@ -1475,17 +1613,52 @@ export async function dismissAgentTask(
       );
       if (!saved)
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
-      return saved;
+      return projectResponse ? projectResponse(saved) : saved;
     }),
   );
 }
 
-export async function recordClaimedAgentTaskValidation(
+export function dismissAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: DismissAgentTaskRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  return dismissAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    caller,
+    now,
+  ) as Promise<ActionableDetail>;
+}
+
+export function dismissAgentTaskWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: DismissAgentTaskRequest,
+  caller: AgentTaskCaller,
+  projectResponse: (task: ActionableDetail) => T,
+  now = new Date(),
+): Promise<T> {
+  return dismissAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    caller,
+    now,
+    projectResponse,
+  ) as Promise<T>;
+}
+
+async function recordClaimedAgentTaskValidationResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: RecordClaimedAgentTaskValidationRequest,
   now = new Date(),
-): Promise<ActionableDetail> {
+  projectResponse?: (result: RecordClaimedAgentTaskValidationResult) => T,
+): Promise<RecordClaimedAgentTaskValidationResult | T> {
   const request = parseInput(
     recordClaimedAgentTaskValidationRequestSchema,
     input,
@@ -1496,7 +1669,7 @@ export async function recordClaimedAgentTaskValidation(
     request,
     now,
     async (tx, row, claim) => {
-      const saved = await recordValidation(
+      const recorded = await recordValidationWithRecord(
         prisma,
         sourceOrdinal,
         {
@@ -1510,20 +1683,73 @@ export async function recordClaimedAgentTaskValidation(
         },
         tx,
       );
+      const saved = recorded.task;
       if (!saved)
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
       await renewClaimAfterMutation(tx, row, now);
-      return saved;
+      const validation = saved.validationRecords.find(
+        (candidate) => candidate.id === recorded.validationRecordId,
+      );
+      if (!validation) {
+        throw new Error("Recorded validation could not be read.");
+      }
+      return {
+        task: saved,
+        validation: {
+          id: validation.id,
+          qualifiesForCompletion: validation.qualifiesForCompletion,
+        },
+        counts: [
+          {
+            field: "validationRecords" as const,
+            persisted: 1 as const,
+            duplicatesIgnored: 0,
+          },
+        ],
+      };
     },
+    projectResponse,
   );
 }
 
-export async function handoffClaimedAgentTask(
+export async function recordClaimedAgentTaskValidation(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RecordClaimedAgentTaskValidationRequest,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  const result = await recordClaimedAgentTaskValidationResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  );
+  return (result as RecordClaimedAgentTaskValidationResult).task;
+}
+
+export function recordClaimedAgentTaskValidationWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RecordClaimedAgentTaskValidationRequest,
+  projectResponse: (result: RecordClaimedAgentTaskValidationResult) => T,
+  now = new Date(),
+): Promise<T> {
+  return recordClaimedAgentTaskValidationResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
+}
+
+async function handoffClaimedAgentTaskResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: HandoffClaimedAgentTaskRequest,
   now = new Date(),
-): Promise<ActionableDetail> {
+  projectResponse?: (result: HandoffClaimedAgentTaskResult) => T,
+): Promise<HandoffClaimedAgentTaskResult | T> {
   const request = parseInput(handoffClaimedAgentTaskRequestSchema, input);
   return runClaimedMutation(
     prisma,
@@ -1533,30 +1759,71 @@ export async function handoffClaimedAgentTask(
     async (tx, row, claim) => {
       const currentResearch = persistedStringArray(row.researchJson);
       const currentPlannedValidation = persistedStringArray(row.validationJson);
-      const research = request.appendResearch
-        ? appendUniqueStrings(currentResearch, request.appendResearch).values
-        : currentResearch;
-      const plannedValidation = request.appendPlannedValidation
+      const currentFiles = persistedSourceFiles(row.filesJson);
+      const researchAppend = request.appendResearch
+        ? appendUniqueStrings(currentResearch, request.appendResearch)
+        : undefined;
+      const plannedValidationAppend = request.appendPlannedValidation
         ? appendUniqueStrings(
             currentPlannedValidation,
             request.appendPlannedValidation,
-          ).values
-        : currentPlannedValidation;
-      const files = request.addFiles
-        ? appendUniqueFiles(
-            persistedSourceFiles(row.filesJson),
-            request.addFiles,
           )
-        : persistedSourceFiles(row.filesJson);
+        : undefined;
+      const fileAppend = request.addFiles
+        ? appendUniqueFiles(currentFiles, request.addFiles)
+        : undefined;
+      const research = researchAppend?.values ?? currentResearch;
+      const plannedValidation =
+        plannedValidationAppend?.values ?? currentPlannedValidation;
+      const files = fileAppend?.values ?? currentFiles;
       const contentFields = [
+        request.finding !== undefined && request.finding !== row.finding
+          ? "finding"
+          : null,
+        fileAppend?.appended ? "files" : null,
+        researchAppend?.appended ? "research" : null,
+        plannedValidationAppend?.appended ? "plannedValidation" : null,
+      ].filter((field): field is string => field !== null);
+      const requestedContentFields = [
         "finding",
         "addFiles",
         "appendResearch",
         "appendPlannedValidation",
       ].filter((field) => request[field as keyof typeof request] !== undefined);
+      const counts: AgentTaskMutationCount[] = [
+        ...(researchAppend
+          ? [
+              {
+                field: "research",
+                persisted: researchAppend.appended,
+                duplicatesIgnored: researchAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+        ...(plannedValidationAppend
+          ? [
+              {
+                field: "plannedValidation",
+                persisted: plannedValidationAppend.appended,
+                duplicatesIgnored: plannedValidationAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+        ...(fileAppend
+          ? [
+              {
+                field: "files",
+                persisted: fileAppend.appended,
+                duplicatesIgnored: fileAppend.duplicatesIgnored,
+              },
+            ]
+          : []),
+      ];
       let version = request.version;
+      let recordedValidation:
+        HandoffClaimedAgentTaskResult["validation"] | undefined;
 
-      if (contentFields.length > 0) {
+      if (requestedContentFields.length > 0) {
         const update = parseInput(updateActionableRequestSchema, {
           version,
           title: row.title,
@@ -1597,7 +1864,7 @@ export async function handoffClaimedAgentTask(
             summary: `Updated by agent ${claim.agentId} during handoff`,
             metadataJson: {
               origin: agentOrigin(claim.agentId),
-              fields: contentFields.join(","),
+              fields: requestedContentFields.join(","),
               operation: "handoff",
             },
             occurredAt: now,
@@ -1606,7 +1873,7 @@ export async function handoffClaimedAgentTask(
       }
 
       if (request.validation) {
-        const saved = await recordValidation(
+        const recorded = await recordValidationWithRecord(
           prisma,
           sourceOrdinal,
           {
@@ -1616,9 +1883,25 @@ export async function handoffClaimedAgentTask(
           },
           tx,
         );
+        const saved = recorded.task;
         if (!saved)
           throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
         version = saved.version;
+        const validation = saved.validationRecords.find(
+          (candidate) => candidate.id === recorded.validationRecordId,
+        );
+        if (!validation) {
+          throw new Error("Handoff validation could not be read.");
+        }
+        recordedValidation = {
+          id: validation.id,
+          qualifiesForCompletion: validation.qualifiesForCompletion,
+        };
+        counts.push({
+          field: "validationRecords",
+          persisted: 1,
+          duplicatesIgnored: 0,
+        });
       }
 
       await tx.agentTaskClaim.delete({ where: { actionableId: row.id } });
@@ -1639,9 +1922,49 @@ export async function handoffClaimedAgentTask(
       const handedOff = await getActionable(tx, sourceOrdinal);
       if (!handedOff)
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
-      return handedOff;
+      return {
+        task: handedOff,
+        changedFields: [
+          ...contentFields,
+          ...(recordedValidation ? ["validationRecords"] : []),
+        ],
+        counts,
+        ...(recordedValidation ? { validation: recordedValidation } : {}),
+      };
     },
+    projectResponse,
   );
+}
+
+export async function handoffClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: HandoffClaimedAgentTaskRequest,
+  now = new Date(),
+): Promise<ActionableDetail> {
+  const result = await handoffClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  );
+  return (result as HandoffClaimedAgentTaskResult).task;
+}
+
+export function handoffClaimedAgentTaskWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: HandoffClaimedAgentTaskRequest,
+  projectResponse: (result: HandoffClaimedAgentTaskResult) => T,
+  now = new Date(),
+): Promise<T> {
+  return handoffClaimedAgentTaskResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
 }
 
 export function claimAgentTask(
@@ -1945,12 +2268,13 @@ async function recoverAgentTaskClaimResult<T = never>(
   return result.response;
 }
 
-export async function renewAgentTaskClaim(
+async function renewAgentTaskClaimResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: RenewAgentTaskClaimRequest,
   now = new Date(),
-): Promise<RenewAgentTaskClaimResponse> {
+  projectResponse?: (response: RenewAgentTaskClaimResponse) => T,
+): Promise<RenewAgentTaskClaimResponse | T> {
   const request = parseInput(renewAgentTaskClaimRequestSchema, input);
   const result = await prisma.$transaction(async (tx) => {
     const row = await findTask(tx, sourceOrdinal);
@@ -1975,11 +2299,12 @@ export async function renewAgentTaskClaim(
     });
     const task = await findTask(tx, sourceOrdinal);
     if (!task) throw new Error("Renewed agent task could not be read.");
+    const response = renewAgentTaskClaimResponseSchema.parse({
+      task: toAgentTaskSummary(task),
+    });
     return {
       expired: false as const,
-      response: renewAgentTaskClaimResponseSchema.parse({
-        task: toAgentTaskSummary(task),
-      }),
+      response: projectResponse ? projectResponse(response) : response,
     };
   });
   if (result.expired) {
@@ -1991,12 +2316,43 @@ export async function renewAgentTaskClaim(
   return result.response;
 }
 
-export async function releaseAgentTaskClaim(
+export function renewAgentTaskClaim(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RenewAgentTaskClaimRequest,
+  now = new Date(),
+): Promise<RenewAgentTaskClaimResponse> {
+  return renewAgentTaskClaimResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  ) as Promise<RenewAgentTaskClaimResponse>;
+}
+
+export function renewAgentTaskClaimWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: RenewAgentTaskClaimRequest,
+  projectResponse: (response: RenewAgentTaskClaimResponse) => T,
+  now = new Date(),
+): Promise<T> {
+  return renewAgentTaskClaimResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
+}
+
+async function releaseAgentTaskClaimResult<T = never>(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: ReleaseAgentTaskClaimRequest,
   now = new Date(),
-): Promise<ReleaseAgentTaskClaimResponse> {
+  projectResponse?: (response: ReleaseAgentTaskClaimResponse) => T,
+): Promise<ReleaseAgentTaskClaimResponse | T> {
   const request = parseInput(releaseAgentTaskClaimRequestSchema, input);
   const result = await prisma.$transaction(async (tx) => {
     const row = await findTask(tx, sourceOrdinal);
@@ -2028,11 +2384,12 @@ export async function releaseAgentTaskClaim(
     });
     const task = await findTask(tx, sourceOrdinal);
     if (!task) throw new Error("Released agent task could not be read.");
+    const response = releaseAgentTaskClaimResponseSchema.parse({
+      task: toAgentTaskSummary(task),
+    });
     return {
       expired: false as const,
-      response: releaseAgentTaskClaimResponseSchema.parse({
-        task: toAgentTaskSummary(task),
-      }),
+      response: projectResponse ? projectResponse(response) : response,
     };
   });
   if (result.expired) {
@@ -2042,6 +2399,36 @@ export async function releaseAgentTaskClaim(
     );
   }
   return result.response;
+}
+
+export function releaseAgentTaskClaim(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: ReleaseAgentTaskClaimRequest,
+  now = new Date(),
+): Promise<ReleaseAgentTaskClaimResponse> {
+  return releaseAgentTaskClaimResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+  ) as Promise<ReleaseAgentTaskClaimResponse>;
+}
+
+export function releaseAgentTaskClaimWithProjection<T>(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: ReleaseAgentTaskClaimRequest,
+  projectResponse: (response: ReleaseAgentTaskClaimResponse) => T,
+  now = new Date(),
+): Promise<T> {
+  return releaseAgentTaskClaimResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    now,
+    projectResponse,
+  ) as Promise<T>;
 }
 
 export async function forceReleaseAgentTaskClaim(

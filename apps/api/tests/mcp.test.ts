@@ -108,6 +108,12 @@ function output<T>(value: unknown) {
   expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(
     true,
   );
+  expect(result.content).toEqual([
+    {
+      type: "text",
+      text: "Actionables operation succeeded. Read structuredContent for the authoritative result.",
+    },
+  ]);
   return result.structuredContent as T;
 }
 
@@ -250,6 +256,12 @@ describe("Actionables MCP", () => {
       );
       expect(client.getInstructions()).toContain(
         "If reconciliationGuidance is absent, normal flow may continue",
+      );
+      expect(client.getInstructions()).toContain(
+        "Successful structuredContent is authoritative",
+      );
+      expect(client.getInstructions()).toContain(
+        "Inspect hasMore before treating list_tasks items as exhaustive",
       );
       expect(client.getInstructions()).toContain(
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
@@ -418,6 +430,42 @@ describe("Actionables MCP", () => {
       expect(descriptions["actionables.release_task"]).toContain(
         "record findings so far, remaining questions, and the next research step",
       );
+      const receiptTools = [
+        "actionables.renew_task_claim",
+        "actionables.update_task",
+        "actionables.transition_task",
+        "actionables.dismiss_task",
+        "actionables.record_task_validation",
+        "actionables.handoff_task",
+        "actionables.release_task",
+      ];
+      const receiptSchemas = receiptTools.map(
+        (name) => tools.find((tool) => tool.name === name)!.outputSchema,
+      );
+      for (const schema of receiptSchemas.slice(1)) {
+        expect(schema).toEqual(receiptSchemas[0]);
+      }
+      expect(
+        (receiptSchemas[0] as { required?: string[] }).required?.sort(),
+      ).toEqual(
+        [
+          "id",
+          "version",
+          "status",
+          "changedFields",
+          "claimReleased",
+          "reconciliationFields",
+          "readiness",
+          "permittedTransitions",
+          "counts",
+        ].sort(),
+      );
+      expect(
+        (
+          tools.find((tool) => tool.name === "actionables.list_tasks")!
+            .outputSchema as { required?: string[] }
+        ).required,
+      ).toContain("hasMore");
     } finally {
       await transport.close();
     }
@@ -456,9 +504,7 @@ describe("Actionables MCP", () => {
       ).toBe(45 * 60_000);
 
       const omitted = output<{
-        task: {
-          claim: { renewedAt: string; leaseExpiresAt: string };
-        };
+        claimLease: { renewedAt: string; leaseExpiresAt: string };
       }>(
         await client.callTool({
           name: "actionables.renew_task_claim",
@@ -469,15 +515,13 @@ describe("Actionables MCP", () => {
         }),
       );
       const omittedDuration =
-        Date.parse(omitted.task.claim.leaseExpiresAt) -
-        Date.parse(omitted.task.claim.renewedAt);
+        Date.parse(omitted.claimLease.leaseExpiresAt) -
+        Date.parse(omitted.claimLease.renewedAt);
       expect(omittedDuration).toBeGreaterThanOrEqual(45 * 60_000 - 1_000);
       expect(omittedDuration).toBeLessThanOrEqual(45 * 60_000);
 
       const explicit = output<{
-        task: {
-          claim: { renewedAt: string; leaseExpiresAt: string };
-        };
+        claimLease: { renewedAt: string; leaseExpiresAt: string };
       }>(
         await client.callTool({
           name: "actionables.renew_task_claim",
@@ -489,8 +533,8 @@ describe("Actionables MCP", () => {
         }),
       );
       const explicitDuration =
-        Date.parse(explicit.task.claim.leaseExpiresAt) -
-        Date.parse(explicit.task.claim.renewedAt);
+        Date.parse(explicit.claimLease.leaseExpiresAt) -
+        Date.parse(explicit.claimLease.renewedAt);
       expect(explicitDuration).toBeGreaterThanOrEqual(60 * 60_000 - 1_000);
       expect(explicitDuration).toBeLessThanOrEqual(60 * 60_000);
 
@@ -771,6 +815,10 @@ describe("Actionables MCP", () => {
       expect(dismissed).toMatchObject({
         status: "Dismissed",
         version: created.version + 1,
+        changedFields: ["status"],
+        reconciliationFields: [],
+        claimReleased: false,
+        counts: [],
       });
       const stored = await prisma.actionable.findUniqueOrThrow({
         where: { id: created.recordId },
@@ -1192,6 +1240,18 @@ describe("Actionables MCP", () => {
 
     const { client, transport } = await connectClient();
     try {
+      const fullPage = output<{ items: unknown[]; hasMore: boolean }>(
+        await client.callTool({
+          name: "actionables.list_tasks",
+          arguments: {
+            view: "available",
+            workItemId: root.sourceOrdinal,
+            limit: 100,
+          },
+        }),
+      );
+      expect(fullPage.items).toHaveLength(100);
+      expect(fullPage.hasMore).toBe(true);
       const claimed = output<{
         task: {
           version: number;
@@ -1235,7 +1295,11 @@ describe("Actionables MCP", () => {
       expect(recovered.task.subtasks).toHaveLength(5);
       expect(recovered.claim.claimToken).not.toBe(claimed.claim.claimToken);
 
-      const released = output<{ task: { claim: null; version: number } }>(
+      const released = output<{
+        version: number;
+        claimReleased: boolean;
+        changedFields: string[];
+      }>(
         await client.callTool({
           name: "actionables.release_task",
           arguments: {
@@ -1244,9 +1308,10 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(released.task).toMatchObject({
-        claim: null,
+      expect(released).toMatchObject({
         version: recovered.task.version + 1,
+        claimReleased: true,
+        changedFields: [],
       });
       expect(
         await prisma.activityEvent.count({
@@ -1271,6 +1336,7 @@ describe("Actionables MCP", () => {
           version: number;
           readiness: { requiredForReady: string[] };
         }>;
+        hasMore: boolean;
       }>(
         await client.callTool({
           name: "actionables.list_tasks",
@@ -1285,6 +1351,7 @@ describe("Actionables MCP", () => {
         (item) => item.id === task.sourceOrdinal,
       );
       expect(available).toBeDefined();
+      expect(listed.hasMore).toBe(false);
       expect(available!.readiness.requiredForReady).toEqual([
         "researchPhase",
         "research",
@@ -1327,13 +1394,19 @@ describe("Actionables MCP", () => {
         claimToken: claimed.claim.claimToken,
       };
 
-      const renewed = output<{ task: { version: number } }>(
+      const renewed = output<{
+        version: number;
+        claimLease: { renewedAt: string; leaseExpiresAt: string };
+      }>(
         await client.callTool({
           name: "actionables.renew_task_claim",
           arguments: { ...credentials, leaseMinutes: 60 },
         }),
       );
-      expect(renewed.task.version).toBe(claimed.task.version);
+      expect(renewed.version).toBe(claimed.task.version);
+      expect(Date.parse(renewed.claimLease.leaseExpiresAt)).toBeGreaterThan(
+        Date.parse(renewed.claimLease.renewedAt),
+      );
 
       const skippedResearch = errorOutput(
         await client.callTool({
@@ -1362,6 +1435,11 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(researching.status).toBe("Researching");
+      expect(researching).toMatchObject({
+        changedFields: ["status"],
+        reconciliationFields: [],
+        claimReleased: false,
+      });
 
       const missingResearch = errorOutput(
         await client.callTool({
@@ -1384,8 +1462,13 @@ describe("Actionables MCP", () => {
         id: number;
         version: number;
         status: string;
-        appended: number;
-        duplicatesIgnored: number;
+        changedFields: string[];
+        reconciliationFields: string[];
+        counts: Array<{
+          field: string;
+          persisted: number;
+          duplicatesIgnored: number;
+        }>;
         lifecycleGuidance?: string;
       }>(
         await client.callTool({
@@ -1403,8 +1486,9 @@ describe("Actionables MCP", () => {
         id: task.sourceOrdinal,
         version: researching.version + 1,
         status: "Researching",
-        appended: 1,
-        duplicatesIgnored: 0,
+        changedFields: ["research"],
+        reconciliationFields: ["research"],
+        counts: [{ field: "research", persisted: 1, duplicatesIgnored: 0 }],
         readiness: { requiredForReady: [], blockers: [] },
         permittedTransitions: expect.arrayContaining(["Ready"]),
         lifecycleGuidance: expect.stringContaining("Ready is now permitted"),
@@ -1421,6 +1505,11 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(ready.status).toBe("Ready");
+      expect(ready).toMatchObject({
+        changedFields: ["status"],
+        reconciliationFields: [],
+        claimReleased: false,
+      });
 
       let inProgress = output<{ status: string; version: number }>(
         await client.callTool({
@@ -1507,8 +1596,8 @@ describe("Actionables MCP", () => {
       });
 
       const updated = output<{
-        finding: string;
-        resolution: string;
+        changedFields: string[];
+        reconciliationFields: string[];
         research: string[];
         version: number;
       }>(
@@ -1523,14 +1612,24 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(updated.finding).toContain("official MCP client");
-      expect(updated.resolution).toContain("existing claim lifecycle");
+      expect(updated).toMatchObject({
+        changedFields: ["finding", "resolution"],
+        reconciliationFields: ["finding"],
+      });
+      expect(
+        await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }),
+      ).toMatchObject({
+        finding: "The official MCP client completed a real request.",
+        resolution:
+          "Completed the MCP request path and retained the existing claim lifecycle.",
+      });
 
       const validated = output<{
-        validationRecords: Array<{
-          outcome: string;
+        validation: {
+          id: string;
           qualifiesForCompletion: boolean;
-        }>;
+        };
+        counts: Array<{ field: string; persisted: number }>;
         version: number;
       }>(
         await client.callTool({
@@ -1546,20 +1645,32 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(validated.validationRecords.at(-1)).toMatchObject({
-        outcome: "Passed",
+      expect(validated.validation).toMatchObject({
+        id: expect.any(String),
         qualifiesForCompletion: true,
       });
+      expect(
+        await prisma.validationRecord.findUniqueOrThrow({
+          where: { id: validated.validation.id },
+        }),
+      ).toMatchObject({
+        notesMd: "Focused MCP workflow passed.",
+        evidenceMd:
+          "Official SDK client calls returned valid structured results.",
+      });
+      expect(validated.counts).toEqual([
+        expect.objectContaining({ field: "validationRecords", persisted: 1 }),
+      ]);
 
-      const released = output<{ task: { claim: null; version: number } }>(
+      const released = output<{ version: number; claimReleased: boolean }>(
         await client.callTool({
           name: "actionables.release_task",
           arguments: credentials,
         }),
       );
-      expect(released.task).toMatchObject({
-        claim: null,
+      expect(released).toMatchObject({
         version: validated.version + 1,
+        claimReleased: true,
       });
     } finally {
       await transport.close();
@@ -1664,7 +1775,10 @@ describe("Actionables MCP", () => {
         nextAction: expect.stringContaining("actionables.recover_task_claim"),
       });
 
-      const updated = output<{ title: string }>(
+      const updated = output<{
+        changedFields: string[];
+        reconciliationFields: string[];
+      }>(
         await owner.client.callTool({
           name: "actionables.update_task",
           arguments: {
@@ -1675,7 +1789,14 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(updated.title).toBe("Recovered credential completed a mutation");
+      expect(updated).toMatchObject({
+        changedFields: ["title"],
+        reconciliationFields: [],
+      });
+      expect(
+        (await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }))
+          .title,
+      ).toBe("Recovered credential completed a mutation");
     } finally {
       await other.transport.close();
       await owner.transport.close();
@@ -1723,16 +1844,14 @@ describe("Actionables MCP", () => {
 
       const handedOff = output<{
         claimReleased: true;
-        task: {
-          finding: string;
-          research: string[];
-          plannedValidation: string[];
-          files: Array<{ path: string; symbol?: string }>;
-          validationRecords: Array<{
-            outcome: string;
-            qualifiesForCompletion: boolean;
-          }>;
-        };
+        changedFields: string[];
+        reconciliationFields: string[];
+        counts: Array<{
+          field: string;
+          persisted: number;
+          duplicatesIgnored: number;
+        }>;
+        validation: { id: string; qualifiesForCompletion: boolean };
       }>(
         await client.callTool({
           name: "actionables.handoff_task",
@@ -1741,6 +1860,10 @@ describe("Actionables MCP", () => {
             version: inProgress.version,
             finding: "The atomic MCP handoff completed.",
             addFiles: [
+              {
+                path: "apps/api/src/agent-tasks.ts",
+                symbol: "handoffClaimedAgentTask",
+              },
               {
                 path: "apps/api/src/agent-tasks.ts",
                 symbol: "handoffClaimedAgentTask",
@@ -1759,27 +1882,55 @@ describe("Actionables MCP", () => {
       );
       expect(handedOff).toMatchObject({
         claimReleased: true,
-        task: {
-          finding: "The atomic MCP handoff completed.",
-          research: [
-            "The handoff path was investigated.",
-            "The transaction boundary is verified.",
-          ],
-          plannedValidation: [
-            "Run the MCP integration test.",
-            "Run the atomic handoff test.",
-          ],
-          files: expect.arrayContaining([
-            {
-              path: "apps/api/src/agent-tasks.ts",
-              symbol: "handoffClaimedAgentTask",
-            },
-          ]),
-        },
+        changedFields: [
+          "finding",
+          "research",
+          "plannedValidation",
+          "files",
+          "validationRecords",
+        ],
+        reconciliationFields: [
+          "finding",
+          "research",
+          "plannedValidation",
+          "files",
+        ],
       });
-      expect(handedOff.task.validationRecords.at(-1)).toMatchObject({
-        outcome: "Passed",
+      expect(handedOff.validation).toMatchObject({
+        id: expect.any(String),
         qualifiesForCompletion: true,
+      });
+      expect(
+        await prisma.validationRecord.findUniqueOrThrow({
+          where: { id: handedOff.validation.id },
+        }),
+      ).toMatchObject({ notesMd: "Atomic handoff integration passed." });
+      expect(handedOff.counts).toEqual([
+        { field: "research", persisted: 1, duplicatesIgnored: 0 },
+        {
+          field: "plannedValidation",
+          persisted: 1,
+          duplicatesIgnored: 0,
+        },
+        { field: "files", persisted: 1, duplicatesIgnored: 1 },
+        {
+          field: "validationRecords",
+          persisted: 1,
+          duplicatesIgnored: 0,
+        },
+      ]);
+      expect(
+        await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }),
+      ).toMatchObject({
+        finding: "The atomic MCP handoff completed.",
+        researchJson: [
+          "The handoff path was investigated.",
+          "The transaction boundary is verified.",
+        ],
+        validationJson: [
+          "Run the MCP integration test.",
+          "Run the atomic handoff test.",
+        ],
       });
       expect(
         await prisma.agentTaskClaim.findUnique({
@@ -1828,8 +1979,13 @@ describe("Actionables MCP", () => {
         id: number;
         version: number;
         status: string;
-        appended: number;
-        duplicatesIgnored: number;
+        changedFields: string[];
+        reconciliationFields: string[];
+        counts: Array<{
+          field: string;
+          persisted: number;
+          duplicatesIgnored: number;
+        }>;
         lifecycleGuidance?: string;
       }>(
         await client.callTool({
@@ -1843,6 +1999,11 @@ describe("Actionables MCP", () => {
               "New note",
               "Another note",
             ],
+            appendPlannedValidation: ["New check", "New check"],
+            addUserSources: [
+              { type: "Command", locator: "pnpm test" },
+              { type: "Command", locator: "pnpm test" },
+            ],
           },
         }),
       );
@@ -1850,8 +2011,17 @@ describe("Actionables MCP", () => {
         id: researchingTask.sourceOrdinal,
         version: researchingClaim.task.version + 1,
         status: "Researching",
-        appended: 2,
-        duplicatesIgnored: 2,
+        changedFields: ["research", "plannedValidation", "userSources"],
+        reconciliationFields: ["research", "plannedValidation", "userSources"],
+        counts: [
+          { field: "research", persisted: 2, duplicatesIgnored: 2 },
+          {
+            field: "plannedValidation",
+            persisted: 2,
+            duplicatesIgnored: 0,
+          },
+          { field: "userSources", persisted: 1, duplicatesIgnored: 1 },
+        ],
         readiness: {
           requiredForReady: ["finding"],
           blockers: [expect.objectContaining({ field: "finding" })],
@@ -1883,8 +2053,9 @@ describe("Actionables MCP", () => {
         id: researchingTask.sourceOrdinal,
         version: mixed.version + 1,
         status: "Researching",
-        appended: 0,
-        duplicatesIgnored: 2,
+        changedFields: [],
+        reconciliationFields: [],
+        counts: [{ field: "research", persisted: 0, duplicatesIgnored: 2 }],
         readiness: {
           requiredForReady: ["finding"],
         },
@@ -1920,8 +2091,9 @@ describe("Actionables MCP", () => {
         id: readyTask.sourceOrdinal,
         version: readyClaim.task.version + 1,
         status: "Ready",
-        appended: 1,
-        duplicatesIgnored: 0,
+        changedFields: ["research"],
+        reconciliationFields: ["research"],
+        counts: [{ field: "research", persisted: 1, duplicatesIgnored: 0 }],
         readiness: { requiredForReady: [], blockers: [] },
         permittedTransitions: expect.not.arrayContaining(["Ready"]),
       });
@@ -2578,7 +2750,6 @@ describe("Actionables MCP", () => {
       );
       const completed = output<{
         status: string;
-        terminal: boolean;
         version: number;
       }>(
         await client.callTool({
@@ -2590,7 +2761,12 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      expect(completed).toMatchObject({ status: "Done", terminal: true });
+      expect(completed).toMatchObject({
+        status: "Done",
+        changedFields: ["status"],
+        reconciliationFields: [],
+        claimReleased: true,
+      });
 
       for (const view of ["mine", "available"] as const) {
         const listed = output<{
@@ -2608,6 +2784,7 @@ describe("Actionables MCP", () => {
         );
         expect(listed).toEqual({
           items: [],
+          hasMore: false,
           workItem: {
             id: task.sourceOrdinal,
             status: "Done",

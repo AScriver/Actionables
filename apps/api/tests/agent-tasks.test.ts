@@ -9,17 +9,24 @@ import {
   claimAgentTask,
   claimAgentTaskWithProjection,
   dismissAgentTask,
+  dismissAgentTaskWithProjection,
   forceReleaseAgentTaskClaim,
   handoffClaimedAgentTask,
+  handoffClaimedAgentTaskWithProjection,
   getScopedTerminalAgentTask,
   listAgentTasks,
   recoverAgentTaskClaim,
   recoverAgentTaskClaimWithProjection,
   recordClaimedAgentTaskValidation,
+  recordClaimedAgentTaskValidationWithProjection,
   releaseAgentTaskClaim,
+  releaseAgentTaskClaimWithProjection,
   renewAgentTaskClaim,
+  renewAgentTaskClaimWithProjection,
   transitionClaimedAgentTask,
+  transitionClaimedAgentTaskWithProjection,
   updateClaimedAgentTask,
+  updateClaimedAgentTaskWithProjection,
 } from "../src/agent-tasks.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
@@ -143,6 +150,14 @@ afterAll(async () => {
 describe("agent task claims", () => {
   it("lists only active nonterminal tasks and filters available versus mine", async () => {
     const available = await createTask({ title: "Available" });
+    const availableChild = await createTask({ title: "Available child" });
+    await prisma.hierarchyRelationship.create({
+      data: {
+        parentId: available.id,
+        childId: availableChild.id,
+        provenance: "test",
+      },
+    });
     const mine = await createTask({ title: "Mine" });
     await createTask({ status: "Done", title: "Done" });
     await createTask({
@@ -168,6 +183,15 @@ describe("agent task claims", () => {
     expect(availableList.items.map((item) => item.id)).not.toContain(
       mine.sourceOrdinal,
     );
+    expect(availableList.hasMore).toBe(false);
+    const bounded = await listAgentTasks(prisma, {
+      agentId: "agent:list",
+      view: "available",
+      workItemId: available.sourceOrdinal,
+      limit: 1,
+    });
+    expect(bounded.items).toHaveLength(1);
+    expect(bounded.hasMore).toBe(true);
 
     const mineList = await listAgentTasks(prisma, {
       agentId: "agent:list",
@@ -180,6 +204,7 @@ describe("agent task claims", () => {
         claim: expect.objectContaining({ agentId: "agent:list" }),
       }),
     ]);
+    expect(mineList.hasMore).toBe(false);
     expect(claimed.task.status).toBe("Ready");
   });
 
@@ -211,6 +236,7 @@ describe("agent task claims", () => {
       ]);
       expect(mine).toEqual({
         items: [],
+        hasMore: false,
         workItem: {
           id: task.sourceOrdinal,
           status: task.status,
@@ -419,6 +445,14 @@ describe("agent task claims", () => {
       expect(summary.childIds).toEqual(expectedChildIds);
       expect(summary.childCount).toBe(101);
     };
+    const fullPage = await listAgentTasks(prisma, {
+      agentId: `codex:${threadId}`,
+      view: "available",
+      workItemId: root.sourceOrdinal,
+      limit: 100,
+    });
+    expect(fullPage.items).toHaveLength(100);
+    expect(fullPage.hasMore).toBe(true);
 
     const claimed = await claimAgentTask(
       prisma,
@@ -486,7 +520,7 @@ describe("agent task claims", () => {
     ).toBe(1);
   });
 
-  it("rolls back claim credential changes when response projection fails", async () => {
+  it("rolls back claim and routine mutations when response projection fails", async () => {
     const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df98";
     const task = await createTask({ title: "Projection rollback" });
     const projectionError = new Error("Simulated response projection failure");
@@ -567,6 +601,121 @@ describe("agent task claims", () => {
         },
       }),
     ).toBe(0);
+
+    const rollbackSnapshot = await prisma.actionable.findUniqueOrThrow({
+      where: { id: task.id },
+      include: { agentTaskClaim: true, validationRecords: true },
+    });
+    const claimedInput = {
+      claimToken: claimed.claim.claimToken,
+      version: claimed.task.version,
+    };
+    const mutationNow = new Date("2026-07-25T12:12:30.000Z");
+    await expect(
+      updateClaimedAgentTaskWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { ...claimedInput, title: "Must roll back" },
+        () => {
+          throw projectionError;
+        },
+        mutationNow,
+      ),
+    ).rejects.toBe(projectionError);
+    await expect(
+      recordClaimedAgentTaskValidationWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        {
+          ...claimedInput,
+          type: "Command",
+          outcome: "Passed",
+          notes: "Must roll back",
+          evidence: "Must roll back",
+        },
+        () => {
+          throw projectionError;
+        },
+        mutationNow,
+      ),
+    ).rejects.toBe(projectionError);
+    await expect(
+      transitionClaimedAgentTaskWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { ...claimedInput, status: "Inbox" },
+        () => {
+          throw projectionError;
+        },
+        mutationNow,
+      ),
+    ).rejects.toBe(projectionError);
+    await expect(
+      handoffClaimedAgentTaskWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { ...claimedInput, finding: "Must roll back" },
+        () => {
+          throw projectionError;
+        },
+        mutationNow,
+      ),
+    ).rejects.toBe(projectionError);
+    await expect(
+      renewAgentTaskClaimWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { claimToken: claimed.claim.claimToken, leaseMinutes: 60 },
+        () => {
+          throw projectionError;
+        },
+        new Date("2026-07-25T12:13:00.000Z"),
+      ),
+    ).rejects.toBe(projectionError);
+    await expect(
+      releaseAgentTaskClaimWithProjection(
+        prisma,
+        task.sourceOrdinal,
+        { claimToken: claimed.claim.claimToken },
+        () => {
+          throw projectionError;
+        },
+        mutationNow,
+      ),
+    ).rejects.toBe(projectionError);
+    expect(
+      await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, validationRecords: true },
+      }),
+    ).toMatchObject({
+      version: rollbackSnapshot.version,
+      title: rollbackSnapshot.title,
+      finding: rollbackSnapshot.finding,
+      agentTaskClaim: rollbackSnapshot.agentTaskClaim,
+      validationRecords: rollbackSnapshot.validationRecords,
+    });
+
+    const dismissible = await createTask({
+      status: "Inbox",
+      creatorThreadId: threadId,
+    });
+    await expect(
+      dismissAgentTaskWithProjection(
+        prisma,
+        dismissible.sourceOrdinal,
+        { reason: "Must roll back" },
+        { threadId },
+        () => {
+          throw projectionError;
+        },
+      ),
+    ).rejects.toBe(projectionError);
+    expect(
+      await prisma.actionable.findUniqueOrThrow({
+        where: { id: dismissible.id },
+      }),
+    ).toMatchObject({ status: "Inbox", version: dismissible.version });
   });
 
   it("stores only a token hash, increments version, and records a bounded claim event", async () => {

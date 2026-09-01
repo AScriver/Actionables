@@ -2127,15 +2127,20 @@ export async function transitionActionable(
     : prisma.$transaction(operation);
 }
 
-export async function recordValidation(
+type RecordValidationResult = {
+  task: ActionableDetail | null;
+  validationRecordId: string | null;
+};
+
+async function recordValidationResult(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   input: Omit<CreateValidationRecordRequest, "origin"> & { origin: string },
   existingTransaction?: TransactionClient,
-): Promise<ActionableDetail | null> {
+): Promise<RecordValidationResult> {
   const operation = async (transaction: TransactionClient) => {
     const current = await currentOrNotFound(transaction, sourceOrdinal);
-    if (!current) return null;
+    if (!current) return { task: null, validationRecordId: null };
     if (current.version !== input.version)
       throw new VersionConflictError(toDetail(current));
     if (!input.notes.trim() && !input.evidence.trim()) {
@@ -2186,7 +2191,7 @@ export async function recordValidation(
     });
     if (updated.count !== 1) {
       const latest = await currentOrNotFound(transaction, sourceOrdinal);
-      if (!latest) return null;
+      if (!latest) return { task: null, validationRecordId: null };
       throw new VersionConflictError(toDetail(latest));
     }
 
@@ -2219,9 +2224,42 @@ export async function recordValidation(
     });
 
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
-    return saved ? toDetail(saved) : null;
+    return {
+      task: saved ? toDetail(saved) : null,
+      validationRecordId: record.id,
+    };
   };
   return existingTransaction
     ? operation(existingTransaction)
     : prisma.$transaction(operation);
+}
+
+export async function recordValidation(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: Omit<CreateValidationRecordRequest, "origin"> & { origin: string },
+  existingTransaction?: TransactionClient,
+): Promise<ActionableDetail | null> {
+  return (
+    await recordValidationResult(
+      prisma,
+      sourceOrdinal,
+      input,
+      existingTransaction,
+    )
+  ).task;
+}
+
+export function recordValidationWithRecord(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: Omit<CreateValidationRecordRequest, "origin"> & { origin: string },
+  existingTransaction?: TransactionClient,
+): Promise<RecordValidationResult> {
+  return recordValidationResult(
+    prisma,
+    sourceOrdinal,
+    input,
+    existingTransaction,
+  );
 }

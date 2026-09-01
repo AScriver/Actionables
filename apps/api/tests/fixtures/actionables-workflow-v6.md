@@ -10,7 +10,7 @@ Use Actionables as the coordination record for substantive work without letting 
 ## Start or resume work
 
 1. Let the Actionables MCP server derive the current Codex thread ID from host-supplied request metadata. Never supply, invent, or persist a model-authored agent ID.
-2. Call `actionables.list_tasks` with `view: mine`; the server uses the calling thread as claim identity. Inspect `hasMore` before treating a bounded list as exhaustive; raise `limit` up to 100 when needed, and do not assume all matches were returned while `hasMore` remains true.
+2. Call `actionables.list_tasks` with `view: mine`; the server uses the calling thread as claim identity.
 3. Resolve the governing feature or bug's top-level Actionable ID as `workItemId` from the task context. Never infer it from repository, worktree, title, tags, or arbitrary pending work.
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
@@ -54,7 +54,6 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - After claim, use the task ID, claim token, and latest version where required. Do not repeat the agent ID or mutation lease duration; only explicit renewal accepts `leaseMinutes`.
 - Re-fetch compact detail after a mutation version conflict, reconcile the current record, and retry only if the intended change is still valid. For detail-page version conflicts, discard the partial field and restart its paging from the current compact version.
 - After each composed tool result, branch on `isError` before accessing fields such as `version`. Stop dependent calls when it is true, then follow structured `nextAction` guidance. Retry only when `retryable` is true and the stated prerequisite has been satisfied.
-- Treat successful `structuredContent` as authoritative; success `content.text` is only a short compatibility notice. Routine mutations return a lean receipt, not task detail: advance with its `version`, `status`, `readiness`, and `permittedTransitions`; use `counts` for persisted and duplicate-ignored additions; and fetch only fields named by `reconciliationFields` before relying on their authoritative stored values. An empty `reconciliationFields` means the mutation did not invalidate cached implementation-critical detail.
 - Prefer `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding material; use replacement fields only for intentional rewrites.
 - Record meaningful state changes, research conclusions, decisions, plans, blockers, and validation evidence. Do not emit heartbeat or narration-only updates.
 - Renew explicitly during long periods without mutations. Successful claimed mutations may renew the lease automatically.

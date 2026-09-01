@@ -752,6 +752,7 @@ export const listAgentTasksRequestSchema = z
 export const listAgentTasksResponseSchema = z
   .object({
     items: z.array(agentTaskSummarySchema).max(100),
+    hasMore: z.boolean(),
     workItem: agentTaskWorkItemStateSchema.nullable(),
   })
   .strict();

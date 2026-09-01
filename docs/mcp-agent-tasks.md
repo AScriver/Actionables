@@ -91,7 +91,8 @@ claim. Blocking and claim eligibility are filtered before the result limit is
 applied, so blocked tasks cannot hide safe work. Every scoped list also returns
 `workItem` with the root ID, status, and derived `terminal` flag. Done and
 Dismissed roots are valid read scopes; `mine` and `available` remain active-work
-views and return empty `items` for a terminal root.
+views and return empty `items` for a terminal root. Every list response includes
+`hasMore`; callers must not treat `items` as exhaustive when it is true.
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
@@ -170,15 +171,23 @@ claim. Every supplied handoff write and the release share one transaction: if
 any write fails, none of the handoff content persists and the claim remains
 active. The existing `release_task` remains the release-only operation.
 
-An `actionables.update_task` call with `appendResearch` returns only the
-authoritative research mutation receipt: `id`, latest `version`, current
-`status`, `appended`, `duplicatesIgnored`, `readiness`, and
-`permittedTransitions`. When the resulting status remains `Researching`, the
-receipt also includes `lifecycleGuidance`. It names any persisted Ready
-prerequisites that remain; only an empty `readiness.requiredForReady` together
-with Ready in `permittedTransitions` makes that transition available. A turn
-ending alone does not force the transition. Updates without `appendResearch`
-retain the compact task response.
+Routine mutations (`renew_task_claim`, `update_task`, `transition_task`,
+`dismiss_task`, `record_task_validation`, `handoff_task`, and `release_task`)
+return one lean authoritative receipt with `id`, latest `version`, current
+`status`, `changedFields`, `claimReleased`, `reconciliationFields`, `readiness`,
+`permittedTransitions`, and `counts`. Counts identify the field plus persisted
+and duplicate-ignored additions. Renewal also reports `claimLease`; validation
+reports the created record ID and whether it qualifies for completion. When a
+result remains `Researching`, `lifecycleGuidance` names any persisted Ready
+prerequisites that remain. Only fetch implementation-critical fields named by
+`reconciliationFields`; a status-only transition therefore does not invalidate
+unchanged research or sources. Create, claim, recovery, and explicit reads keep
+their compact detail responses.
+
+Successful calls expose their authoritative result in `structuredContent`.
+`content.text` is a fixed short compatibility notice and intentionally does not
+duplicate task detail or secret claim credentials. Error text retains the
+machine-readable error payload.
 
 The enforced implementation path is `Inbox → Researching → Ready → In progress`.
 `Inbox → Ready` is rejected. Active work can become `Ready` only with non-empty
@@ -214,7 +223,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 active tasks and scoped results identify the work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Tool errors distinguish terminal, archived, and not-found recovery and return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Tool errors distinguish terminal, archived, and not-found recovery and return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.
