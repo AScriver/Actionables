@@ -11,6 +11,7 @@ import {
   dismissAgentTask,
   forceReleaseAgentTaskClaim,
   handoffClaimedAgentTask,
+  getScopedTerminalAgentTask,
   listAgentTasks,
   recoverAgentTaskClaim,
   recoverAgentTaskClaimWithProjection,
@@ -180,6 +181,103 @@ describe("agent task claims", () => {
       }),
     ]);
     expect(claimed.task.status).toBe("Ready");
+  });
+
+  it("returns terminal work-item state and supports side-effect-free scoped inspection", async () => {
+    const done = await createTask({
+      status: "Done",
+      title: "Completed work item",
+      finding: "Completed work remains inspectable.",
+    });
+    const dismissed = await createTask({
+      status: "Dismissed",
+      title: "Dismissed work item",
+    });
+
+    for (const task of [done, dismissed]) {
+      const [mine, available] = await Promise.all([
+        listAgentTasks(prisma, {
+          agentId: "agent:terminal-inspection",
+          view: "mine",
+          workItemId: task.sourceOrdinal,
+          limit: 100,
+        }),
+        listAgentTasks(prisma, {
+          agentId: "agent:terminal-inspection",
+          view: "available",
+          workItemId: task.sourceOrdinal,
+          limit: 100,
+        }),
+      ]);
+      expect(mine).toEqual({
+        items: [],
+        workItem: {
+          id: task.sourceOrdinal,
+          status: task.status,
+          terminal: true,
+        },
+      });
+      expect(available).toEqual(mine);
+
+      const before = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, activityEvents: true },
+      });
+      const first = await getScopedTerminalAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        task.sourceOrdinal,
+      );
+      const second = await getScopedTerminalAgentTask(
+        prisma,
+        task.sourceOrdinal,
+        task.sourceOrdinal,
+      );
+      const after = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, activityEvents: true },
+      });
+      expect(first).toMatchObject({
+        id: task.sourceOrdinal,
+        status: task.status,
+        version: task.version,
+      });
+      expect(second).toEqual(first);
+      expect(after.version).toBe(before.version);
+      expect(after.agentTaskClaim).toEqual(before.agentTaskClaim);
+      expect(after.activityEvents).toEqual(before.activityEvents);
+    }
+
+    const active = await createTask({ status: "Ready" });
+    await expect(
+      getScopedTerminalAgentTask(
+        prisma,
+        active.sourceOrdinal,
+        active.sourceOrdinal,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+
+    const archived = await createTask({
+      status: "Done",
+      archivedAt: new Date(),
+    });
+    await expect(
+      getScopedTerminalAgentTask(
+        prisma,
+        archived.sourceOrdinal,
+        archived.sourceOrdinal,
+      ),
+    ).rejects.toMatchObject({ code: "ARCHIVED" });
+    await expect(
+      getScopedTerminalAgentTask(prisma, 999_999, done.sourceOrdinal),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      getScopedTerminalAgentTask(
+        prisma,
+        dismissed.sourceOrdinal,
+        done.sourceOrdinal,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
   });
 
   it("requires a feature or bug root and keeps discovery and claims inside it", async () => {

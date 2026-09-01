@@ -249,7 +249,7 @@ describe("Actionables MCP", () => {
         "pass contentHash with each nextOffset until null",
       );
       expect(client.getInstructions()).toContain(
-        "if it is absent, normal flow may continue",
+        "If reconciliationGuidance is absent, normal flow may continue",
       );
       expect(client.getInstructions()).toContain(
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
@@ -2505,6 +2505,328 @@ describe("Actionables MCP", () => {
       expect(noncritical.task.truncation).not.toHaveProperty(
         "reconciliationGuidance",
       );
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("supports scoped terminal list and exact reads without reopening work", async () => {
+    const longFinding = `Terminal inspection ${"x".repeat(8_500)}`;
+    const created = await createTask({
+      status: "Ready",
+      title: "Terminal inspection workflow",
+    });
+    const task = await prisma.actionable.update({
+      where: { id: created.id },
+      data: {
+        finding: longFinding,
+        researchJson: json(["Terminal inspection lifecycle was researched."]),
+      },
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      const inProgress = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            status: "In progress",
+          },
+        }),
+      );
+      const resolved = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: inProgress.version,
+            resolution:
+              "Completed the work and retained a read-only historical record.",
+          },
+        }),
+      );
+      const validated = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.record_task_validation",
+          arguments: {
+            ...credentials,
+            version: resolved.version,
+            type: "Command",
+            outcome: "Passed",
+            notes: "Terminal inspection fixture passed.",
+            evidence: "The fixture reached its intended final state.",
+          },
+        }),
+      );
+      const completed = output<{
+        status: string;
+        terminal: boolean;
+        version: number;
+      }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: validated.version,
+            status: "Done",
+          },
+        }),
+      );
+      expect(completed).toMatchObject({ status: "Done", terminal: true });
+
+      for (const view of ["mine", "available"] as const) {
+        const listed = output<{
+          items: unknown[];
+          workItem: { id: number; status: string; terminal: boolean };
+        }>(
+          await client.callTool({
+            name: "actionables.list_tasks",
+            arguments: {
+              view,
+              workItemId: task.sourceOrdinal,
+              limit: 100,
+            },
+          }),
+        );
+        expect(listed).toEqual({
+          items: [],
+          workItem: {
+            id: task.sourceOrdinal,
+            status: "Done",
+            terminal: true,
+          },
+        });
+      }
+
+      const beforeReads = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, activityEvents: true },
+      });
+      const compact = output<{
+        id: number;
+        status: string;
+        terminal: boolean;
+        version: number;
+      }>(
+        await client.callTool({
+          name: "actionables.get_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+          },
+        }),
+      );
+      expect(compact).toMatchObject({
+        id: task.sourceOrdinal,
+        status: "Done",
+        terminal: true,
+        version: completed.version,
+      });
+
+      const firstPage = output<{
+        json: string;
+        contentHash: string;
+        nextOffset: number | null;
+      }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: compact.version,
+            field: "finding",
+          },
+        }),
+      );
+      expect(firstPage.nextOffset).toBe(8_000);
+      const secondPage = output<{ json: string; nextOffset: null }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: compact.version,
+            field: "finding",
+            offset: firstPage.nextOffset,
+            contentHash: firstPage.contentHash,
+          },
+        }),
+      );
+      expect(JSON.parse(firstPage.json + secondPage.json)).toBe(longFinding);
+      const afterReads = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { agentTaskClaim: true, activityEvents: true },
+      });
+      expect(afterReads.version).toBe(beforeReads.version);
+      expect(afterReads.agentTaskClaim).toBeNull();
+      expect(afterReads.activityEvents).toEqual(beforeReads.activityEvents);
+
+      const terminalClaim = errorOutput(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: compact.version,
+          },
+        }),
+      );
+      expect(terminalClaim).toMatchObject({
+        code: "TERMINAL",
+        retryable: false,
+        nextAction: expect.stringContaining("read-only"),
+      });
+      const terminalChild = errorOutput(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: {
+            idempotencyKey: randomUUID(),
+            workItemId: task.sourceOrdinal,
+            parentId: task.sourceOrdinal,
+            title: "Must not be created under terminal work",
+            priority: "Medium",
+            description: "Terminal work stays closed.",
+            effort: "S",
+            plannedValidation: ["Verify rejection."],
+            tags: ["terminal"],
+          },
+        }),
+      );
+      expect(terminalChild.code).toBe("TERMINAL");
+
+      const dismissed = await createTask({ status: "Dismissed" });
+      const dismissedList = output<{
+        items: unknown[];
+        workItem: { status: string; terminal: boolean };
+      }>(
+        await client.callTool({
+          name: "actionables.list_tasks",
+          arguments: {
+            view: "available",
+            workItemId: dismissed.sourceOrdinal,
+          },
+        }),
+      );
+      expect(dismissedList).toMatchObject({
+        items: [],
+        workItem: { status: "Dismissed", terminal: true },
+      });
+      expect(
+        output<{ status: string; terminal: boolean }>(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: {
+              id: dismissed.sourceOrdinal,
+              workItemId: dismissed.sourceOrdinal,
+            },
+          }),
+        ),
+      ).toMatchObject({ status: "Dismissed", terminal: true });
+
+      const active = await createTask({ status: "Ready" });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: {
+              id: active.sourceOrdinal,
+              workItemId: active.sourceOrdinal,
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      const archived = await createTask({ status: "Done" });
+      await prisma.actionable.update({
+        where: { id: archived.id },
+        data: { archivedAt: new Date() },
+      });
+      const archivedRead = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task",
+          arguments: {
+            id: archived.sourceOrdinal,
+            workItemId: archived.sourceOrdinal,
+          },
+        }),
+      );
+      expect(archivedRead).toMatchObject({
+        code: "ARCHIVED",
+        nextAction: expect.stringContaining("Restore"),
+      });
+      const missingRead = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task",
+          arguments: {
+            id: 999_999,
+            workItemId: task.sourceOrdinal,
+          },
+        }),
+      );
+      expect(missingRead).toMatchObject({
+        code: "NOT_FOUND",
+        nextAction: expect.stringContaining("Verify"),
+      });
+
+      const conflictCreated = await createTask({ status: "Done" });
+      const conflictTask = await prisma.actionable.update({
+        where: { id: conflictCreated.id },
+        data: { finding: longFinding },
+      });
+      const conflictFirstPage = output<{
+        contentHash: string;
+        nextOffset: number;
+      }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: conflictTask.sourceOrdinal,
+            workItemId: conflictTask.sourceOrdinal,
+            version: conflictTask.version,
+            field: "finding",
+          },
+        }),
+      );
+      await prisma.actionable.update({
+        where: { id: conflictTask.id },
+        data: { status: "Ready", version: { increment: 1 } },
+      });
+      const conflict = errorOutput(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: {
+            id: conflictTask.sourceOrdinal,
+            workItemId: conflictTask.sourceOrdinal,
+            version: conflictTask.version,
+            field: "finding",
+            offset: conflictFirstPage.nextOffset,
+            contentHash: conflictFirstPage.contentHash,
+          },
+        }),
+      );
+      expect(conflict).toMatchObject({
+        code: "TERMINAL_READ_INVALIDATED",
+        retryable: false,
+        nextAction: expect.stringMatching(/stop terminal inspection/i),
+        currentVersion: conflictTask.version + 1,
+      });
     } finally {
       await transport.close();
     }

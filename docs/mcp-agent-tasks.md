@@ -62,10 +62,10 @@ The server instructions direct agents to use this sequence:
 
 1. List `mine`.
 2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields; never use a direct task as the parent. Reuse the UUID only for an exact retry.
-3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`.
-4. Claim the exact listed version with the same `workItemId`.
+3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
+4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
-6. Start from the compact task detail returned by claim. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. If any page returns `VERSION_CONFLICT`, discard the partial value and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue.
+6. Start from the compact task detail returned by claim or terminal inspection. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. If any page returns `VERSION_CONFLICT`, discard the partial value and restart from the current compact detail. If a terminal page returns `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading the active task with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue.
 7. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
 8. For a newly claimed Inbox task, transition to `Researching` before investigation.
 9. Before transitioning to `Ready` or advancing Ready to `In progress`, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
@@ -88,7 +88,10 @@ A work item is one existing top-level Actionable representing the feature or bug
 Available discovery returns only active, unarchived, nonterminal tasks that are
 not manually blocked, have no unresolved dependency, and have no unexpired
 claim. Blocking and claim eligibility are filtered before the result limit is
-applied, so blocked tasks cannot hide safe work.
+applied, so blocked tasks cannot hide safe work. Every scoped list also returns
+`workItem` with the root ID, status, and derived `terminal` flag. Done and
+Dismissed roots are valid read scopes; `mine` and `available` remain active-work
+views and return empty `items` for a terminal root.
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
@@ -136,10 +139,26 @@ from the owning thread returns `OWN_CLAIM_ACTIVE` with `currentVersion` and
 machine-readable guidance to `recover_task_claim`; other threads cannot use
 the recovery operation.
 
-After claim, the token identifies the stored agent claim. Get, detail, update,
-transition, validation, and release calls do not repeat `agentId`; only
-explicit renewal accepts a new `leaseMinutes`. Successful mutations use the
-server's default renewal period.
+After claim, the token identifies the stored agent claim. Active get and detail
+reads, plus update, transition, validation, and release calls, do not repeat
+`agentId`; only explicit renewal accepts a new `leaseMinutes`. Successful
+mutations use the server's default renewal period.
+
+`actionables.get_task` and `actionables.get_task_detail` accept exactly one read
+authorization. Active work uses its valid `claimToken`. Read-only inspection of
+a Done or Dismissed task uses the explicit top-level `workItemId`; the server
+validates that the target is the root or one direct task, rejects archived and
+nonterminal targets, and returns `terminal: true` on compact terminal detail.
+Terminal reads do not recreate or renew claims, change versions, or add activity.
+Paged detail remains version- and content-hash-bound across a later reopen. A
+reopen during paging returns `TERMINAL_READ_INVALIDATED`, not a retry instruction
+that would reuse the now-invalid terminal scope.
+
+Terminal inspection never reopens work. Continued work requires explicit user
+authorization and the existing dashboard transition from Done or Dismissed to
+Ready, including its required audited reason, before the normal list and claim
+flow resumes. A separately authorized new follow-up is a new Actionable; do not
+claim a relationship unless one was actually recorded.
 
 Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate appended research notes and added source references are ignored.
 
@@ -195,7 +214,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 tasks. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return the claim token, renew the claim, or change the task version. Tool errors return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 active tasks and scoped results identify the work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Tool errors distinguish terminal, archived, and not-found recovery and return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.

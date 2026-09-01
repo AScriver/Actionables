@@ -14,14 +14,13 @@ Use Actionables as the coordination record for substantive work without letting 
 3. Resolve the governing feature or bug's top-level Actionable ID as `workItemId` from the task context. Never infer it from repository, worktree, title, tags, or arbitrary pending work.
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
-6. Treat a scoped list with `workItem.terminal: true` as a successful read even when `items` is empty. Inspect a known Done or Dismissed task with `actionables.get_task` using its top-level `workItemId`; page truncated fields with `actionables.get_task_detail` using that same `workItemId`. Terminal inspection is read-only and does not create lifecycle ownership.
-7. Claim only the root or a direct task returned from an active work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token, so do not immediately fetch again.
-8. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing any dependent mutation, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
-9. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. On `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading active work with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
-10. For a newly claimed Inbox task, transition to Researching before beginning investigation.
-11. Before moving to Ready or advancing Ready to In progress, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
-12. Transition from Ready to In progress before making any implementation changes.
-13. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
+6. Claim only the root or a direct task returned from that work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token, so do not immediately fetch again.
+7. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing any dependent mutation, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
+8. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
+9. For a newly claimed Inbox task, transition to Researching before beginning investigation.
+10. Before moving to Ready or advancing Ready to In progress, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
+11. Transition from Ready to In progress before making any implementation changes.
+12. If no task in that work item matches, continue the user's work without claiming anything and state in the final report that Actionables was not updated.
 
 If the Actionables MCP server or required tool is unavailable, continue the user's work and report the tracking limitation. Never claim a merely adjacent task.
 
@@ -65,7 +64,6 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 ## Lifecycle accountability
 
 - Track every Actionable created, claimed, or transitioned during the task, including accidental creations. Read-only inspection does not create lifecycle ownership.
-- Do not claim or mutate a Done or Dismissed Actionable. If continued work is explicitly authorized, reopen it to Ready in the dashboard with the required audited reason, then use the normal list and claim flow. A new follow-up is separate work and requires normal creation authority; do not imply a relationship that was not recorded.
 - Treat user-provided reports as sources, not research. Recording, restating, or paraphrasing a report does not satisfy the Researching phase.
 - A claimed Actionable may remain Researching between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, remaining questions, and the next research step. Do not force a status transition merely because a turn ended.
 - Move an Actionable to Ready only after at least one independent investigative action, such as inspecting relevant code, reproducing the behavior, or consulting authoritative documentation. Record the action and its observed result; an unverified research note is insufficient. Confirm the latest `readiness.requiredForReady` is empty and the intended target appears in `permittedTransitions` before moving to Ready or from Ready to In progress.
@@ -91,9 +89,8 @@ Use lifecycle states consistently:
 
 1. Record Resolution content plus actual validation with commands, results, or other evidence before transitioning to Done.
 2. Transition to Done only when the existing completion rules pass. A terminal transition releases the claim.
-3. Verify terminal state read-only with a scoped list or `get_task` using the top-level `workItemId`; an empty active-work list with `workItem.terminal: true` is expected.
-4. Release a nonterminal claim when abandoning the work or handing it to another agent.
-5. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.
-6. Include the final Actionables status in the user-facing handoff without exposing credentials.
+3. Release a nonterminal claim when abandoning the work or handing it to another agent.
+4. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.
+5. Include the final Actionables status in the user-facing handoff without exposing credentials.
 
 Do not create tasks beyond the authorized `create_task` operation, modify other hierarchy or dependencies, archive records, bypass validation, or broaden scope unless dedicated tools and explicit user authority exist.

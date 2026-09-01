@@ -22,6 +22,7 @@ const knownLegacySkillHashes = new Set([
   "d090896ff221b734e43c6bba21b7e79b195f62a20b47961b4a7147b6281c779d",
   "56955943f579ffaa246d6c9fb03340334387b080e059e42bc8e4044f721a9c1d",
   "495f61a7d11d93f2104c56a9c21c9cc6a0bb021badc7fbc0d3740902148c2f37",
+  "c31e09f64ddd667dfed2da664701f832e86d2c135f1c30e031c9b19446bd1bc4",
 ]);
 const repositoryRoot = resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),

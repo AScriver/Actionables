@@ -138,6 +138,7 @@ export class AgentTaskClaimError extends Error {
       | "NOT_FOUND"
       | "ARCHIVED"
       | "TERMINAL"
+      | "TERMINAL_READ_INVALIDATED"
       | "VERSION_CONFLICT"
       | "ALREADY_CLAIMED"
       | "OWN_CLAIM_ACTIVE"
@@ -326,6 +327,7 @@ async function findMutationTask(
 async function requireWorkItem(
   prisma: AppPrismaClient | TransactionClient,
   sourceOrdinal: number,
+  options: { allowTerminal?: boolean } = {},
 ) {
   const row = await findTask(prisma, sourceOrdinal);
   if (!row) {
@@ -351,7 +353,7 @@ async function requireWorkItem(
       "The feature or bug work item is archived.",
     );
   }
-  if (terminalStatuses.includes(row.status)) {
+  if (!options.allowTerminal && terminalStatuses.includes(row.status)) {
     throw new AgentTaskClaimError(
       "TERMINAL",
       "The feature or bug work item is terminal.",
@@ -627,7 +629,22 @@ export async function listAgentTasks(
   const workItem =
     request.workItemId === undefined
       ? null
-      : await requireWorkItem(prisma, request.workItemId);
+      : await requireWorkItem(prisma, request.workItemId, {
+          allowTerminal: true,
+        });
+  const workItemState = workItem
+    ? {
+        id: workItem.sourceOrdinal,
+        status: workItem.status,
+        terminal: terminalStatuses.includes(workItem.status),
+      }
+    : null;
+  if (workItemState?.terminal) {
+    return listAgentTasksResponseSchema.parse({
+      items: [],
+      workItem: workItemState,
+    });
+  }
   const baseWhere = {
     archivedAt: null,
     status: { notIn: terminalStatuses },
@@ -706,6 +723,7 @@ export async function listAgentTasks(
       }
       return summary;
     }),
+    workItem: workItemState,
   });
 }
 
@@ -1181,6 +1199,62 @@ export async function getClaimedAgentTask(
   if (!result.task)
     throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
   return result.task;
+}
+
+export async function getScopedTerminalAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  workItemSourceOrdinal: number,
+  expectedVersion?: number,
+): Promise<ActionableDetail> {
+  return prisma.$transaction(async (tx) => {
+    const workItem = await requireWorkItem(tx, workItemSourceOrdinal, {
+      allowTerminal: true,
+    });
+    const row = await findTask(tx, sourceOrdinal);
+    if (!row) {
+      throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+    }
+    requireTaskInWorkItem(row, workItem);
+    if (isArchived(row)) {
+      throw new AgentTaskClaimError(
+        "ARCHIVED",
+        "Archived Actionables cannot be inspected by an agent.",
+      );
+    }
+    if (!terminalStatuses.includes(row.status)) {
+      if (expectedVersion !== undefined) {
+        throw new AgentTaskClaimError(
+          "TERMINAL_READ_INVALIDATED",
+          "This Actionable is no longer terminal, so scoped terminal inspection has ended.",
+          undefined,
+          row.version,
+        );
+      }
+      throw new AgentTaskClaimError(
+        "INVALID_REQUEST",
+        "Active Actionables require a valid claim token for exact inspection.",
+        {
+          claimToken: [
+            "Use claimToken for active claimed work; workItemId is only for terminal inspection.",
+          ],
+        },
+      );
+    }
+    if (expectedVersion !== undefined && row.version !== expectedVersion) {
+      throw new AgentTaskClaimError(
+        "VERSION_CONFLICT",
+        "This Actionable changed after it was fetched.",
+        undefined,
+        row.version,
+      );
+    }
+    const task = await getActionable(tx, sourceOrdinal);
+    if (!task) {
+      throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+    }
+    return task;
+  });
 }
 
 async function updateClaimedAgentTaskResult(

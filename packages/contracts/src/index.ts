@@ -709,6 +709,14 @@ export const agentTaskSummarySchema = z
   })
   .strict();
 
+export const agentTaskWorkItemStateSchema = z
+  .object({
+    id: z.number().int().positive(),
+    status: statusSchema,
+    terminal: z.boolean(),
+  })
+  .strict();
+
 export const listAgentTasksRequestSchema = z
   .object({
     agentId: agentIdSchema,
@@ -744,6 +752,7 @@ export const listAgentTasksRequestSchema = z
 export const listAgentTasksResponseSchema = z
   .object({
     items: z.array(agentTaskSummarySchema).max(100),
+    workItem: agentTaskWorkItemStateSchema.nullable(),
   })
   .strict();
 
