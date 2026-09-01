@@ -12,17 +12,17 @@ Result: **pass with the limitations below**. No unresolved release blocker was f
 
 ## Environment and exact versions
 
-| Component | Verified version |
-| --- | --- |
-| OS | Windows 11 Enterprise 25H2, build 26200.8390, x64 |
-| Shell | PowerShell 7.6.3 |
-| Intended Node runtime | Node.js 24.18.0; npm 11.16.0; Corepack 0.35.0 |
-| Additional supported runtime | Node.js 22.19.0; npm 10.9.3 |
-| Package manager | pnpm 11.9.0, pinned by `packageManager` |
-| Prisma | CLI/client 7.9.0 |
-| Native SQLite driver | `better-sqlite3` 12.11.1 |
-| Browser runner | Playwright 1.61.1; Chromium 149.0.7827.55 |
-| Installed browsers | Microsoft Edge 150.0.4078.83; Google Chrome 150.0.7871.182 |
+| Component                    | Verified version                                           |
+| ---------------------------- | ---------------------------------------------------------- |
+| OS                           | Windows 11 Enterprise 25H2, build 26200.8390, x64          |
+| Shell                        | PowerShell 7.6.3                                           |
+| Intended Node runtime        | Node.js 24.18.0; npm 11.16.0; Corepack 0.35.0              |
+| Additional supported runtime | Node.js 22.19.0; npm 10.9.3                                |
+| Package manager              | pnpm 11.9.0, pinned by `packageManager`                    |
+| Prisma                       | CLI/client 7.9.0                                           |
+| Native SQLite driver         | `better-sqlite3` 12.11.1                                   |
+| Browser runner               | Playwright 1.61.1; Chromium 149.0.7827.55                  |
+| Installed browsers           | Microsoft Edge 150.0.4078.83; Google Chrome 150.0.7871.182 |
 
 The official Node 24.18.0 Windows x64 archive used for the isolated proof matched the published SHA-256 value `0AE68406B42D7725661DA979B1403EC9926DA205C6770827F33AAC9D8F26E821`.
 
@@ -47,12 +47,12 @@ Under **each** Node runtime, the final `pnpm run verify:release` passed as one u
 - Chromium E2E: 16 tests passed.
 - Axe/Playwright: 3 suites passed with zero reported violations and no disabled rules.
 - Production build: pass; main JavaScript 393.56 kB / 112.87 kB gzip, lazy Markdown 154.00 kB / 45.88 kB gzip, CSS 47.68 kB / 10.03 kB gzip.
-- Fresh database: all 7 migrations applied and `prisma migrate status` reported up to date.
+- Fresh database: every repository migration applied and `prisma migrate status` reported up to date.
 - Generic sample seed: first import created 32; second import reported 0 created, 0 updated, 32 unchanged.
 - Direct `better-sqlite3` load/query: pass.
 - Living-plan validation: pass.
 
-The E2E web server exercised the documented development setup and browser access during both complete gates. Production-mode proof ran the documented build, migration, seed, and `node scripts/start-production.mjs` sequence: the UI at port 4173 proxied `/api/health` to port 4174 and returned HTTP 200 with `status: ok`, `database: ok`, and a correlation ID. `Ctrl+C` closed both listeners; a second start returned health 200 again. The desktop PTY reports Ctrl+C as exit code 1 even for a control process that handles SIGINT and explicitly exits 0, so shutdown success was asserted by both ports closing and the successful restart.
+The E2E web server exercised the documented development setup and browser access during both complete gates. Production-mode proof ran the documented build, migration, seed, and `node scripts/start-production.mjs` sequence: the UI at port 4173 proxied `/api/health` to port 4174 and returned HTTP 200 with database health and a correlation ID. A 2026-09-01 maintenance update made `status: ok`, `database: ok`, and `schema: current` the readiness contract. `Ctrl+C` closed both listeners; a second start returned health 200 again. The desktop PTY reports Ctrl+C as exit code 1 even for a control process that handles SIGINT and explicitly exits 0, so shutdown success was asserted by both ports closing and the successful restart.
 
 Representative import/export and keyboard workflows also passed using the installed `msedge` and `chrome` Playwright channels.
 
@@ -64,15 +64,15 @@ Responsive screenshots and interaction checks passed at 1586Ã—990 desktop, 1280Ã
 
 Keyboard-only coverage passed for capture/triage, stale-draft recovery, lifecycle/validation, hierarchy/dependencies, search/filter/sort, archive/restore, and import preview/commit/export. `/`, `j/k`, Enter, `e`, and `c` are discoverable and suppressed while editing, in content-editable elements, with modifiers, and while a dialog is active.
 
-| State contract | Evidence and result |
-| --- | --- |
-| Initial/background loading and pending actions | Live-region/disabled-state semantic inspection plus E2E transition coverage; pass. |
+| State contract                                            | Evidence and result                                                                                                                                                                |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial/background loading and pending actions            | Live-region/disabled-state semantic inspection plus E2E transition coverage; pass.                                                                                                 |
 | Empty scope/database presentation and filtered no-results | Filtered no-results received rendered axe/manual coverage; the same semantic empty-row component is used for a zero-record result. A separate zero-record axe fixture was not run. |
-| API 500/unreachable, retry, and correlation ID | Route-failure E2E, retry recovery, visible request ID, and live error semantics; pass. |
-| Draft validation and stale write conflict | API and two-browser E2E preserve values and permit explicit reapply; pass. |
-| Archive confirmation, archived deep link, restore | Dialog containment, impact review, persistence, and focus return E2E; pass. |
-| Import parse/conflict/stale/rollback safety | API integration tests prove no partial mutation; Data UI proves preview, review, and explicit commit. |
-| Browser console | Representative full/focused runs reported no application console errors. |
+| API 500/unreachable, retry, and correlation ID            | Route-failure E2E, retry recovery, visible request ID, and live error semantics; pass.                                                                                             |
+| Draft validation and stale write conflict                 | API and two-browser E2E preserve values and permit explicit reapply; pass.                                                                                                         |
+| Archive confirmation, archived deep link, restore         | Dialog containment, impact review, persistence, and focus return E2E; pass.                                                                                                        |
+| Import parse/conflict/stale/rollback safety               | API integration tests prove no partial mutation; Data UI proves preview, review, and explicit commit.                                                                              |
+| Browser console                                           | Representative full/focused runs reported no application console errors.                                                                                                           |
 
 ## Backup and restore proof
 
@@ -95,7 +95,13 @@ The focused API suite contains eight portable-data tests, including the represen
 - Production orchestration and preview proxy were absent: added the local built-mode start harness and API proxy, then proved health/shutdown/restart.
 - Formatting, fresh-migration/native-load, and living-plan checks were not part of one ordered gate: added and executed them.
 
-An initial production health request against an intentionally unmigrated clean default database returned Prisma `P2021`; following the documented migration step produced health 200. This confirmed the runbook prerequisite and did not require an application workaround.
+A 2026-09-01 maintenance check uses an intentionally non-current active database and
+expects HTTP 503 with `SCHEMA_MIGRATION_REQUIRED` before any mutation runs.
+Restoring that isolated ledger to its previously migrated state produces health
+200 with `schema: current`, proving failures are rechecked rather than cached.
+Raw Prisma errors such as `P2021` are no longer the readiness contract. A real
+pending-migration deployment remains covered by the migration runbook rather
+than claimed as part of this recorded verification.
 
 ## Known limitations
 

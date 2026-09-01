@@ -1661,6 +1661,305 @@ export const dependencyActionRequestSchema = z
 
 export const fieldErrorsSchema = z.record(z.string(), z.array(z.string()));
 
+export const actionablesCorrelationIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/,
+    "Use letters, numbers, and . _ : - only.",
+  );
+
+export const actionablesRetryModeSchema = z.enum([
+  "same_request",
+  "after_input_change",
+  "after_state_change",
+  "never",
+]);
+export type ActionablesRetryMode = z.infer<typeof actionablesRetryModeSchema>;
+
+export const actionablesRecoveryActionSchema = z.enum([
+  "retry_request",
+  "modify_request",
+  "resolve_state",
+  "reconcile_state",
+  "migrate_database",
+  "stop",
+]);
+export type ActionablesRecoveryAction = z.infer<
+  typeof actionablesRecoveryActionSchema
+>;
+
+export const actionablesRecoverySchema = z
+  .object({
+    action: actionablesRecoveryActionSchema,
+    guidance: z.string().trim().min(1).max(2_000),
+    retryAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type ActionablesRecovery = z.infer<typeof actionablesRecoverySchema>;
+
+export const actionablesErrorResponseSchema = z
+  .object({
+    code: z.string().trim().min(1).max(100),
+    detail: z.string().trim().min(1).max(600),
+    errors: fieldErrorsSchema.optional(),
+    currentVersion: z.number().int().positive().optional(),
+    correlationId: actionablesCorrelationIdSchema,
+    retryMode: actionablesRetryModeSchema,
+    recovery: actionablesRecoverySchema,
+    retryable: z.boolean(),
+    nextAction: z.string().trim().min(1).max(2_000),
+  })
+  .strict()
+  .superRefine((payload, context) => {
+    if (payload.nextAction !== payload.recovery.guidance) {
+      context.addIssue({
+        code: "custom",
+        path: ["nextAction"],
+        message: "Legacy nextAction must mirror recovery.guidance.",
+      });
+    }
+    const retryable = ["same_request", "after_state_change"].includes(
+      payload.retryMode,
+    );
+    if (payload.retryable !== retryable) {
+      context.addIssue({
+        code: "custom",
+        path: ["retryable"],
+        message:
+          "Legacy retryable must match same-request or after-state-change recovery.",
+      });
+    }
+  });
+export type ActionablesErrorPayload = z.infer<
+  typeof actionablesErrorResponseSchema
+>;
+
+type ActionablesRecoveryDefinition = Pick<
+  ActionablesErrorPayload,
+  "retryMode"
+> &
+  Omit<ActionablesRecovery, "retryAt">;
+
+const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
+  {
+    INVALID_REQUEST: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Correct every field reported in errors, then submit a new call with corrected arguments.",
+    },
+    INVALID_SCOPE: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Choose an existing, internally consistent Actionables scope, then submit a corrected request.",
+    },
+    NOT_FOUND: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Verify the Actionable and top-level work-item IDs. Do not create a replacement implicitly.",
+    },
+    IDEMPOTENCY_CONFLICT: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Reuse the key only for an identical retry, or generate a new UUID for a new task.",
+    },
+    INVALID_STATUS_TRANSITION: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Inspect permittedTransitions on the latest task and submit a legal target; returning In progress to Researching also requires a meaningful reason.",
+    },
+    REASON_REQUIRED: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Add the required meaningful reason, then submit the corrected request.",
+    },
+    VALIDATION_EVIDENCE_REQUIRED: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "Add the required validation evidence, then submit the corrected request.",
+    },
+    RESEARCH_PHASE_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Call actionables.transition_task with status Researching, then begin investigation.",
+    },
+    RESEARCH_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Call actionables.update_task with appendResearch, then retry Ready using the returned version.",
+    },
+    READY_REQUIREMENTS_NOT_MET: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Inspect readiness.requiredForReady on the latest task. Supply only the named missing fields with finding, description, appendResearch, or appendPlannedValidation, then use the returned version and confirm Ready appears in permittedTransitions before transitioning.",
+    },
+    RESOLUTION_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Call actionables.update_task with non-empty Resolution content, then retry Done using the returned version.",
+    },
+    VALIDATION_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Record qualifying validation evidence, then retry Done using the returned version.",
+    },
+    INCOMPLETE_SUBTASKS: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Complete or explicitly dismiss every active direct task before retrying completion.",
+    },
+    VERSION_CONFLICT: {
+      retryMode: "after_state_change",
+      action: "reconcile_state",
+      guidance:
+        "Re-list or fetch the task, reconcile the newer state, then submit a new request with its current version.",
+    },
+    ALREADY_CLAIMED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Wait until the active claim expires, then re-list available tasks in the same work item before claiming its current version.",
+    },
+    OWN_CLAIM_ACTIVE: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Call actionables.recover_task_claim with this task ID and currentVersion to rotate and return fresh credentials for the current Codex thread.",
+    },
+    CLAIM_OWNER_MISMATCH: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Use the Codex thread that owns the active claim, or wait for the claim to expire.",
+    },
+    CLAIM_NOT_FOUND: {
+      retryMode: "after_state_change",
+      action: "reconcile_state",
+      guidance:
+        "List mine; if the task is no longer owned, list available in the same work item and claim its current version.",
+    },
+    INVALID_CLAIM_TOKEN: {
+      retryMode: "after_state_change",
+      action: "reconcile_state",
+      guidance:
+        "Discard the token and list mine. If this thread still owns the task, call actionables.recover_task_claim with its current version; otherwise reclaim within the same work item.",
+    },
+    CLAIM_EXPIRED: {
+      retryMode: "after_state_change",
+      action: "reconcile_state",
+      guidance:
+        "Re-list available tasks in the same work item and claim the current version.",
+    },
+    ARCHIVED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Restore the archived Actionable or governing scope before attempting agent work again.",
+    },
+    TERMINAL: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Do not retry the claim or mutation. Inspect terminal work read-only with scoped list_tasks or get_task using workItemId. Continued work requires an explicitly authorized, reasoned dashboard reopen before normal list and claim.",
+    },
+    TERMINAL_READ_INVALIDATED: {
+      retryMode: "never",
+      action: "stop",
+      guidance:
+        "Stop terminal inspection and discard any partial pages. The task is active again; continued access requires the normal explicitly authorized list and claim flow, then a fresh read with claimToken.",
+    },
+    THREAD_ID_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Run the operation from a Codex thread that supplies consistent MCP thread metadata.",
+    },
+    CREATOR_THREAD_MISMATCH: {
+      retryMode: "never",
+      action: "stop",
+      guidance:
+        "Use the Codex thread that created this unclaimed task, or use the normal claimed-task workflow instead of repeating this request.",
+    },
+    SCHEMA_MIGRATION_REQUIRED: {
+      retryMode: "after_state_change",
+      action: "migrate_database",
+      guidance:
+        "Inspect errors.migrations and the active configured Actionables database migration status. Apply missing migrations; reconcile incomplete or unexpected history with the documented operator recovery before retrying only after health reports schema current.",
+    },
+  };
+
+export type ActionablesInternalRetryMode = Extract<
+  ActionablesRetryMode,
+  "same_request" | "never"
+>;
+
+export type CreateActionablesErrorPayloadInput = {
+  code: string;
+  detail: string;
+  errors?: Record<string, string[]>;
+  currentVersion?: number;
+  correlationId: string;
+  retryAt?: string;
+  internalRetryMode?: ActionablesInternalRetryMode;
+};
+
+export function actionablesErrorPayload({
+  internalRetryMode = "never",
+  retryAt,
+  ...input
+}: CreateActionablesErrorPayloadInput): ActionablesErrorPayload {
+  const definition =
+    input.code === "INTERNAL_ERROR"
+      ? internalRetryMode === "same_request"
+        ? {
+            retryMode: "same_request" as const,
+            action: "retry_request" as const,
+            guidance:
+              "Retry the same request once. If it fails again, inspect the server log using correlationId.",
+          }
+        : {
+            retryMode: "never" as const,
+            action: "reconcile_state" as const,
+            guidance:
+              "Do not retry automatically. Inspect the server log using correlationId and reconcile task state before choosing a new operation.",
+          }
+      : (actionablesRecoveryByCode[input.code] ?? {
+          retryMode: "never" as const,
+          action: "stop" as const,
+          guidance:
+            "Do not retry automatically. Inspect the reported error and choose an explicitly supported recovery path.",
+        });
+  const recovery = {
+    action: definition.action,
+    guidance: definition.guidance,
+    ...(retryAt ? { retryAt } : {}),
+  };
+  return actionablesErrorResponseSchema.parse({
+    ...input,
+    retryMode: definition.retryMode,
+    recovery,
+    retryable: ["same_request", "after_state_change"].includes(
+      definition.retryMode,
+    ),
+    nextAction: definition.guidance,
+  });
+}
+
 export const bulkAgentTaskLimit = 25;
 export const bulkAgentTaskModeSchema = z
   .enum(["preview", "apply"])
@@ -1861,24 +2160,7 @@ export const bulkAgentTaskFailureSchema = z
   .object({
     index: bulkAgentTaskIndexSchema,
     outcome: z.literal("failed"),
-    error: z
-      .object({
-        code: z.string().trim().min(1).max(100),
-        detail: z.string().trim().min(1).max(600),
-        errors: z
-          .record(z.string(), z.array(z.string().max(600)).max(5))
-          .superRefine((errors, context) => {
-            if (Object.keys(errors).length > 20) {
-              context.addIssue({
-                code: "custom",
-                message: "Return at most 20 field-error groups.",
-              });
-            }
-          })
-          .optional(),
-        currentVersion: z.number().int().positive().optional(),
-      })
-      .strict(),
+    error: actionablesErrorResponseSchema,
   })
   .strict();
 
@@ -1979,6 +2261,7 @@ export const problemDetailsSchema = z.object({
 export const healthResponseSchema = z.object({
   status: z.literal("ok"),
   database: z.literal("ok"),
+  schema: z.literal("current"),
   requestId: z.string().min(1),
 });
 

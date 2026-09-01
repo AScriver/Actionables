@@ -155,8 +155,64 @@ describe("Actionables API", () => {
     expect(response.json()).toEqual({
       status: "ok",
       database: "ok",
+      schema: "current",
       requestId: "test-correlation-id",
     });
+  });
+
+  it("rejects unsafe correlation ids and blocks mutations until the active schema is current", async () => {
+    const latest = (
+      await prisma!.$queryRaw<Array<{ migration_name: string }>>`
+        SELECT migration_name
+        FROM "_prisma_migrations"
+        ORDER BY migration_name DESC
+        LIMIT 1
+      `
+    )[0]!;
+    const before = await prisma!.actionable.count();
+
+    await prisma!.$executeRaw`
+      UPDATE "_prisma_migrations"
+      SET rolled_back_at = CURRENT_TIMESTAMP
+      WHERE migration_name = ${latest.migration_name}
+    `;
+    try {
+      const health = await app!.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { "x-correlation-id": "unsafe correlation id" },
+      });
+      expect(health.statusCode).toBe(503);
+      expect(health.headers["x-correlation-id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(health.json()).toMatchObject({
+        code: "SCHEMA_MIGRATION_REQUIRED",
+        requestId: health.headers["x-correlation-id"],
+        errors: { migrations: [`Incomplete: ${latest.migration_name}`] },
+      });
+
+      const mutation = await app!.inject({
+        method: "POST",
+        url: "/api/actionables",
+        payload: createBody("Blocked by schema readiness"),
+      });
+      expect(mutation.statusCode).toBe(503);
+      expect(mutation.json()).toMatchObject({
+        code: "SCHEMA_MIGRATION_REQUIRED",
+      });
+      expect(await prisma!.actionable.count()).toBe(before);
+    } finally {
+      await prisma!.$executeRaw`
+        UPDATE "_prisma_migrations"
+        SET rolled_back_at = NULL
+        WHERE migration_name = ${latest.migration_name}
+      `;
+    }
+
+    const recovered = await app!.inject({ method: "GET", url: "/api/health" });
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json()).toMatchObject({ schema: "current" });
   });
 
   it("lists all 32 findings and labels the 28 collapsed top-level rows", async () => {

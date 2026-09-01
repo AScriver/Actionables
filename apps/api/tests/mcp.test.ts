@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { actionablesErrorResponseSchema } from "@actionables/contracts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
@@ -93,15 +94,20 @@ function threadMetadata(value: string) {
 async function connectClient(
   token = bearerToken,
   requestThreadId: string | null = threadId,
+  options: { address?: string; correlationId?: string } = {},
 ) {
+  const targetAddress = options.address ?? address;
   const client = new Client({ name: "actionables-test", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(
-    new URL(`${address}/mcp`),
+    new URL(`${targetAddress}/mcp`),
     {
       requestInit: {
         headers: {
           authorization: `Bearer ${token}`,
-          origin: address,
+          origin: targetAddress,
+          ...(options.correlationId
+            ? { "x-correlation-id": options.correlationId }
+            : {}),
         },
       },
     },
@@ -135,12 +141,12 @@ function output<T>(value: unknown) {
 function errorOutput(value: unknown) {
   const result = value as CallToolResult;
   expect(result.isError).toBe(true);
-  const parsed = JSON.parse(
-    result.content.find((item) => item.type === "text")?.text ?? "{}",
-  ) as Record<string, unknown>;
+  const parsed = actionablesErrorResponseSchema.parse(
+    JSON.parse(
+      result.content.find((item) => item.type === "text")?.text ?? "{}",
+    ),
+  );
   expect(result.structuredContent).toEqual(parsed);
-  expect(typeof parsed.retryable).toBe("boolean");
-  expect(typeof parsed.nextAction).toBe("string");
   return parsed;
 }
 
@@ -150,6 +156,22 @@ function validationErrorText(value: unknown) {
   const message = result.content.find((item) => item.type === "text")?.text;
   expect(message).toEqual(expect.any(String));
   return message!;
+}
+
+function captureLogger(entries: Array<{ value: unknown; message?: string }>) {
+  const logger = {
+    level: "error",
+    child: () => logger,
+    fatal: () => undefined,
+    error: (value: unknown, message?: string) =>
+      entries.push({ value, message }),
+    warn: () => undefined,
+    info: () => undefined,
+    debug: () => undefined,
+    trace: () => undefined,
+    silent: () => undefined,
+  };
+  return logger as never;
 }
 
 function describedProperties(
@@ -567,6 +589,239 @@ describe("Actionables MCP", () => {
       ).toContain("hasMore");
     } finally {
       await transport.close();
+    }
+  });
+
+  it("correlates redacted internal errors and distinguishes read retries from mutation uncertainty", async () => {
+    const entries: Array<{ value: unknown; message?: string }> = [];
+    const testApp = buildApp({
+      prisma,
+      mcpBearerToken: bearerToken,
+      logger: captureLogger(entries),
+    });
+    const testAddress = await testApp.listen({ host: "127.0.0.1", port: 0 });
+    const correlationId = "mcp-internal-error-test";
+    const connected = await connectClient(bearerToken, threadId, {
+      address: testAddress,
+      correlationId,
+    });
+
+    try {
+      const readFailure = vi
+        .spyOn(prisma.actionable, "findMany")
+        .mockRejectedValueOnce(new Error("private read diagnostic"));
+      const readError = errorOutput(
+        await connected.client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "mine" },
+        }),
+      );
+      readFailure.mockRestore();
+      expect(readError).toMatchObject({
+        code: "INTERNAL_ERROR",
+        detail: "The task operation could not be completed.",
+        correlationId,
+        retryMode: "same_request",
+        recovery: { action: "retry_request" },
+      });
+      expect(JSON.stringify(readError)).not.toContain(
+        "private read diagnostic",
+      );
+
+      const before = await prisma.actionable.count();
+      const readinessFailure = vi
+        .spyOn(prisma, "$queryRaw")
+        .mockRejectedValueOnce(new Error("private mutation diagnostic"));
+      const mutationError = errorOutput(
+        await connected.client.callTool({
+          name: "actionables.create_task",
+          arguments: {
+            idempotencyKey: randomUUID(),
+            ...scope,
+            title: "Must not be created after an internal readiness failure",
+            ...validTaskClassification,
+          },
+        }),
+      );
+      readinessFailure.mockRestore();
+      expect(mutationError).toMatchObject({
+        code: "INTERNAL_ERROR",
+        detail: "The task operation could not be completed.",
+        correlationId,
+        retryMode: "never",
+        recovery: { action: "reconcile_state" },
+      });
+      expect(JSON.stringify(mutationError)).not.toContain(
+        "private mutation diagnostic",
+      );
+      expect(await prisma.actionable.count()).toBe(before);
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            value: expect.objectContaining({
+              correlationId,
+              toolName: "actionables.list_tasks",
+            }),
+          }),
+          expect.objectContaining({
+            value: expect.objectContaining({
+              correlationId,
+              toolName: "actionables.create_task",
+            }),
+          }),
+        ]),
+      );
+      expect(
+        entries.map(
+          ({ value }) =>
+            (value as { err?: Error }).err?.message ?? String(value),
+        ),
+      ).toEqual(
+        expect.arrayContaining([
+          "private read diagnostic",
+          "private mutation diagnostic",
+        ]),
+      );
+    } finally {
+      vi.restoreAllMocks();
+      await connected.transport.close();
+      await testApp.close();
+    }
+  });
+
+  it("returns typed migration recovery before a mutation and recovers without restart", async () => {
+    const latest = (
+      await prisma.$queryRaw<Array<{ migration_name: string }>>`
+        SELECT migration_name
+        FROM "_prisma_migrations"
+        ORDER BY migration_name DESC
+        LIMIT 1
+      `
+    )[0]!;
+    const idempotencyKey = randomUUID();
+    const argumentsValue = {
+      idempotencyKey,
+      ...scope,
+      title: "Created only after schema readiness recovers",
+      ...validTaskClassification,
+    };
+    const connected = await connectClient(bearerToken, threadId, {
+      correlationId: "mcp-schema-readiness-test",
+    });
+    const claimedTask = await createTask({
+      status: "Ready",
+      title: "Expired claim protected by schema readiness",
+    });
+    const claimed = output<{
+      task: { version: number };
+      claim: { claimToken: string };
+    }>(
+      await connected.client.callTool({
+        name: "actionables.claim_task",
+        arguments: {
+          id: claimedTask.sourceOrdinal,
+          workItemId: claimedTask.sourceOrdinal,
+          version: claimedTask.version,
+        },
+      }),
+    );
+    await prisma.agentTaskClaim.update({
+      where: { actionableId: claimedTask.id },
+      data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    const protectedVersion = (
+      await prisma.actionable.findUniqueOrThrow({
+        where: { id: claimedTask.id },
+      })
+    ).version;
+    const protectedActivityCount = await prisma.activityEvent.count({
+      where: { actionableId: claimedTask.id },
+    });
+    const before = await prisma.actionable.count();
+
+    try {
+      await prisma.$executeRaw`
+        UPDATE "_prisma_migrations"
+        SET rolled_back_at = CURRENT_TIMESTAMP
+        WHERE migration_name = ${latest.migration_name}
+      `;
+      try {
+        const blocked = errorOutput(
+          await connected.client.callTool({
+            name: "actionables.create_task",
+            arguments: argumentsValue,
+          }),
+        );
+        expect(blocked).toMatchObject({
+          code: "SCHEMA_MIGRATION_REQUIRED",
+          correlationId: "mcp-schema-readiness-test",
+          retryMode: "after_state_change",
+          recovery: { action: "migrate_database" },
+          errors: { migrations: [`Incomplete: ${latest.migration_name}`] },
+        });
+        expect(await prisma.actionable.count()).toBe(before);
+
+        for (const request of [
+          {
+            name: "actionables.get_task",
+            arguments: {
+              id: claimedTask.sourceOrdinal,
+              claimToken: claimed.claim.claimToken,
+            },
+          },
+          {
+            name: "actionables.get_task_detail",
+            arguments: {
+              id: claimedTask.sourceOrdinal,
+              claimToken: claimed.claim.claimToken,
+              version: claimed.task.version,
+              field: "finding",
+            },
+          },
+        ]) {
+          expect(
+            errorOutput(await connected.client.callTool(request)),
+          ).toMatchObject({
+            code: "SCHEMA_MIGRATION_REQUIRED",
+            retryMode: "after_state_change",
+          });
+        }
+        expect(
+          (
+            await prisma.actionable.findUniqueOrThrow({
+              where: { id: claimedTask.id },
+            })
+          ).version,
+        ).toBe(protectedVersion);
+        expect(
+          await prisma.activityEvent.count({
+            where: { actionableId: claimedTask.id },
+          }),
+        ).toBe(protectedActivityCount);
+        expect(
+          await prisma.agentTaskClaim.count({
+            where: { actionableId: claimedTask.id },
+          }),
+        ).toBe(1);
+      } finally {
+        await prisma.$executeRaw`
+          UPDATE "_prisma_migrations"
+          SET rolled_back_at = NULL
+          WHERE migration_name = ${latest.migration_name}
+        `;
+      }
+
+      const created = output<{ id: number }>(
+        await connected.client.callTool({
+          name: "actionables.create_task",
+          arguments: argumentsValue,
+        }),
+      );
+      expect(created.id).toEqual(expect.any(Number));
+      expect(await prisma.actionable.count()).toBe(before + 1);
+    } finally {
+      await connected.transport.close();
     }
   });
 
@@ -1551,7 +1806,9 @@ describe("Actionables MCP", () => {
       );
       expect(missingThread).toMatchObject({
         code: "THREAD_ID_REQUIRED",
-        retryable: false,
+        retryMode: "after_state_change",
+        recovery: { action: "resolve_state" },
+        retryable: true,
       });
     } finally {
       await withoutThread.transport.close();
@@ -1668,10 +1925,10 @@ describe("Actionables MCP", () => {
       );
       expect(error).toMatchObject({
         code: "INVALID_REQUEST",
+        retryMode: "after_input_change",
+        recovery: { action: "modify_request" },
         retryable: false,
-        nextAction: expect.stringContaining(
-          "Do not repeat this request unchanged",
-        ),
+        nextAction: expect.stringContaining("corrected arguments"),
         errors: { repositoryPath: expect.any(Array) },
       });
       expect(await prisma.project.count()).toBe(before.projects);
@@ -1781,6 +2038,8 @@ describe("Actionables MCP", () => {
       );
       expect(invalidScope).toMatchObject({
         code: "INVALID_SCOPE",
+        retryMode: "after_input_change",
+        recovery: { action: "modify_request" },
         errors: {
           projectId: expect.any(Array),
           repositoryId: expect.any(Array),
@@ -2089,6 +2348,8 @@ describe("Actionables MCP", () => {
       );
       expect(missingResearch).toMatchObject({
         code: "READY_REQUIREMENTS_NOT_MET",
+        retryMode: "after_state_change",
+        recovery: { action: "resolve_state" },
         retryable: true,
         errors: { research: expect.any(Array) },
         nextAction: expect.stringContaining("appendResearch"),
@@ -2326,7 +2587,7 @@ describe("Actionables MCP", () => {
     try {
       const claimed = output<{
         task: { version: number };
-        claim: { claimToken: string };
+        claim: { claimToken: string; leaseExpiresAt: string };
       }>(
         await owner.client.callTool({
           name: "actionables.claim_task",
@@ -2377,7 +2638,12 @@ describe("Actionables MCP", () => {
       );
       expect(wrongThread).toMatchObject({
         code: "CLAIM_OWNER_MISMATCH",
-        retryable: false,
+        retryMode: "after_state_change",
+        recovery: {
+          action: "resolve_state",
+          retryAt: claimed.claim.leaseExpiresAt,
+        },
+        retryable: true,
       });
 
       const recovered = output<{
@@ -3504,7 +3770,9 @@ describe("Actionables MCP", () => {
       );
       expect(terminalClaim).toMatchObject({
         code: "TERMINAL",
-        retryable: false,
+        retryMode: "after_state_change",
+        recovery: { action: "resolve_state" },
+        retryable: true,
         nextAction: expect.stringContaining("read-only"),
       });
       const terminalChild = errorOutput(
@@ -3636,6 +3904,8 @@ describe("Actionables MCP", () => {
       );
       expect(conflict).toMatchObject({
         code: "TERMINAL_READ_INVALIDATED",
+        retryMode: "never",
+        recovery: { action: "stop" },
         retryable: false,
         nextAction: expect.stringMatching(/stop terminal inspection/i),
         currentVersion: conflictTask.version + 1,
@@ -3893,6 +4163,21 @@ describe("Actionables MCP", () => {
         })
       ).status,
     ).toBe(403);
+
+    const correlated = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        ...headers,
+        authorization: `Bearer ${bearerToken}`,
+        origin: address,
+        "x-correlation-id": "safe-mcp-correlation",
+      },
+      body: JSON.stringify(initialization),
+    });
+    expect(correlated.status).toBe(200);
+    expect(correlated.headers.get("x-correlation-id")).toBe(
+      "safe-mcp-correlation",
+    );
 
     for (const method of ["GET", "DELETE"]) {
       const response = await fetch(endpoint, {

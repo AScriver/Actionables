@@ -4,6 +4,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { promisify } from "node:util";
 import {
+  actionablesErrorPayload,
   agentTaskSummaryChildIdsLimit,
   agentTaskSummarySchema,
   bulkAgentTaskFailureSchema,
@@ -191,6 +192,7 @@ export class AgentTaskClaimError extends Error {
     message: string,
     public readonly fieldErrors?: Record<string, string[]>,
     public readonly currentVersion?: number,
+    public readonly retryAt?: string,
   ) {
     super(message);
   }
@@ -818,6 +820,11 @@ export type AgentTaskCaller = {
   threadId: string;
 };
 
+export type BulkAgentTaskFailureContext = {
+  correlationId: string;
+  onInternalError: (error: unknown) => void;
+};
+
 type ResolvedRepositoryPlacement = {
   repositoryPath: string;
   worktreePath: string;
@@ -1233,13 +1240,18 @@ function compactBulkFieldErrors(errors: Record<string, string[]>) {
   );
 }
 
-function bulkFailure(index: number, error: unknown): BulkAgentTaskItemResult {
+function bulkFailure(
+  index: number,
+  error: unknown,
+  context: BulkAgentTaskFailureContext,
+): BulkAgentTaskItemResult {
   let payload:
     | {
         code: string;
         detail: string;
         errors?: Record<string, string[]>;
         currentVersion?: number;
+        retryAt?: string;
       }
     | undefined;
   if (error instanceof AgentTaskClaimError) {
@@ -1250,6 +1262,7 @@ function bulkFailure(index: number, error: unknown): BulkAgentTaskItemResult {
         ? { errors: compactBulkFieldErrors(error.fieldErrors) }
         : {}),
       ...(error.currentVersion ? { currentVersion: error.currentVersion } : {}),
+      ...(error.retryAt ? { retryAt: error.retryAt } : {}),
     };
   } else if (error instanceof DomainValidationError) {
     payload = {
@@ -1265,6 +1278,7 @@ function bulkFailure(index: number, error: unknown): BulkAgentTaskItemResult {
     };
   }
   if (!payload) {
+    context.onInternalError(error);
     payload = {
       code: "INTERNAL_ERROR",
       detail: "The batch item could not be completed.",
@@ -1273,7 +1287,12 @@ function bulkFailure(index: number, error: unknown): BulkAgentTaskItemResult {
   return bulkAgentTaskFailureSchema.parse({
     index,
     outcome: "failed",
-    error: { ...payload, detail: payload.detail.slice(0, 600) },
+    error: actionablesErrorPayload({
+      ...payload,
+      detail: payload.detail.slice(0, 600),
+      correlationId: context.correlationId,
+      internalRetryMode: "never",
+    }),
   });
 }
 
@@ -1374,6 +1393,7 @@ export async function bulkCreateAgentTasks(
   prisma: AppPrismaClient,
   input: BulkCreateAgentTasksRequest,
   caller: AgentTaskCaller,
+  failureContext: BulkAgentTaskFailureContext,
 ): Promise<BulkCreateAgentTasksResponse> {
   const request = parseInput(bulkCreateAgentTasksRequestSchema, input);
   const preflight: Array<ActionableDetail | BulkAgentTaskItemResult | null> =
@@ -1382,7 +1402,7 @@ export async function bulkCreateAgentTasks(
     try {
       preflight.push(await preflightAgentTaskCreate(prisma, item, caller));
     } catch (error) {
-      preflight.push(bulkFailure(index, error));
+      preflight.push(bulkFailure(index, error, failureContext));
     }
   }
 
@@ -1423,7 +1443,7 @@ export async function bulkCreateAgentTasks(
         }),
       );
     } catch (error) {
-      items.push(bulkFailure(index, error));
+      items.push(bulkFailure(index, error, failureContext));
     }
   }
 
@@ -1576,6 +1596,9 @@ async function planAgentTaskPreparation(
         : "This Actionable already has an active claim.",
       undefined,
       row.version,
+      row.agentTaskClaim.agentId === agentId
+        ? undefined
+        : row.agentTaskClaim.leaseExpiresAt.toISOString(),
     );
   }
   if (row.version !== request.version) {
@@ -1871,6 +1894,7 @@ export async function bulkPrepareAgentTasks(
   prisma: AppPrismaClient,
   input: BulkPrepareAgentTasksRequest,
   caller: AgentTaskCaller,
+  failureContext: BulkAgentTaskFailureContext,
   now = new Date(),
 ): Promise<BulkPrepareAgentTasksResponse> {
   const request = parseInput(bulkPrepareAgentTasksRequestSchema, input);
@@ -1884,7 +1908,7 @@ export async function bulkPrepareAgentTasks(
         ),
       );
     } catch (error) {
-      preflight.push(bulkFailure(index, error));
+      preflight.push(bulkFailure(index, error, failureContext));
     }
   }
 
@@ -1932,7 +1956,7 @@ export async function bulkPrepareAgentTasks(
         }),
       );
     } catch (error) {
-      items.push(bulkFailure(index, error));
+      items.push(bulkFailure(index, error, failureContext));
     }
   }
 
@@ -2341,6 +2365,7 @@ async function dismissAgentTaskResult<T = never>(
           "This Actionable has an active claim.",
           undefined,
           row.version,
+          row.agentTaskClaim.leaseExpiresAt.toISOString(),
         );
       }
 
@@ -2783,6 +2808,9 @@ async function claimAgentTaskUnlocked<T = never>(
             : "This Actionable already has an active claim.",
           undefined,
           row.version,
+          row.agentTaskClaim.agentId === request.agentId
+            ? undefined
+            : row.agentTaskClaim.leaseExpiresAt.toISOString(),
         );
       }
       if (row.version !== request.version) {
@@ -2860,6 +2888,9 @@ async function claimAgentTaskUnlocked<T = never>(
           : "This Actionable already has an active claim.",
         undefined,
         current.version,
+        current.agentTaskClaim.agentId === request.agentId
+          ? undefined
+          : current.agentTaskClaim.leaseExpiresAt.toISOString(),
       );
     }
     throw error;
@@ -2943,6 +2974,7 @@ async function recoverAgentTaskClaimResult<T = never>(
           "Only the Codex thread that owns this active claim can recover it.",
           undefined,
           row.version,
+          claim.leaseExpiresAt.toISOString(),
         );
       }
       if (row.version !== request.version) {

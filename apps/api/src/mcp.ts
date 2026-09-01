@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   actionableReadinessSchema,
+  actionablesErrorPayload,
   agentTaskClaimCredentialSchema,
   agentTaskHandoffContentRecoveryMessage,
   agentTaskLeaseMinutesSchema,
@@ -22,18 +23,29 @@ import {
   transitionClaimedAgentTaskRequestSchema,
   updateClaimedAgentTaskRequestSchema,
   type ActionableDetail,
+  type ActionablesInternalRetryMode,
   type AgentTaskSummary,
 } from "@actionables/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+} from "fastify";
 import { z } from "zod/v4";
-import type { AppPrismaClient } from "./database.js";
+import {
+  assertDatabaseSchemaReady,
+  SchemaMigrationRequiredError,
+  type AppPrismaClient,
+} from "./database.js";
 import {
   AgentTaskClaimError,
   bulkCreateAgentTasks,
   bulkPrepareAgentTasks,
+  type BulkAgentTaskFailureContext,
   type AgentTaskScopeProvisioning,
   claimAgentTaskWithProjection,
   createAgentTask,
@@ -780,151 +792,41 @@ function threadAgentId(threadId: string) {
   return `codex:${threadId}`;
 }
 
-function recovery(code: string) {
-  switch (code) {
-    case "INVALID_REQUEST":
-      return {
-        retryable: false,
-        nextAction:
-          "Do not repeat this request unchanged. Correct every field reported in errors, then submit a new call with corrected arguments.",
-      };
-    case "RESEARCH_PHASE_REQUIRED":
-      return {
-        retryable: true,
-        nextAction:
-          "Call actionables.transition_task with status Researching, then begin investigation.",
-      };
-    case "RESEARCH_REQUIRED":
-      return {
-        retryable: true,
-        nextAction:
-          "Call actionables.update_task with appendResearch, then retry Ready using the returned version.",
-      };
-    case "READY_REQUIREMENTS_NOT_MET":
-      return {
-        retryable: true,
-        nextAction:
-          "Inspect readiness.requiredForReady on the latest task. Supply only the named missing fields with finding, description, appendResearch, or appendPlannedValidation, then use the returned version and confirm Ready appears in permittedTransitions before transitioning.",
-      };
-    case "INVALID_STATUS_TRANSITION":
-      return {
-        retryable: false,
-        nextAction:
-          "Do not repeat the unchanged transition. Inspect permittedTransitions on the latest task and choose a legal target; returning In progress to Researching requires a meaningful reason.",
-      };
-    case "RESOLUTION_REQUIRED":
-      return {
-        retryable: true,
-        nextAction:
-          "Call actionables.update_task with non-empty Resolution content, then retry Done using the returned version.",
-      };
-    case "NOT_FOUND":
-      return {
-        retryable: false,
-        nextAction:
-          "Verify the Actionable and top-level work-item IDs. Do not create a replacement implicitly.",
-      };
-    case "ARCHIVED":
-      return {
-        retryable: false,
-        nextAction:
-          "Restore the archived Actionable or governing scope in Actionables before attempting agent work.",
-      };
-    case "TERMINAL":
-      return {
-        retryable: false,
-        nextAction:
-          "Do not retry the claim or mutation. Inspect terminal work read-only with scoped list_tasks or get_task using workItemId. Continued work requires an explicitly authorized, reasoned dashboard reopen before normal list and claim.",
-      };
-    case "TERMINAL_READ_INVALIDATED":
-      return {
-        retryable: false,
-        nextAction:
-          "Stop terminal inspection and discard any partial pages. The task is active again; continued access requires the normal explicitly authorized list and claim flow, then a fresh read with claimToken.",
-      };
-    case "VERSION_CONFLICT":
-      return {
-        retryable: true,
-        nextAction:
-          "Re-list or fetch the task, reconcile the newer state, then retry with its current version.",
-      };
-    case "ALREADY_CLAIMED":
-      return {
-        retryable: true,
-        nextAction:
-          "List mine; otherwise wait and re-list available tasks in the same work item.",
-      };
-    case "OWN_CLAIM_ACTIVE":
-      return {
-        retryable: true,
-        nextAction:
-          "Call actionables.recover_task_claim with this task ID and currentVersion to rotate and return fresh credentials for the current Codex thread.",
-      };
-    case "CLAIM_OWNER_MISMATCH":
-      return {
-        retryable: false,
-        nextAction:
-          "Use the Codex thread that owns the active claim, or wait for the claim to expire.",
-      };
-    case "CLAIM_NOT_FOUND":
-      return {
-        retryable: true,
-        nextAction:
-          "List mine; if the task is no longer owned, list available in the same work item and claim its current version.",
-      };
-    case "INVALID_CLAIM_TOKEN":
-      return {
-        retryable: true,
-        nextAction:
-          "Discard the token and list mine. If this thread still owns the task, call actionables.recover_task_claim with its current version; otherwise reclaim within the same work item.",
-      };
-    case "CLAIM_EXPIRED":
-      return {
-        retryable: true,
-        nextAction:
-          "Re-list available tasks in the same work item and claim the current version.",
-      };
-    case "IDEMPOTENCY_CONFLICT":
-      return {
-        retryable: false,
-        nextAction:
-          "Reuse the key only for an identical retry, or generate a new UUID for a new task.",
-      };
-    case "THREAD_ID_REQUIRED":
-      return {
-        retryable: false,
-        nextAction:
-          "Run this operation from a Codex thread that supplies MCP thread metadata.",
-      };
-    case "CREATOR_THREAD_MISMATCH":
-      return {
-        retryable: false,
-        nextAction:
-          "Use the Codex thread that created this unclaimed task, or use the normal claimed-task workflow.",
-      };
-    case "INTERNAL_ERROR":
-      return {
-        retryable: true,
-        nextAction:
-          "Retry once; if it repeats, inspect the local Actionables server log.",
-      };
-    default:
-      return {
-        retryable: true,
-        nextAction:
-          "Correct the reported task state or fields, then retry with the latest version.",
-      };
-  }
+type McpToolFailureContext = {
+  correlationId: string;
+  internalRetryMode: ActionablesInternalRetryMode;
+  logger: FastifyBaseLogger;
+  toolName: string;
+};
+
+function migrationErrors(error: SchemaMigrationRequiredError) {
+  return {
+    migrations: [
+      ...error.missingMigrations.map((name) => `Missing: ${name}`),
+      ...error.incompleteMigrations.map((name) => `Incomplete: ${name}`),
+      ...error.unexpectedMigrations.map((name) => `Unexpected: ${name}`),
+    ],
+  };
 }
 
-function failure(error: unknown): CallToolResult {
-  let output: Record<string, unknown>;
+function failure(
+  error: unknown,
+  context: McpToolFailureContext,
+): CallToolResult {
+  let output: {
+    code: string;
+    detail: string;
+    errors?: Record<string, string[]>;
+    currentVersion?: number;
+    retryAt?: string;
+  };
   if (error instanceof AgentTaskClaimError) {
     output = {
       code: error.code,
       detail: error.message,
       ...(error.fieldErrors ? { errors: error.fieldErrors } : {}),
       ...(error.currentVersion ? { currentVersion: error.currentVersion } : {}),
+      ...(error.retryAt ? { retryAt: error.retryAt } : {}),
     };
   } else if (error instanceof DomainValidationError) {
     output = {
@@ -938,31 +840,53 @@ function failure(error: unknown): CallToolResult {
       detail: error.message,
       currentVersion: error.current.version,
     };
+  } else if (error instanceof SchemaMigrationRequiredError) {
+    output = {
+      code: error.code,
+      detail: error.message,
+      errors: migrationErrors(error),
+    };
   } else {
+    context.logger.error(
+      {
+        err: error,
+        correlationId: context.correlationId,
+        toolName: context.toolName,
+      },
+      "Unhandled Actionables MCP tool error",
+    );
     output = {
       code: "INTERNAL_ERROR",
       detail: "The task operation could not be completed.",
     };
   }
-  Object.assign(output, recovery(String(output.code)));
+  const payload = actionablesErrorPayload({
+    ...output,
+    correlationId: context.correlationId,
+    internalRetryMode: context.internalRetryMode,
+  });
   return {
-    content: [{ type: "text", text: JSON.stringify(output) }],
-    structuredContent: output,
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
     isError: true,
   };
 }
 
 async function runTool(
+  context: McpToolFailureContext,
   operation: () => Promise<object>,
 ): Promise<CallToolResult> {
   try {
     return success(await operation());
   } catch (error) {
-    return failure(error);
+    return failure(error, context);
   }
 }
 
-function createActionablesMcpServer(prisma: AppPrismaClient) {
+function createActionablesMcpServer(
+  prisma: AppPrismaClient,
+  requestContext: { correlationId: string; logger: FastifyBaseLogger },
+) {
   const server = new McpServer(
     { name: "actionables", version: "0.1.0" },
     {
@@ -981,6 +905,41 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     idempotentHint: false,
     openWorldHint: false,
   };
+  const runReadTool = (toolName: string, operation: () => Promise<object>) =>
+    runTool(
+      {
+        ...requestContext,
+        toolName,
+        internalRetryMode: "same_request",
+      },
+      operation,
+    );
+  const runMutationTool = (
+    toolName: string,
+    operation: () => Promise<object>,
+  ) =>
+    runTool(
+      { ...requestContext, toolName, internalRetryMode: "never" },
+      async () => {
+        await assertDatabaseSchemaReady(prisma);
+        return operation();
+      },
+    );
+  const bulkFailureContext = (
+    toolName: string,
+  ): BulkAgentTaskFailureContext => ({
+    correlationId: requestContext.correlationId,
+    onInternalError(error) {
+      requestContext.logger.error(
+        {
+          err: error,
+          correlationId: requestContext.correlationId,
+          toolName,
+        },
+        "Unhandled Actionables MCP bulk item error",
+      );
+    },
+  });
 
   server.registerTool(
     "actionables.create_task",
@@ -993,7 +952,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, idempotentHint: true },
     },
     (input, extra) =>
-      runTool(async () => {
+      runMutationTool("actionables.create_task", async () => {
         const created = await createAgentTask(prisma, input, {
           threadId: requestThreadId(extra),
         });
@@ -1011,10 +970,13 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, idempotentHint: true },
     },
     (input, extra) =>
-      runTool(() =>
-        bulkCreateAgentTasks(prisma, input, {
-          threadId: requestThreadId(extra),
-        }),
+      runMutationTool("actionables.bulk_create_tasks", () =>
+        bulkCreateAgentTasks(
+          prisma,
+          input,
+          { threadId: requestThreadId(extra) },
+          bulkFailureContext("actionables.bulk_create_tasks"),
+        ),
       ),
   );
   server.registerTool(
@@ -1032,10 +994,13 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       },
     },
     (input, extra) =>
-      runTool(() =>
-        bulkPrepareAgentTasks(prisma, input, {
-          threadId: requestThreadId(extra),
-        }),
+      runMutationTool("actionables.bulk_prepare_tasks", () =>
+        bulkPrepareAgentTasks(
+          prisma,
+          input,
+          { threadId: requestThreadId(extra) },
+          bulkFailureContext("actionables.bulk_prepare_tasks"),
+        ),
       ),
   );
   server.registerTool(
@@ -1049,7 +1014,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: readOnly,
     },
     (input, extra) =>
-      runTool(() => {
+      runReadTool("actionables.list_tasks", () => {
         const threadId = requestThreadId(extra);
         return listAgentTasks(prisma, {
           ...input,
@@ -1068,12 +1033,14 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: readOnly,
     },
     ({ id, claimToken, workItemId }) =>
-      runTool(async () =>
-        compactTask(
-          claimToken
-            ? await getClaimedAgentTask(prisma, id, { claimToken })
-            : await getScopedTerminalAgentTask(prisma, id, workItemId!),
-        ),
+      (claimToken ? runMutationTool : runReadTool)(
+        "actionables.get_task",
+        async () =>
+          compactTask(
+            claimToken
+              ? await getClaimedAgentTask(prisma, id, { claimToken })
+              : await getScopedTerminalAgentTask(prisma, id, workItemId!),
+          ),
       ),
   );
   server.registerTool(
@@ -1087,18 +1054,20 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: readOnly,
     },
     ({ id, claimToken, workItemId, ...input }) =>
-      runTool(async () =>
-        taskDetailPage(
-          claimToken
-            ? await getClaimedAgentTask(prisma, id, { claimToken })
-            : await getScopedTerminalAgentTask(
-                prisma,
-                id,
-                workItemId!,
-                input.version,
-              ),
-          input,
-        ),
+      (claimToken ? runMutationTool : runReadTool)(
+        "actionables.get_task_detail",
+        async () =>
+          taskDetailPage(
+            claimToken
+              ? await getClaimedAgentTask(prisma, id, { claimToken })
+              : await getScopedTerminalAgentTask(
+                  prisma,
+                  id,
+                  workItemId!,
+                  input.version,
+                ),
+            input,
+          ),
       ),
   );
   server.registerTool(
@@ -1112,7 +1081,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: mutation,
     },
     ({ id, ...input }, extra) =>
-      runTool(async () => {
+      runMutationTool("actionables.claim_task", async () => {
         const threadId = requestThreadId(extra);
         return claimAgentTaskWithProjection(
           prisma,
@@ -1137,7 +1106,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: mutation,
     },
     ({ id, ...input }) =>
-      runTool(() =>
+      runMutationTool("actionables.renew_task_claim", () =>
         renewAgentTaskClaimWithProjection(prisma, id, input, (response) => {
           const claim = response.task.claim;
           if (!claim) throw new Error("Renewed claim could not be read.");
@@ -1163,7 +1132,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: mutation,
     },
     ({ id, ...input }, extra) =>
-      runTool(async () => {
+      runMutationTool("actionables.recover_task_claim", async () => {
         return recoverAgentTaskClaimWithProjection(
           prisma,
           id,
@@ -1185,7 +1154,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(async () => {
+      runMutationTool("actionables.update_task", async () => {
         return updateClaimedAgentTaskWithProjection(
           prisma,
           id,
@@ -1210,7 +1179,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(() =>
+      runMutationTool("actionables.transition_task", () =>
         transitionClaimedAgentTaskWithProjection(prisma, id, input, (task) =>
           mutationReceipt(task, {
             changedFields: ["status"],
@@ -1231,7 +1200,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }, extra) =>
-      runTool(() =>
+      runMutationTool("actionables.dismiss_task", () =>
         dismissAgentTaskWithProjection(
           prisma,
           id,
@@ -1258,7 +1227,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: mutation,
     },
     ({ id, ...input }) =>
-      runTool(() =>
+      runMutationTool("actionables.record_task_validation", () =>
         recordClaimedAgentTaskValidationWithProjection(
           prisma,
           id,
@@ -1283,7 +1252,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
-      runTool(() =>
+      runMutationTool("actionables.handoff_task", () =>
         handoffClaimedAgentTaskWithProjection(prisma, id, input, (result) =>
           mutationReceipt(result.task, {
             changedFields: result.changedFields,
@@ -1308,7 +1277,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
       },
     },
     ({ id, ...input }) =>
-      runTool(() =>
+      runMutationTool("actionables.release_task", () =>
         releaseAgentTaskClaimWithProjection(prisma, id, input, (response) =>
           mutationReceipt(response.task, {
             changedFields: [],
@@ -1401,23 +1370,34 @@ export function registerMcpRoutes(
   app.get("/mcp", { onRequest }, methodNotAllowed);
   app.delete("/mcp", { onRequest }, methodNotAllowed);
   app.post("/mcp", { onRequest }, async (request, reply) => {
-    const server = createActionablesMcpServer(prisma);
+    const server = createActionablesMcpServer(prisma, {
+      correlationId: request.id,
+      logger: request.log,
+    });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
+    reply.raw.setHeader("x-correlation-id", request.id);
     reply.hijack();
     try {
       await server.connect(transport);
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (error) {
-      request.log.error({ err: error }, "MCP request failed");
+      request.log.error(
+        { err: error, correlationId: request.id },
+        "MCP request failed",
+      );
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(500, { "content-type": "application/json" });
         reply.raw.end(
           JSON.stringify({
             jsonrpc: "2.0",
-            error: { code: -32603, message: "Internal server error" },
+            error: {
+              code: -32603,
+              message: "Internal server error",
+              data: { correlationId: request.id },
+            },
             id: null,
           }),
         );

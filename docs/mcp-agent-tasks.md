@@ -64,7 +64,7 @@ The server instructions direct agents to use this sequence:
 2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse a UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
-5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
+5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy the structured `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Retain `correlationId` when diagnostics are needed. `retryable` and `nextAction` remain only for legacy compatibility. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
 6. Start from the compact task detail returned by claim or terminal inspection. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. If any page returns `VERSION_CONFLICT`, discard the partial value and restart from the current compact detail. If a terminal page returns `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading the active task with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue.
 7. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
 8. For a newly claimed Inbox task, transition to `Researching` before investigation.
@@ -218,11 +218,48 @@ Successful calls expose their authoritative result in `structuredContent`.
 duplicate task detail or secret claim credentials. Error text retains the
 machine-readable error payload.
 
-For structured errors, `retryable: false` means the failed request must not be
-repeated unchanged. An `INVALID_REQUEST` recovery can still direct a new call
-after every reported field has been corrected. Input rejected by the MCP SDK
-before a tool handler runs uses the same targeted field wording even though the
-SDK result is text-only.
+Handled tool errors return `code`, a redacted `detail`, `correlationId`,
+`retryMode`, and structured `recovery`. `recovery.action` is one of
+`retry_request`, `modify_request`, `resolve_state`, `reconcile_state`,
+`migrate_database`, or `stop`; `recovery.guidance` explains that action, and
+`recovery.retryAt` appears only when the server knows an authoritative time.
+Use the four retry modes literally:
+
+- `same_request`: the exact call may be repeated once.
+- `after_input_change`: do not repeat the same call; correct its arguments and
+  submit a new request.
+- `after_state_change`: complete the named recovery, wait until `retryAt` when
+  present, reconcile current task state, and only then retry.
+- `never`: stop that operation.
+
+The legacy `retryable` and `nextAction` fields remain for older clients.
+`nextAction` mirrors `recovery.guidance`; `retryable` is only a coarse
+compatibility signal and is false for both `after_input_change` and `never`.
+New clients must use `retryMode` and `recovery`.
+
+A returned `INTERNAL_ERROR` exposes no exception text. Its `correlationId`
+links the redacted response to the full local server diagnostic. Repeat the
+exact call only when its returned mode is `same_request`, and only once; a
+`never` response requires state reconciliation and log inspection instead.
+If the client throws or the HTTP/MCP service is unreachable before a structured
+tool result arrives, no retry contract was delivered and mutation delivery is
+uncertain. Re-list or fetch the scoped task before another mutation. Reuse the
+same caller-stable idempotency UUID for an exact create or bulk retry; do not
+invent a new key merely because the response was lost.
+
+Input rejected by the MCP SDK before a tool handler runs remains text-only with
+targeted field wording. It does not carry the handled-error envelope; clients
+must correct the reported schema input instead of assuming a retry mode.
+
+Before a tool that can mutate Actionables runs, the server verifies that the
+active database has exactly the repository's completed migration set. Drift
+returns `SCHEMA_MIGRATION_REQUIRED` with `after_state_change` and
+`migrate_database`; no task mutation is attempted. Apply migrations to the same
+configured database only when the reported history is missing migrations.
+Incomplete or unexpected history requires preserving a backup and following the
+documented operator recovery or using the matching application version. Retry
+only after `/api/health` reports `schema: "current"`. Do not switch, reset,
+delete, or hand-edit a populated database to make the check pass.
 
 The enforced implementation path is `Inbox → Researching → Ready → In progress`.
 `Inbox → Ready` is rejected. Active work can become `Ready` only with non-empty
@@ -260,7 +297,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Tool errors distinguish terminal, archived, and not-found recovery and return the same machine-readable `code`, `retryable`, `nextAction`, field errors, and current version in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.

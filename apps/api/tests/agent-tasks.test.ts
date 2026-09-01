@@ -4,10 +4,13 @@ import { open, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  actionablesErrorPayload,
+  actionablesErrorResponseSchema,
   bulkCreateAgentTasksResponseSchema,
   bulkPrepareAgentTasksResponseSchema,
+  healthResponseSchema,
 } from "@actionables/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   AgentTaskClaimError,
   bulkCreateAgentTasks,
@@ -107,7 +110,132 @@ async function createTask(
 function expectClaimError(error: unknown, code: AgentTaskClaimError["code"]) {
   expect(error).toBeInstanceOf(AgentTaskClaimError);
   expect((error as AgentTaskClaimError).code).toBe(code);
+  return error as AgentTaskClaimError;
 }
+
+function bulkFailureContext() {
+  return {
+    correlationId: randomUUID(),
+    onInternalError: vi.fn(),
+  };
+}
+
+describe("Actionables error recovery contract", () => {
+  it.each([
+    ["INVALID_REQUEST", "after_input_change", "modify_request", false],
+    ["READY_REQUIREMENTS_NOT_MET", "after_state_change", "resolve_state", true],
+    ["VERSION_CONFLICT", "after_state_change", "reconcile_state", true],
+  ] as const)(
+    "classifies %s recovery",
+    (code, retryMode, action, retryable) => {
+      const payload = actionablesErrorPayload({
+        code,
+        detail: "Representative failure.",
+        correlationId: "contract-test",
+      });
+
+      expect(actionablesErrorResponseSchema.parse(payload)).toEqual(payload);
+      expect(payload).toMatchObject({
+        retryMode,
+        retryable,
+        recovery: { action },
+        nextAction: payload.recovery.guidance,
+      });
+    },
+  );
+
+  it("distinguishes read retry, mutation reconciliation, and unknown errors", () => {
+    const readFailure = actionablesErrorPayload({
+      code: "INTERNAL_ERROR",
+      detail: "The read could not be completed.",
+      correlationId: "read-failure",
+      internalRetryMode: "same_request",
+    });
+    const mutationFailure = actionablesErrorPayload({
+      code: "INTERNAL_ERROR",
+      detail: "The mutation could not be completed.",
+      correlationId: "mutation-failure",
+    });
+    const futureFailure = actionablesErrorPayload({
+      code: "FUTURE_ERROR",
+      detail: "An unrecognized error occurred.",
+      correlationId: "future-failure",
+    });
+
+    expect(readFailure).toMatchObject({
+      retryMode: "same_request",
+      retryable: true,
+      recovery: { action: "retry_request" },
+    });
+    expect(mutationFailure).toMatchObject({
+      retryMode: "never",
+      retryable: false,
+      recovery: { action: "reconcile_state" },
+    });
+    expect(futureFailure).toMatchObject({
+      retryMode: "never",
+      retryable: false,
+      recovery: { action: "stop" },
+    });
+  });
+
+  it("publishes migration recovery and requires strict correlation and health schema state", () => {
+    const migration = actionablesErrorPayload({
+      code: "SCHEMA_MIGRATION_REQUIRED",
+      detail: "The database schema is not current.",
+      correlationId: "migration-failure",
+    });
+
+    expect(migration).toMatchObject({
+      retryMode: "after_state_change",
+      recovery: { action: "migrate_database" },
+    });
+    expect(migration.recovery.guidance).toContain(
+      "active configured Actionables database",
+    );
+    expect(migration.recovery.guidance).not.toContain("restart");
+    expect(
+      actionablesErrorResponseSchema.safeParse({
+        ...migration,
+        correlationId: "invalid correlation id",
+      }).success,
+    ).toBe(false);
+    expect(
+      actionablesErrorResponseSchema.safeParse({ ...migration, extra: true })
+        .success,
+    ).toBe(false);
+    expect(
+      healthResponseSchema.safeParse({
+        status: "ok",
+        database: "ok",
+        schema: "current",
+        requestId: "health-test",
+      }).success,
+    ).toBe(true);
+    expect(
+      healthResponseSchema.safeParse({
+        status: "ok",
+        database: "ok",
+        requestId: "health-test",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("publishes the exact retry time for active claim contention", () => {
+    const retryAt = "2026-09-01T23:30:00.000Z";
+    const contention = actionablesErrorPayload({
+      code: "ALREADY_CLAIMED",
+      detail: "This Actionable already has an active claim.",
+      correlationId: "contention-test",
+      retryAt,
+    });
+
+    expect(contention).toMatchObject({
+      retryMode: "after_state_change",
+      recovery: { action: "resolve_state", retryAt },
+    });
+  });
+});
 
 beforeAll(async () => {
   const databaseName = `agent-tasks-${randomUUID()}.db`;
@@ -812,7 +940,11 @@ describe("agent task claims", () => {
         (result): result is PromiseRejectedResult =>
           result.status === "rejected",
       );
-      expectClaimError(rejected?.reason, "ALREADY_CLAIMED");
+      const claimError = expectClaimError(rejected?.reason, "ALREADY_CLAIMED");
+      const activeClaim = await prisma.agentTaskClaim.findUniqueOrThrow({
+        where: { actionableId: task.id },
+      });
+      expect(claimError.retryAt).toBe(activeClaim.leaseExpiresAt.toISOString());
       expect(
         await prisma.agentTaskClaim.count({
           where: { actionableId: task.id },
@@ -923,7 +1055,10 @@ describe("agent task claims", () => {
         { version: claimed.task.version, leaseMinutes: 30 },
         { threadId: "019fa45f-581d-7bc0-afe3-a2b65171df65" },
       ),
-    ).rejects.toMatchObject({ code: "CLAIM_OWNER_MISMATCH" });
+    ).rejects.toMatchObject({
+      code: "CLAIM_OWNER_MISMATCH",
+      retryAt: claimed.claim.leaseExpiresAt,
+    });
 
     const secondPrisma = createPrismaClient(databaseUrl);
     try {
@@ -1092,7 +1227,7 @@ describe("agent task claims", () => {
       status: "Inbox",
       creatorThreadId,
     });
-    await claimAgentTask(prisma, liveClaim.sourceOrdinal, {
+    const claimed = await claimAgentTask(prisma, liveClaim.sourceOrdinal, {
       agentId: `codex:${creatorThreadId}`,
       workItemId: liveClaim.sourceOrdinal,
       version: liveClaim.version,
@@ -1105,7 +1240,10 @@ describe("agent task claims", () => {
         { reason: "Claimed work must use transition_task." },
         caller,
       ),
-    ).rejects.toMatchObject({ code: "ALREADY_CLAIMED" });
+    ).rejects.toMatchObject({
+      code: "ALREADY_CLAIMED",
+      retryAt: claimed.claim.leaseExpiresAt,
+    });
 
     const archived = await createTask({
       status: "Inbox",
@@ -2221,6 +2359,7 @@ describe("agent task claims", () => {
 
   it("previews, partially creates, and exactly replays bounded batches", async () => {
     const caller = { threadId: `bulk-create-${randomUUID()}` };
+    const failureContext = bulkFailureContext();
     const firstKey = randomUUID();
     const invalidKey = randomUUID();
     const input = {
@@ -2252,7 +2391,12 @@ describe("agent task claims", () => {
     };
     const before = await prisma.actionable.count();
 
-    const preview = await bulkCreateAgentTasks(prisma, input, caller);
+    const preview = await bulkCreateAgentTasks(
+      prisma,
+      input,
+      caller,
+      failureContext,
+    );
     expect(preview).toMatchObject({
       mode: "preview",
       summary: { requested: 2, succeeded: 1, replayed: 0, failed: 1 },
@@ -2261,7 +2405,13 @@ describe("agent task claims", () => {
         {
           index: 1,
           outcome: "failed",
-          error: { code: "INVALID_SCOPE" },
+          error: {
+            code: "INVALID_SCOPE",
+            correlationId: failureContext.correlationId,
+            retryMode: "after_input_change",
+            recovery: { action: "modify_request" },
+            retryable: false,
+          },
         },
       ],
     });
@@ -2271,6 +2421,7 @@ describe("agent task claims", () => {
       prisma,
       { ...input, mode: "apply" },
       caller,
+      failureContext,
     );
     expect(applied.summary).toEqual({
       requested: 2,
@@ -2292,6 +2443,7 @@ describe("agent task claims", () => {
       prisma,
       { ...input, mode: "apply" },
       caller,
+      failureContext,
     );
     expect(replayed.summary).toEqual({
       requested: 2,
@@ -2304,6 +2456,56 @@ describe("agent task claims", () => {
       id: (applied.items[0] as { id: number }).id,
     });
     expect(await prisma.actionable.count()).toBe(before + 1);
+  });
+
+  it("redacts and correlates unexpected bulk item failures", async () => {
+    const internalError = new Error("sensitive database failure");
+    const failureContext = bulkFailureContext();
+    const projectLookup = vi
+      .spyOn(prisma.project, "findUnique")
+      .mockRejectedValueOnce(internalError);
+    let result: Awaited<ReturnType<typeof bulkCreateAgentTasks>>;
+    try {
+      result = await bulkCreateAgentTasks(
+        prisma,
+        {
+          mode: "preview",
+          items: [
+            {
+              idempotencyKey: randomUUID(),
+              ...scope,
+              title: "Correlated bulk failure",
+              priority: "High",
+              description: "Exercise unexpected item failure handling.",
+              effort: "S",
+              plannedValidation: [],
+              tags: ["bulk"],
+            },
+          ],
+        },
+        { threadId: `bulk-internal-${randomUUID()}` },
+        failureContext,
+      );
+    } finally {
+      projectLookup.mockRestore();
+    }
+
+    expect(failureContext.onInternalError).toHaveBeenCalledWith(internalError);
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        index: 0,
+        outcome: "failed",
+        error: expect.objectContaining({
+          code: "INTERNAL_ERROR",
+          detail: "The batch item could not be completed.",
+          correlationId: failureContext.correlationId,
+          retryMode: "never",
+          recovery: expect.objectContaining({ action: "reconcile_state" }),
+          retryable: false,
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain(internalError.message);
   });
 
   it("rejects impossible or out-of-order bulk receipts", () => {
@@ -2348,6 +2550,7 @@ describe("agent task claims", () => {
 
   it("atomically prepares valid Inbox items and leaves invalid siblings untouched", async () => {
     const caller = { threadId: `bulk-prepare-${randomUUID()}` };
+    const failureContext = bulkFailureContext();
     const valid = await createTask({
       status: "Inbox",
       creatorThreadId: caller.threadId,
@@ -2397,6 +2600,7 @@ describe("agent task claims", () => {
       prisma,
       { mode: "preview", items },
       caller,
+      failureContext,
     );
     expect(preview.summary).toEqual({
       requested: 3,
@@ -2418,6 +2622,7 @@ describe("agent task claims", () => {
       prisma,
       { mode: "apply", items },
       caller,
+      failureContext,
     );
     expect(applied.summary).toEqual({
       requested: 3,
@@ -2484,6 +2689,7 @@ describe("agent task claims", () => {
       prisma,
       { mode: "apply", items },
       caller,
+      failureContext,
     );
     expect(replayed.summary).toEqual({
       requested: 3,
@@ -2527,6 +2733,7 @@ describe("agent task claims", () => {
         ],
       },
       { threadId: `requesting-thread-${randomUUID()}` },
+      bulkFailureContext(),
     );
 
     expect(result.items).toEqual([

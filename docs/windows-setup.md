@@ -182,6 +182,11 @@ Verify health:
 Invoke-RestMethod -Uri 'http://127.0.0.1:4273/api/health'
 ```
 
+A ready response is HTTP 200 with `status: ok`, `database: ok`, and
+`schema: current`. The schema value is based on the migration ledger of the
+active configured database, not on a default path or a basic connectivity
+query.
+
 Stop with `Ctrl+C`; repeat `pnpm run start` to verify a clean restart.
 
 ## Release gate
@@ -268,6 +273,24 @@ launch tries 4173/4174 first.
 ```powershell
 pnpm exec prisma migrate status
 pnpm run verify:migrations
+```
+
+`/api/health` returns HTTP 503 with `SCHEMA_MIGRATION_REQUIRED` when the active
+database is missing a repository migration, has an incomplete migration, or
+contains an unexpected migration. Actionables refuses mutations while that
+condition remains. Confirm that `DATABASE_URL` identifies the intended database,
+then inspect both `errors.migrations` and `pnpm exec prisma migrate status`. If
+the history only has missing migrations, apply them to that same configured
+database with `pnpm run db:migrate`. For incomplete history, preserve a backup
+and use Prisma's documented migration-recovery workflow; for unexpected history,
+use the matching application version or restore a verified compatible backup.
+Retry only after health reports `schema: current`. Do not switch databases or
+hand-edit the migration ledger merely to bypass the readiness check.
+
+For missing migrations only:
+
+```powershell
+pnpm run db:migrate
 ```
 
 Never edit an already-applied migration. Preserve the database and export a portable backup before recovery.

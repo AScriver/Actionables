@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   actionableQuerySchema,
+  actionablesCorrelationIdSchema,
   actionableDetailResponseSchema,
   actionablesListResponseSchema,
   auditActionableRelationshipsRequestSchema,
@@ -48,7 +49,11 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest,
 } from "fastify";
-import type { AppPrismaClient } from "./database.js";
+import {
+  assertDatabaseSchemaReady,
+  SchemaMigrationRequiredError,
+  type AppPrismaClient,
+} from "./database.js";
 import {
   createActionable,
   createRepository,
@@ -228,13 +233,12 @@ export function buildApp({
   const assistantDefaultModel =
     assistantRunner?.defaultModel ?? defaultCodexAssistantModel;
   const app = Fastify({
-    logger,
+    ...(typeof logger === "object" ? { loggerInstance: logger } : { logger }),
     bodyLimit: 6 * 1024 * 1024,
     genReqId(request) {
       const incoming = request.headers["x-correlation-id"];
-      return typeof incoming === "string" && incoming.trim()
-        ? incoming
-        : randomUUID();
+      const parsed = actionablesCorrelationIdSchema.safeParse(incoming);
+      return parsed.success ? parsed.data : randomUUID();
     },
   });
 
@@ -247,7 +251,35 @@ export function buildApp({
     registerMcpRoutes(app, prisma, mcpBearerToken);
   }
 
+  app.addHook("preHandler", async (request) => {
+    if (
+      ["POST", "PUT", "PATCH", "DELETE"].includes(request.method) &&
+      request.routeOptions.url !== "/mcp"
+    ) {
+      await assertDatabaseSchemaReady(prisma);
+    }
+  });
+
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof SchemaMigrationRequiredError) {
+      const migrations = [
+        ...error.missingMigrations.map((name) => `Missing: ${name}`),
+        ...error.incompleteMigrations.map((name) => `Incomplete: ${name}`),
+        ...error.unexpectedMigrations.map((name) => `Unexpected: ${name}`),
+      ];
+      return problem(
+        request,
+        reply,
+        503,
+        "SCHEMA_MIGRATION_REQUIRED",
+        "The active Actionables database schema is not current.",
+        {
+          detail:
+            "Inspect the reported migration state for the configured database. Apply missing migrations or use the documented operator recovery for incomplete or unexpected history, then retry only after health reports schema current.",
+          ...(migrations.length ? { errors: { migrations } } : {}),
+        },
+      );
+    }
     if (error instanceof PortableImportError) {
       return problem(request, reply, error.status, error.code, error.message, {
         errors: error.errors,
@@ -410,10 +442,12 @@ export function buildApp({
   });
 
   app.get("/api/health", async (request) => {
+    await assertDatabaseSchemaReady(prisma);
     await prisma.project.count();
     return healthResponseSchema.parse({
       status: "ok",
       database: "ok",
+      schema: "current",
       requestId: request.id,
     });
   });
