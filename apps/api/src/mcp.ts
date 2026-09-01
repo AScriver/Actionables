@@ -2,8 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   actionableReadinessSchema,
   agentTaskClaimCredentialSchema,
+  agentTaskHandoffContentRecoveryMessage,
   agentTaskLeaseMinutesSchema,
   agentTaskListViewSchema,
+  agentTaskVersionInputSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
   handoffClaimedAgentTaskRequestSchema,
@@ -45,6 +47,7 @@ import {
   parsePersistedStatus,
   permittedTransitions,
 } from "./actionable-transitions.js";
+import { bundledActionablesWorkflowInstructions } from "./agent-integration.js";
 import { DomainValidationError, VersionConflictError } from "./repository.js";
 
 const idSchema = z
@@ -127,13 +130,9 @@ const getTaskDetailSchema = z
   .object({
     id: idSchema,
     ...taskReadCredentialFields,
-    version: z
-      .number()
-      .int()
-      .positive()
-      .describe(
-        "Exact task version from the compact detail; prevents pages from mixing task states.",
-      ),
+    version: agentTaskVersionInputSchema.describe(
+      "Exact task version from the compact detail; prevents pages from mixing task states.",
+    ),
     field: taskDetailFieldSchema,
     offset: z
       .number()
@@ -177,11 +176,9 @@ const claimTaskSchema = z
       .int()
       .positive()
       .describe("Top-level Actionable ID for the current feature or bug."),
-    version: z
-      .number()
-      .int()
-      .positive()
-      .describe("Exact task version returned by list_tasks."),
+    version: agentTaskVersionInputSchema.describe(
+      "Exact task version returned by list_tasks.",
+    ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
@@ -209,9 +206,9 @@ const dismissTaskSchema = dismissAgentTaskRequestSchema.extend({
 });
 const recordValidationSchema =
   recordClaimedAgentTaskValidationRequestSchema.extend({ id: idSchema });
-const handoffTaskSchema = handoffClaimedAgentTaskRequestSchema.extend({
-  id: idSchema,
-});
+const handoffTaskSchema = handoffClaimedAgentTaskRequestSchema
+  .extend({ id: idSchema })
+  .describe(agentTaskHandoffContentRecoveryMessage);
 
 const compactReferenceSchema = z
   .object({
@@ -782,7 +779,8 @@ function recovery(code: string) {
     case "INVALID_REQUEST":
       return {
         retryable: false,
-        nextAction: "Correct the reported input fields before calling again.",
+        nextAction:
+          "Do not repeat this request unchanged. Correct every field reported in errors, then submit a new call with corrected arguments.",
       };
     case "RESEARCH_PHASE_REQUIRED":
       return {
@@ -962,9 +960,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
   const server = new McpServer(
     { name: "actionables", version: "0.1.0" },
     {
-      instructions:
-        "Successful structuredContent is authoritative; content.text is only a short compatibility notice. Routine mutations return a lean receipt: continue with its version, status, readiness, and permittedTransitions; inspect counts; and fetch only fields named by reconciliationFields before relying on their stored values. An empty reconciliationFields does not require a defensive readback. Inspect hasMore before treating list_tasks items as exhaustive. " +
-        "Use Actionables as the source of truth for substantive tracked work. Codex thread identity is derived from MCP request metadata; never supply or invent an agent ID. Start by listing mine. Create a task only when the user authorizes it, and provide a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag. For a top-level task, either provide existing scope IDs or provide repositoryPath with ensureScope true to resolve or create the local Git scope. For one direct task or sibling created by research-driven splitting, provide the same top-level Actionable as workItemId and parentId without placement fields; never use the current direct task as the parent. Generate one idempotency UUID per intended task and reuse it only for exact retries. Only list available tasks when the governing feature or bug provides its top-level workItemId; arbitrary pending work is intentionally unavailable. A scoped list of a terminal work item is a valid read and returns workItem status with terminal true even when items is empty. Inspect a known Done or Dismissed task with get_task using its top-level workItemId; use the same authorization for get_task_detail pages. Terminal inspection is read-only and does not reopen work. Continued work requires an explicitly authorized dashboard reopen with a reason before normal list and claim. Claim active work within the same work item at the exact listed version; a successful claim returns `{ task, claim }`. Read the latest version from `task.version` and the secret token from `claim.claimToken` for later claimed-task calls. After every composed tool call, inspect `isError`; when it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. Before treating returned compact task detail as complete, inspect `truncation.reconciliationGuidance` (`task.truncation.reconciliationGuidance` in claim and recovery responses). When it is present, call actionables.get_task_detail for every supported critical field named in truncation.truncatedFields, start at offset 0, then pass contentHash with each nextOffset until null, concatenate json in offset order, and JSON-parse it; do not move the task forward or edit files until reconciliation is complete. If a page returns VERSION_CONFLICT, discard partial json and restart from current compact detail. If a terminal page returns TERMINAL_READ_INVALIDATED, discard partial pages and stop; use the normal authorized list and claim flow before reading active work with claimToken. If reconciliationGuidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation. If the owning thread loses that token, list mine and call recover_task_claim with the listed version to rotate it; other threads cannot recover the claim. A creator thread may dismiss one of its own active unclaimed tasks with dismiss_task using only its ID and a reason. Follow Inbox to Researching to Ready to In progress: enter Researching before investigation, and do not make implementation changes until the task is In progress. Before requesting Ready or moving Ready to In progress, inspect readiness.requiredForReady and permittedTransitions; Ready requires non-empty finding, description, Research, and planned validation, and the transition must wait until requiredForReady is empty and the target is permitted. Return In progress directly to Researching only with a meaningful audited reason. A task may remain Researching between turns only while additional investigation is genuinely required; before pausing, record findings so far, remaining questions, and the next research step, and do not force a transition merely because a turn ended. When research establishes multiple independently implementable outcomes in a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. When the current task is already direct, narrow it to one slice and create only the remaining slices as siblings under the same root. Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope. Record the split rationale, dependency notes, and validation boundary in the current task and every created task, and leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, do not claim dependency relationships were created. A split root remains coordination-only when Ready; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation. Before reporting research or the overall task complete, reconcile every owned Researching task: move it to Ready when research is sufficient but implementation remains, or advance it through the permitted lifecycle to Done with actual validation when research is the entire requested outcome. Never claim completion while an owned task remains Researching. Lifecycle enforcement governs Actionables mutations but cannot prevent filesystem edits outside the MCP; orchestration-level write gating requires separate authorization. Use handoff_task to atomically save handoff state and release; use release_task when only the claim should be released. Never expose claim tokens.",
+      instructions: bundledActionablesWorkflowInstructions(),
     },
   );
   const readOnly = {
@@ -985,7 +981,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Create Actionable",
       description:
-        "Create one task with a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag, then return its detail. For a top-level task, either provide projectId, repositoryId, and worktreeId or provide repositoryPath with ensureScope true to resolve and provision the local Git scope. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse the idempotency UUID only for an exact retry.",
+        "Create one task with a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag, then return its detail. For a top-level task, either provide projectId, repositoryId, and worktreeId or provide repositoryPath with ensureScope true to resolve and provision the local Git scope. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. The server inherits that root's scope. Reuse the idempotency UUID only for an exact retry.",
       inputSchema: createAgentTaskRequestSchema,
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, idempotentHint: true },
@@ -1237,8 +1233,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     "actionables.handoff_task",
     {
       title: "Handoff claimed Actionable",
-      description:
-        "Atomically save handoff findings, additive file references, research, planned checks, and optional actual validation, then release the claim. If any requested write fails, no handoff content is saved and the claim remains active.",
+      description: `Atomically save handoff content, then release the claim. ${agentTaskHandoffContentRecoveryMessage} If any requested write fails, no handoff content is saved and the claim remains active.`,
       inputSchema: handoffTaskSchema,
       outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
@@ -1260,7 +1255,7 @@ function createActionablesMcpServer(prisma: AppPrismaClient) {
     {
       title: "Release Actionable claim",
       description:
-        "Release a valid nonterminal claim when abandoning or handing off work. Before releasing a Researching task, record findings so far, remaining questions, and the next research step.",
+        "Release only; this tool does not save or update task content. Use handoff_task when content must be saved before release. Before releasing a Researching task, record findings so far, remaining questions, and the next research step.",
       inputSchema: releaseTaskSchema,
       outputSchema: mutationReceiptSchema,
       annotations: {

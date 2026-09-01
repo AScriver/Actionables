@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -10,13 +11,26 @@ import {
 } from "../src/agent-integration.js";
 
 const temporaryHomes: string[] = [];
+const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const canonicalSkillPath = resolve(
+  repoRoot,
+  "resources",
+  "agent-integration",
+  "actionables-workflow",
+  "SKILL.md",
+);
+const canonicalSkillRepositoryPath =
+  "resources/agent-integration/actionables-workflow/SKILL.md";
 const legacySkillPaths = [
   "./fixtures/actionables-workflow-v1.md",
+  "./fixtures/actionables-workflow-v1-lifecycle.md",
+  "./fixtures/actionables-workflow-v1-resolution.md",
   "./fixtures/actionables-workflow-v2.md",
   "./fixtures/actionables-workflow-v3.md",
   "./fixtures/actionables-workflow-v4.md",
   "./fixtures/actionables-workflow-v5.md",
   "./fixtures/actionables-workflow-v6.md",
+  "./fixtures/actionables-workflow-v7.md",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 const latestLegacySkillPath = legacySkillPaths[legacySkillPaths.length - 1]!;
 
@@ -24,6 +38,10 @@ async function temporaryHome() {
   const path = await mkdtemp(resolve(tmpdir(), "actionables-agent-home-"));
   temporaryHomes.push(path);
   return path;
+}
+
+function normalizedSkill(value: string) {
+  return `${value.replace(/\r\n/g, "\n").trim()}\n`;
 }
 
 afterEach(async () => {
@@ -451,7 +469,9 @@ describe("Actionables agent integration", () => {
         resolve(home, ".agents", "skills", "actionables-workflow", "SKILL.md"),
         "utf8",
       ),
-    ).resolves.toContain("name: actionables-workflow");
+    ).resolves.toBe(
+      normalizedSkill(await readFile(canonicalSkillPath, "utf8")),
+    );
   });
 
   it("preflights user-modified files and writes nothing on conflict", async () => {
@@ -516,14 +536,57 @@ describe("Actionables agent integration", () => {
         settings: { skill: { state: "installed", installed: true } },
         results: [{ component: "skill", outcome: "updated" }],
       });
-      await expect(readFile(skillPath, "utf8")).resolves.toContain(
-        "## Split researched work",
-      );
-      await expect(readFile(skillPath, "utf8")).resolves.toContain(
-        "actionables.get_task_detail",
+      await expect(readFile(skillPath, "utf8")).resolves.toBe(
+        normalizedSkill(await readFile(canonicalSkillPath, "utf8")),
       );
     },
   );
+
+  it("recognizes every committed workflow skill revision as current or legacy", async () => {
+    const revisions = execFileSync(
+      "git",
+      ["log", "--format=%H", "--", canonicalSkillRepositoryPath],
+      { cwd: repoRoot, encoding: "utf8" },
+    )
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean);
+    const canonical = normalizedSkill(
+      await readFile(canonicalSkillPath, "utf8"),
+    );
+
+    for (const revision of revisions) {
+      const home = await temporaryHome();
+      const skillPath = resolve(
+        home,
+        ".agents",
+        "skills",
+        "actionables-workflow",
+        "SKILL.md",
+      );
+      await mkdir(resolve(skillPath, ".."), { recursive: true });
+      await writeFile(
+        skillPath,
+        execFileSync(
+          "git",
+          ["show", `${revision}:${canonicalSkillRepositoryPath}`],
+          { cwd: repoRoot },
+        ),
+      );
+      const installer = new AgentIntegrationInstaller({ homeDirectory: home });
+      const before = await installer.status();
+
+      expect(before.skill.state, revision).not.toBe("modified");
+      if (!before.skill.installed) {
+        await installer.install({
+          mcpServer: false,
+          agentInstructions: false,
+          skill: true,
+        });
+      }
+      await expect(readFile(skillPath, "utf8")).resolves.toBe(canonical);
+    }
+  });
 
   it("does not replace a customized older skill", async () => {
     const home = await temporaryHome();

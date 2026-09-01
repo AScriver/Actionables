@@ -757,6 +757,24 @@ export const listAgentTasksResponseSchema = z
   })
   .strict();
 
+export const agentTaskVersionRecoveryMessage =
+  "Use task.version from the preceding successful result, or re-list the task to obtain its current positive integer version.";
+export const agentTaskClaimTokenRecoveryMessage =
+  "Use claim.claimToken returned by claim_task or recover_task_claim; if it was discarded, list mine and recover the claim.";
+export const agentTaskDirectPlacementRecoveryMessage =
+  "For one direct task or sibling, set both parentId and workItemId to the same authorized top-level Actionable ID; omit both for a top-level task.";
+export const agentTaskHandoffContentRecoveryMessage =
+  "Provide at least one of finding, addFiles, appendResearch, appendPlannedValidation, or validation. If no task content needs to change, call actionables.release_task instead.";
+
+export const agentTaskVersionInputSchema = z
+  .number({ error: agentTaskVersionRecoveryMessage })
+  .int({ error: agentTaskVersionRecoveryMessage })
+  .positive({ error: agentTaskVersionRecoveryMessage });
+export const agentTaskClaimTokenInputSchema = z
+  .string({ error: agentTaskClaimTokenRecoveryMessage })
+  .min(32, { error: agentTaskClaimTokenRecoveryMessage })
+  .max(256, { error: agentTaskClaimTokenRecoveryMessage });
+
 export const claimAgentTaskRequestSchema = z
   .object({
     agentId: agentIdSchema,
@@ -765,11 +783,9 @@ export const claimAgentTaskRequestSchema = z
       .int()
       .positive()
       .describe("Top-level Actionable ID for the current feature or bug."),
-    version: z
-      .number()
-      .int()
-      .positive()
-      .describe("Exact task version returned by list_tasks."),
+    version: agentTaskVersionInputSchema.describe(
+      "Exact task version returned by list_tasks.",
+    ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
@@ -797,11 +813,9 @@ export const claimAgentTaskResponseSchema = z
 
 export const recoverAgentTaskClaimRequestSchema = z
   .object({
-    version: z
-      .number()
-      .int()
-      .positive()
-      .describe("Current task version returned by list_tasks(view: mine)."),
+    version: agentTaskVersionInputSchema.describe(
+      "Current task version returned by list_tasks(view: mine).",
+    ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
@@ -814,11 +828,9 @@ export const recoverAgentTaskClaimResponseSchema = claimAgentTaskResponseSchema;
 
 export const renewAgentTaskClaimRequestSchema = z
   .object({
-    claimToken: z
-      .string()
-      .min(32)
-      .max(256)
-      .describe("Secret claim token returned by claim_task."),
+    claimToken: agentTaskClaimTokenInputSchema.describe(
+      "Secret claim token returned by claim_task.",
+    ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
@@ -835,11 +847,9 @@ export const renewAgentTaskClaimResponseSchema = z
 
 export const releaseAgentTaskClaimRequestSchema = z
   .object({
-    claimToken: z
-      .string()
-      .min(32)
-      .max(256)
-      .describe("Secret claim token returned by claim_task."),
+    claimToken: agentTaskClaimTokenInputSchema.describe(
+      "Secret claim token returned by claim_task.",
+    ),
   })
   .strict();
 
@@ -1227,16 +1237,12 @@ export const createValidationRecordRequestSchema = z
   .strict();
 
 const claimedAgentMutationFields = {
-  claimToken: z
-    .string()
-    .min(32)
-    .max(256)
-    .describe("Secret claim token returned by claim_task."),
-  version: z
-    .number()
-    .int()
-    .positive()
-    .describe("Latest task version returned by the preceding operation."),
+  claimToken: agentTaskClaimTokenInputSchema.describe(
+    "Secret claim token returned by claim_task.",
+  ),
+  version: agentTaskVersionInputSchema.describe(
+    "Latest task version returned by the preceding operation.",
+  ),
 };
 
 export const updateClaimedAgentTaskRequestSchema = z
@@ -1413,6 +1419,7 @@ export const handoffClaimedAgentTaskRequestSchema = z
     validation: handoffValidationSchema.optional(),
   })
   .strict()
+  .describe(agentTaskHandoffContentRecoveryMessage)
   .refine(
     (input) =>
       [
@@ -1423,7 +1430,7 @@ export const handoffClaimedAgentTaskRequestSchema = z
         "validation",
       ].some((field) => input[field as keyof typeof input] !== undefined),
     {
-      message: "Provide at least one handoff field to save.",
+      message: agentTaskHandoffContentRecoveryMessage,
       path: ["handoff"],
     },
   );
@@ -1458,20 +1465,20 @@ export const createAgentTaskRequestSchema = z
         "Caller-generated UUID; reuse it only when retrying this exact creation request.",
       ),
     parentId: z
-      .number()
-      .int()
-      .positive()
+      .number({ error: agentTaskDirectPlacementRecoveryMessage })
+      .int({ error: agentTaskDirectPlacementRecoveryMessage })
+      .positive({ error: agentTaskDirectPlacementRecoveryMessage })
       .optional()
       .describe(
-        "Optional parent Actionable ID. Omit for a top-level task; provide it for a direct subtask.",
+        "Optional parent Actionable ID. For a direct task, set both parentId and workItemId to the same authorized top-level Actionable; omit both for a top-level task.",
       ),
     workItemId: z
-      .number()
-      .int()
-      .positive()
+      .number({ error: agentTaskDirectPlacementRecoveryMessage })
+      .int({ error: agentTaskDirectPlacementRecoveryMessage })
+      .positive({ error: agentTaskDirectPlacementRecoveryMessage })
       .optional()
       .describe(
-        "Top-level feature or bug Actionable that authorizes direct-subtask creation. Required with parentId and must identify that parent.",
+        "Top-level feature or bug Actionable that authorizes direct-task creation. For a direct task, set it to the same top-level Actionable as parentId.",
       ),
     projectId: z
       .string()
@@ -1546,7 +1553,7 @@ export const createAgentTaskRequestSchema = z
         context.addIssue({
           code: "custom",
           path: ["workItemId"],
-          message: "workItemId must be omitted for a top-level task.",
+          message: agentTaskDirectPlacementRecoveryMessage,
         });
       }
       if (hasScopeIds && hasRepositoryPlacement) {
@@ -1602,7 +1609,7 @@ export const createAgentTaskRequestSchema = z
       context.addIssue({
         code: "custom",
         path: ["workItemId"],
-        message: "workItemId is required with parentId.",
+        message: agentTaskDirectPlacementRecoveryMessage,
       });
     }
     for (const field of [

@@ -61,7 +61,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both `workItemId` and `parentId`, without placement fields; never use a direct task as the parent. Reuse the UUID only for an exact retry.
+2. When the user authorizes a new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse the UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
@@ -78,7 +78,7 @@ The server instructions direct agents to use this sequence:
 16. Mutate with the latest version and secret claim token.
 17. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
 18. Never claim completion while an owned task remains `Researching`.
-19. Release a nonterminal claim when abandoning or handing off work.
+19. Use `actionables.handoff_task` when task content must be saved before release, and `actionables.release_task` only when no task content needs to change.
 20. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 When implementation uncovers a need for more investigation, `In progress` can return directly to `Researching` with a meaningful reason. The transition is recorded in task activity; do not route through a semantically false Ready state.
@@ -169,7 +169,10 @@ references and research notes, appends planned checks, optionally records one
 actual validation result through the normal validation rules, and releases the
 claim. Every supplied handoff write and the release share one transaction: if
 any write fails, none of the handoff content persists and the claim remains
-active. The existing `release_task` remains the release-only operation.
+active. At least one of `finding`, `addFiles`, `appendResearch`,
+`appendPlannedValidation`, or `validation` is required. When no task content
+needs to change, use `release_task`; it releases the claim without saving or
+updating task content.
 
 Routine mutations (`renew_task_claim`, `update_task`, `transition_task`,
 `dismiss_task`, `record_task_validation`, `handoff_task`, and `release_task`)
@@ -188,6 +191,12 @@ Successful calls expose their authoritative result in `structuredContent`.
 `content.text` is a fixed short compatibility notice and intentionally does not
 duplicate task detail or secret claim credentials. Error text retains the
 machine-readable error payload.
+
+For structured errors, `retryable: false` means the failed request must not be
+repeated unchanged. An `INVALID_REQUEST` recovery can still direct a new call
+after every reported field has been corrected. Input rejected by the MCP SDK
+before a tool handler runs uses the same targeted field wording even though the
+SDK result is text-only.
 
 The enforced implementation path is `Inbox → Researching → Ready → In progress`.
 `Inbox → Ready` is rejected. Active work can become `Ready` only with non-empty

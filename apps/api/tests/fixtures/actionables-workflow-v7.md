@@ -15,7 +15,7 @@ Use Actionables as the coordination record for substantive work without letting 
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
 6. Treat a scoped list with `workItem.terminal: true` as a successful read even when `items` is empty. Inspect a known Done or Dismissed task with `actionables.get_task` using its top-level `workItemId`; page truncated fields with `actionables.get_task_detail` using that same `workItemId`. Terminal inspection is read-only and does not create lifecycle ownership.
-7. Claim only the root or a direct task returned from an active work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token. Read the latest version from `task.version` and the secret capability from `claim.claimToken`; do not immediately fetch again.
+7. Claim only the root or a direct task returned from an active work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token, so do not immediately fetch again.
 8. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing any dependent mutation, preserve the structured error, and follow its recovery guidance. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
 9. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. On `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading active work with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
 10. For a newly claimed Inbox task, transition to Researching before beginning investigation.
@@ -31,7 +31,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - For a creation-only request, create each authorized Actionable unclaimed in Inbox and stop unless the user also requested triage, research, or implementation.
 - Generate one caller-stable idempotency UUID for each intended task. Reuse it only for an exact retry and never for a different task.
 - Provide a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag for every created task.
-- For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. The server inherits that root's scope.
+- For a direct task or sibling, pass the authorized top-level Actionable as both `workItemId` and `parentId`; the server inherits that root's scope. Never use a direct task as the parent or also pass top-level placement fields.
 - For a top-level task with known scope IDs, pass `projectId`, `repositoryId`, and `worktreeId`.
 - If the current local Git repository is not tracked yet, pass its absolute path as `repositoryPath` with `ensureScope: true`. The server resolves the Git roots and atomically creates any missing project, repository, or worktree before creating the task.
 - Treat the task detail returned by creation as verification. Do not claim a newly created task only to fetch it again.
@@ -53,7 +53,7 @@ If the Actionables MCP server or required tool is unavailable, continue the user
 - Treat the claim token as a secret capability. Keep it only in tool-call context; never place it in chat, code, files, logs, task text, or validation evidence.
 - After claim, use the task ID, claim token, and latest version where required. Do not repeat the agent ID or mutation lease duration; only explicit renewal accepts `leaseMinutes`.
 - Re-fetch compact detail after a mutation version conflict, reconcile the current record, and retry only if the intended change is still valid. For detail-page version conflicts, discard the partial field and restart its paging from the current compact version.
-- After each composed tool result, branch on `isError` before accessing fields such as `version`. Stop dependent calls when it is true, then follow structured `nextAction` guidance. Retry the same request only when `retryable` is true and the stated prerequisite has been satisfied. A false value means do not repeat the request unchanged; when `INVALID_REQUEST` directs field correction, submit a new call with corrected arguments.
+- After each composed tool result, branch on `isError` before accessing fields such as `version`. Stop dependent calls when it is true, then follow structured `nextAction` guidance. Retry only when `retryable` is true and the stated prerequisite has been satisfied.
 - Treat successful `structuredContent` as authoritative; success `content.text` is only a short compatibility notice. Routine mutations return a lean receipt, not task detail: advance with its `version`, `status`, `readiness`, and `permittedTransitions`; use `counts` for persisted and duplicate-ignored additions; and fetch only fields named by `reconciliationFields` before relying on their authoritative stored values. An empty `reconciliationFields` means the mutation did not invalidate cached implementation-critical detail.
 - Prefer `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding material; use replacement fields only for intentional rewrites.
 - Record meaningful state changes, research conclusions, decisions, plans, blockers, and validation evidence. Do not emit heartbeat or narration-only updates.
@@ -93,9 +93,8 @@ Use lifecycle states consistently:
 1. Record Resolution content plus actual validation with commands, results, or other evidence before transitioning to Done.
 2. Transition to Done only when the existing completion rules pass. A terminal transition releases the claim.
 3. Verify terminal state read-only with a scoped list or `get_task` using the top-level `workItemId`; an empty active-work list with `workItem.terminal: true` is expected.
-4. Use `actionables.handoff_task` when task content must be saved before release; provide at least one of `finding`, `addFiles`, `appendResearch`, `appendPlannedValidation`, or `validation`.
-5. Use `actionables.release_task` only when no task content needs to change; it releases the claim without saving or updating task content.
-6. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.
-7. Include the final Actionables status in the user-facing handoff without exposing credentials.
+4. Release a nonterminal claim when abandoning the work or handing it to another agent.
+5. Keep the claim only when the same agent is expected to continue promptly; renew it when necessary.
+6. Include the final Actionables status in the user-facing handoff without exposing credentials.
 
 Do not create tasks beyond the authorized `create_task` operation, modify other hierarchy or dependencies, archive records, bypass validation, or broaden scope unless dedicated tools and explicit user authority exist.

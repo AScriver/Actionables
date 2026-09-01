@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
@@ -19,11 +20,14 @@ const mcpBearerTokenEnvironmentVariable = "ACTIONABLES_MCP_TOKEN";
 const actionablesMcpTableHeader = "[mcp_servers.actionables]";
 const knownLegacySkillHashes = new Set([
   "d75e5b9094b6bb0f4c8c31059e8bbfac88178ad2b46736c570db217aea19cf42",
+  "364c03defceb6662038ff34b53fd47bee28a98ee5aa126f92269171eee6d19f1",
+  "617b25d69f99d60924226da438d41f2ab4a39231dc69506eb7214a87b8e29522",
   "d090896ff221b734e43c6bba21b7e79b195f62a20b47961b4a7147b6281c779d",
   "56955943f579ffaa246d6c9fb03340334387b080e059e42bc8e4044f721a9c1d",
   "495f61a7d11d93f2104c56a9c21c9cc6a0bb021badc7fbc0d3740902148c2f37",
   "c31e09f64ddd667dfed2da664701f832e86d2c135f1c30e031c9b19446bd1bc4",
   "b9e2b2cddfb3cfc40e827b64d3a200b8f303edd38341c08569e94c43eaa1c340",
+  "e59710df38b6b2d4c502dcbfbfc20017529e097aeba8363b317696d9698e9fd8",
 ]);
 const repositoryRoot = resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
@@ -33,6 +37,19 @@ const defaultResourcesDirectory = resolve(
   "resources",
   "agent-integration",
 );
+
+export function bundledActionablesWorkflowSkill() {
+  return readFileSync(
+    resolve(defaultResourcesDirectory, "actionables-workflow", "SKILL.md"),
+    "utf8",
+  );
+}
+
+export function bundledActionablesWorkflowInstructions() {
+  return normalizeContent(bundledActionablesWorkflowSkill())
+    .replace(/^---\n[\s\S]*?\n---\n?/, "")
+    .trim();
+}
 
 type InstallerOptions = {
   homeDirectory?: string;

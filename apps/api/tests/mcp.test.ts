@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, open, rm } from "node:fs/promises";
+import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,13 @@ import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const canonicalWorkflowSkillPath = resolve(
+  repoRoot,
+  "resources",
+  "agent-integration",
+  "actionables-workflow",
+  "SKILL.md",
+);
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
 const bearerToken = "test-mcp-token-with-at-least-thirty-two-characters";
 const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df62";
@@ -23,6 +30,14 @@ const validTaskClassification = {
   effort: "S",
   tags: ["mcp"],
 };
+
+function workflowInstructions(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .replace(/^---\n[\s\S]*?\n---\n?/, "")
+    .trim();
+}
 
 let databasePath: string;
 let prisma: AppPrismaClient;
@@ -237,14 +252,18 @@ describe("Actionables MCP", () => {
   it("exposes exactly the bounded task tools through the official client", async () => {
     const { client, transport } = await connectClient();
     try {
+      const canonicalSkill = await readFile(canonicalWorkflowSkillPath, "utf8");
+      expect(client.getInstructions()).toBe(
+        workflowInstructions(canonicalSkill),
+      );
       expect(client.getInstructions()).toEqual(
         expect.stringContaining(
-          "A task may remain Researching between turns only while additional investigation is genuinely required",
+          "may remain Researching between turns only while additional investigation is genuinely required",
         ),
       );
       expect(client.getInstructions()).toEqual(
         expect.stringContaining(
-          "Never claim completion while an owned task remains Researching",
+          "Never report research or the overall task complete while a lifecycle-owned Actionable remains Researching",
         ),
       );
       expect(client.getInstructions()).toContain(
@@ -252,37 +271,37 @@ describe("Actionables MCP", () => {
       );
       expect(client.getInstructions()).toContain("actionables.get_task_detail");
       expect(client.getInstructions()).toContain(
-        "pass contentHash with each nextOffset until null",
+        "pass `contentHash` with each `nextOffset` until null",
       );
       expect(client.getInstructions()).toContain(
-        "If reconciliationGuidance is absent, normal flow may continue",
+        "When guidance is absent, normal flow may continue",
       );
       expect(client.getInstructions()).toContain(
-        "Successful structuredContent is authoritative",
+        "Treat successful `structuredContent` as authoritative",
       );
       expect(client.getInstructions()).toContain(
-        "Inspect hasMore before treating list_tasks items as exhaustive",
+        "Inspect `hasMore` before treating a bounded list as exhaustive",
       );
       expect(client.getInstructions()).toContain(
-        "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
+        "a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag",
       );
       expect(client.getInstructions()).toContain(
         "keep the root as the coordination record and create the minimum direct task set covering every implementation slice",
       );
       expect(client.getInstructions()).toContain(
-        "narrow it to one slice and create only the remaining slices as siblings under the same root",
+        "narrow it to one non-overlapping slice and create only the remaining slices as sibling direct tasks under the same top-level work item",
       );
       expect(client.getInstructions()).toContain(
-        "Do not split a single outcome, divide work by technical layer, add adjacent cleanup, or duplicate scope",
+        "Do not split by technical layer, create adjacent cleanup, or duplicate scope",
       );
       expect(client.getInstructions()).toContain(
-        "do not claim dependency relationships were created",
+        "do not claim that dependency relationships were created",
       );
       expect(client.getInstructions()).toContain(
-        "in the current task and every created task, and leave created tasks unclaimed in Inbox",
+        "in the current task and every created task. Leave created tasks unclaimed in Inbox",
       );
       expect(client.getInstructions()).toContain(
-        "A split root remains coordination-only when Ready",
+        "Move a research-complete split root to Ready as the coordination record",
       );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
@@ -329,6 +348,8 @@ describe("Actionables MCP", () => {
       const createTaskTool = tools.find(
         (tool) => tool.name === "actionables.create_task",
       );
+      const directTaskGuidance =
+        "For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent.";
       const createTaskInputSchema = createTaskTool?.inputSchema as {
         required?: string[];
         properties?: Record<
@@ -339,9 +360,9 @@ describe("Actionables MCP", () => {
       expect(createTaskTool?.description).toContain(
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
       );
-      expect(createTaskTool?.description).toContain(
-        "For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId",
-      );
+      expect(canonicalSkill).toContain(directTaskGuidance);
+      expect(client.getInstructions()).toContain(directTaskGuidance);
+      expect(createTaskTool?.description).toContain(directTaskGuidance);
       expect(createTaskTool?.description).toContain(
         "never use a direct task as the parent",
       );
@@ -362,6 +383,22 @@ describe("Actionables MCP", () => {
           "Required grouping tags; provide at least one meaningful tag.",
         minItems: 1,
       });
+      const handoffTaskTool = tools.find(
+        (tool) => tool.name === "actionables.handoff_task",
+      );
+      const releaseTaskTool = tools.find(
+        (tool) => tool.name === "actionables.release_task",
+      );
+      expect(handoffTaskTool?.inputSchema.description).toContain(
+        "If no task content needs to change, call actionables.release_task instead.",
+      );
+      expect(handoffTaskTool?.description).toContain(
+        "If no task content needs to change, call actionables.release_task instead.",
+      );
+      expect(releaseTaskTool?.description).toContain(
+        "does not save or update task content",
+      );
+      expect(releaseTaskTool?.description).toContain("Use handoff_task");
       for (const tool of tools) {
         const properties = describedProperties(tool.inputSchema);
         expect(properties.length, tool.name).toBeGreaterThan(0);
@@ -617,6 +654,121 @@ describe("Actionables MCP", () => {
       await expectClassificationError("tags", [" "], "Provide a nonblank tag.");
 
       expect(await prisma.actionable.count()).toBe(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("gives targeted recovery for invalid coordination inputs", async () => {
+    const task = await createTask({ title: "Schema recovery task" });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const schemaError = async (
+        name: string,
+        argumentsValue: Record<string, unknown>,
+        expected: string,
+      ) => {
+        const message = validationErrorText(
+          await client.callTool({ name, arguments: argumentsValue }),
+        );
+        expect(message).toContain(expected);
+      };
+      const updateBase = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+        resolution: "This must not persist.",
+      };
+      const versionRecovery =
+        "Use task.version from the preceding successful result";
+      const tokenRecovery =
+        "Use claim.claimToken returned by claim_task or recover_task_claim";
+      const placementRecovery =
+        "set both parentId and workItemId to the same authorized top-level Actionable ID";
+
+      const withoutVersion: Record<string, unknown> = { ...updateBase };
+      delete withoutVersion.version;
+      await schemaError(
+        "actionables.update_task",
+        withoutVersion,
+        versionRecovery,
+      );
+      await schemaError(
+        "actionables.update_task",
+        { ...updateBase, version: "current" },
+        versionRecovery,
+      );
+      const withoutToken: Record<string, unknown> = { ...updateBase };
+      delete withoutToken.claimToken;
+      await schemaError("actionables.update_task", withoutToken, tokenRecovery);
+      await schemaError(
+        "actionables.update_task",
+        { ...updateBase, claimToken: "discarded" },
+        tokenRecovery,
+      );
+      await schemaError(
+        "actionables.create_task",
+        {
+          idempotencyKey: randomUUID(),
+          parentId: task.sourceOrdinal,
+          title: "Missing work item placement",
+          ...validTaskClassification,
+        },
+        placementRecovery,
+      );
+      await schemaError(
+        "actionables.create_task",
+        {
+          idempotencyKey: randomUUID(),
+          workItemId: task.sourceOrdinal,
+          title: "Missing parent placement",
+          ...validTaskClassification,
+        },
+        placementRecovery,
+      );
+      await schemaError(
+        "actionables.handoff_task",
+        {
+          id: task.sourceOrdinal,
+          claimToken: claimed.claim.claimToken,
+          version: claimed.task.version,
+        },
+        "If no task content needs to change, call actionables.release_task instead.",
+      );
+
+      const stored = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+      });
+      expect(stored.version).toBe(claimed.task.version);
+      expect(stored.resolution).toBe("");
+      await expect(
+        prisma.agentTaskClaim.findUnique({
+          where: { actionableId: task.id },
+        }),
+      ).resolves.not.toBeNull();
+
+      output(
+        await client.callTool({
+          name: "actionables.release_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
     } finally {
       await transport.close();
     }
@@ -1036,6 +1188,10 @@ describe("Actionables MCP", () => {
       );
       expect(error).toMatchObject({
         code: "INVALID_REQUEST",
+        retryable: false,
+        nextAction: expect.stringContaining(
+          "Do not repeat this request unchanged",
+        ),
         errors: { repositoryPath: expect.any(Array) },
       });
       expect(await prisma.project.count()).toBe(before.projects);
