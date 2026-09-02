@@ -42,6 +42,8 @@ Conflicting Markdown and relationships are never silently merged. Immutable hist
 
 Preview parses and validates without writing any database row, timestamp, activity, identifier, or import summary. Its expiring in-memory token binds the canonical document digest and a fingerprint of database versions.
 
+Lifecycle integrity is validated during preview. A `Ready` actionable requires a non-empty finding, description, Research note, and validation plan.
+
 The user then confirms skipped conflicts and relationship suggestions. This produces a separate expiring commit authorization bound to the exact selections. Commit rejects:
 
 - changed content or digest;
