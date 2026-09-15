@@ -6065,23 +6065,30 @@ export default function App() {
         key,
       ) && Boolean(query[key]),
   );
+  const hierarchicalList = !discoveryActive && query.archived !== "archived";
   const visibleRows = useMemo(() => {
-    if (discoveryActive || query.parent || query.archived === "archived")
-      return actionables;
+    if (!hierarchicalList)
+      return actionables.map((item) => ({ ...item, depth: 0 }));
     const byId = new Map(actionables.map((item) => [item.id, item]));
-    return actionables
-      .filter((item) => !item.parentId)
-      .flatMap((item) => {
-        if (!item.childIds || !expandedParents.has(item.id)) return [item];
-        return [item, ...item.childIds.flatMap((id) => byId.get(id) ?? [])];
-      });
-  }, [
-    actionables,
-    discoveryActive,
-    expandedParents,
-    query.parent,
-    query.archived,
-  ]);
+    const pending = actionables
+      .filter((item) => !item.parentId || !byId.has(item.parentId))
+      .map((item) => ({ ...item, depth: 0 }))
+      .reverse();
+    const rows: Array<ActionableSummary & { depth: number }> = [];
+    const visited = new Set<number>();
+    while (pending.length) {
+      const item = pending.pop()!;
+      if (visited.has(item.id)) continue;
+      visited.add(item.id);
+      rows.push(item);
+      if (!expandedParents.has(item.id)) continue;
+      for (const id of [...(item.childIds ?? [])].reverse()) {
+        const child = byId.get(id);
+        if (child) pending.push({ ...child, depth: item.depth + 1 });
+      }
+    }
+    return rows;
+  }, [actionables, hierarchicalList, expandedParents]);
 
   const selectRow = (item: ActionableSummary) => {
     replaceLocation("actionables", item.id, query);
@@ -7365,6 +7372,8 @@ export default function App() {
                 const selectedRow = item.id === selectedId;
                 const isChild = Boolean(item.parentId);
                 const expanded = expandedParents.has(item.id);
+                const guideClass = isChild ? "child-guide" : "row-spacer";
+                const indentation = { marginInlineStart: item.depth * 16 };
                 return (
                   <div
                     className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`}
@@ -7379,11 +7388,14 @@ export default function App() {
                     }}
                   >
                     <div className="finding-cell" role="cell">
-                      {item.childIds && !discoveryActive ? (
+                      {item.childIds?.length && hierarchicalList ? (
                         <button
                           type="button"
                           className="row-expander"
+                          style={indentation}
                           aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${item.title}`}
+                          aria-expanded={expanded}
+                          onKeyDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.stopPropagation();
                             setExpandedParents((current) => {
@@ -7396,10 +7408,8 @@ export default function App() {
                         >
                           {expanded ? <ChevronDown /> : <ChevronRight />}
                         </button>
-                      ) : isChild ? (
-                        <span className="child-guide" />
                       ) : (
-                        <span className="row-spacer" />
+                        <span className={guideClass} style={indentation} />
                       )}
                       <span
                         className="finding-title truncate-reveal"

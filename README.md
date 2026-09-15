@@ -118,6 +118,12 @@ Parent and child links open their immediate neighbors. Relationships must stay
 within the same project, repository and worktree; self-links and cycles are
 rejected. Each task has at most one active parent.
 
+Expand any task with children in the Actionables list to browse further levels.
+Indentation shows the parent order; each branch expands independently, and its
+state survives reloads in the same browser tab. Search, hierarchy filters and
+archive views show matching tasks as a flat list, including deep tasks whose
+ancestors do not match. Use the Relationships links to navigate their parents.
+
 ## Work-item progress
 
 Parents with direct tasks show **Work-item progress** in the **Relationships**
