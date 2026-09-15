@@ -52,6 +52,15 @@ install either or both with explicit consent. See
 [Windows setup](windows-setup.md#optional-codex-instructions-and-workflow-skill)
 for their target paths and conflict-safe behavior.
 
+When updating to nested subtasks, install the updated workflow skill from that
+Settings section. Recognized unmodified older revisions can be upgraded;
+customized skills require manual review. The database migration upgrades only
+the exact previous built-in relationship-auditor prompt, increments its settings
+version, and preserves custom prompts and other settings. Existing custom Codex
+start templates are also preserved. Review any custom instructions for obsolete
+direct-child-only guidance; keep the original root as `workItemId` and the
+immediate parent as `parentId`.
+
 ## Agent workflow
 
 Codex supplies its technical thread ID in MCP request metadata. Actionables

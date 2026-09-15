@@ -8,6 +8,7 @@ import {
   defaultCodexResearchPrompt,
   defaultCodexImplementationPrompt,
   resolveApiRuntimeConfig,
+  updateHelperAgentSettingsRequestSchema,
 } from "@actionables/contracts";
 import { buildApp } from "../src/app.js";
 import { claimAgentTask, renewAgentTaskClaim } from "../src/agent-tasks.js";
@@ -16,6 +17,7 @@ import {
   type AssistantRequest,
   type AssistantRunner,
 } from "../src/assistant-runner.js";
+import { defaultRelationshipAuditorPrompt } from "../src/assistant-prompts.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { importSampleSeed, readSampleSeed } from "../src/import-seed.js";
 import type { NativeFolderPicker } from "../src/native-folder-picker.js";
@@ -722,6 +724,119 @@ describe("Actionables API", () => {
       });
     }
   });
+
+  it.each([false, true])(
+    "migrates only the legacy auditor default and preserves settings (customized: %s)",
+    async (customized) => {
+      const initial = (
+        await app!.inject({
+          method: "GET",
+          url: "/api/settings/helper-agents",
+        })
+      ).json();
+      const original = await prisma!.helperAgentSettings.findUniqueOrThrow({
+        where: { id: "helper-agents" },
+      });
+      const legacy = (
+        await readFile(
+          new URL(
+            "fixtures/relationship-auditor-prompt-v1.txt",
+            import.meta.url,
+          ),
+          "utf8",
+        )
+      ).trim();
+      const prompt = customized
+        ? `${legacy}\nKeep my custom guidance.`
+        : legacy;
+      const migration = await readFile(
+        resolve(
+          repoRoot,
+          "prisma/migrations/20260915180000_nested_relationship_auditor_prompt/migration.sql",
+        ),
+        "utf8",
+      );
+      const previousOutput = assistantOutput;
+      try {
+        const before = await prisma!.helperAgentSettings.update({
+          where: { id: original.id },
+          data: {
+            relationshipAuditorPrompt: prompt,
+            codexResearchPrompt: "Custom start for {{workItemId}}/{{taskId}}",
+            noteGroomerPrompt: "Keep my note instructions.",
+            agentClaimLeaseMinutes: 45,
+            version: { increment: 1 },
+            updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+          },
+        });
+        await prisma!.$executeRawUnsafe(migration);
+        const after = await prisma!.helperAgentSettings.findUniqueOrThrow({
+          where: { id: original.id },
+        });
+        if (customized) {
+          expect(after).toEqual(before);
+        } else {
+          expect(after).toEqual({
+            ...before,
+            relationshipAuditorPrompt: defaultRelationshipAuditorPrompt,
+            version: before.version + 1,
+            updatedAt: expect.any(Date),
+          });
+          expect(after.updatedAt.getTime()).toBeGreaterThan(
+            before.updatedAt.getTime(),
+          );
+          const stale = await app!.inject({
+            method: "PATCH",
+            url: "/api/settings/helper-agents",
+            payload: {
+              ...updateHelperAgentSettingsRequestSchema.strip().parse(initial),
+              version: before.version,
+            },
+          });
+          expect(stale.statusCode).toBe(409);
+          expect(stale.json().current.version).toBe(after.version);
+        }
+        await prisma!.$executeRawUnsafe(migration);
+        expect(
+          await prisma!.helperAgentSettings.findUniqueOrThrow({
+            where: { id: original.id },
+          }),
+        ).toEqual(after);
+        const settings = await app!.inject({
+          method: "GET",
+          url: "/api/settings/helper-agents",
+        });
+        expect(settings.statusCode).toBe(200);
+        expect(settings.json().relationshipAuditorPrompt).toBe(
+          after.relationshipAuditorPrompt,
+        );
+
+        assistantOutput = { recommendations: [] };
+        const root = (
+          await app!.inject({
+            method: "POST",
+            url: "/api/actionables",
+            payload: createBody("Audit migrated helper settings"),
+          })
+        ).json().item;
+        const audited = await app!.inject({
+          method: "POST",
+          url: `/api/actionables/${root.id}/assistant/relationship-audit`,
+          payload: { version: root.version },
+        });
+        expect(audited.statusCode).toBe(200);
+        expect(assistantRequests.at(-1)!.prompt).toContain(
+          after.relationshipAuditorPrompt,
+        );
+      } finally {
+        assistantOutput = previousOutput;
+        await prisma!.helperAgentSettings.update({
+          where: { id: original.id },
+          data: original,
+        });
+      }
+    },
+  );
 
   it("validates agent coordination bounds and the warning-to-lease relationship", async () => {
     const initial = (
