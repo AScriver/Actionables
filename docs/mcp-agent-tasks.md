@@ -24,6 +24,11 @@ closes the MCP endpoint; no separate MCP process is created. First-run setup and
 **Settings → Actionables agent integration** show the effective API origin, MCP
 endpoint, and whether the route is enabled. They never display the token.
 
+Setup and Settings report `Disabled` until a non-empty token is configured.
+The URL is not usable until Actionables is restarted with that token, and it
+only accepts loopback connections. Do not print, paste into task records, or
+commit the token.
+
 Configure Codex globally in `%USERPROFILE%\.codex\config.toml`:
 
 ```toml

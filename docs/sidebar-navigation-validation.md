@@ -22,7 +22,7 @@ pushed. Fixture records were created only in isolated test databases.
 - Existing [daily-shell](../tests/e2e/daily-shell.spec.ts),
   [repository-tracking](../tests/e2e/repository-tracking.spec.ts), and
   [accessibility](../tests/e2e/accessibility.spec.ts) tests.
-- [README](../README.md) navigation guidance and this evidence record.
+- [How-to guide](how-to.md#navigate-the-dashboard) navigation guidance and this evidence record.
 
 The existing Done-navigation fixture now supplies the Resolution required by
 the current lifecycle contract. The sidebar test waits for its CSS transition,

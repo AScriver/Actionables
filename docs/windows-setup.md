@@ -15,12 +15,12 @@ The configurable Codex start prompts add two optional settings columns. When
 upgrading an existing installation, run `pnpm run db:migrate` before starting
 the updated build. Existing settings retain their values, and unset templates
 use the application defaults. Configure or reset each template under
-**Settings → Codex start prompts**; see the [template variables](../README.md#hand-work-to-codex).
+**Settings → Codex start prompts**; see the [template variables](how-to.md#customize-codex-start-prompts).
 
 Monorepo launch targeting uses an optional **Project directory** under
 **Settings → Repository projects** or **Add repository**. After upgrading,
 apply the normal database migrations; existing repositories receive a blank
-directory and retain checkout-root launches. See the [repository setup](../README.md#run-actionables-locally)
+directory and retain checkout-root launches. See the [repository setup](how-to.md#manage-repositories-and-projects)
 for sibling projects, worktree resolution and unavailable-directory recovery.
 
 The agent MCP endpoint is disabled unless `ACTIONABLES_MCP_TOKEN` is set. See [Agent task MCP endpoint](mcp-agent-tasks.md) for the local token and Codex configuration.
@@ -36,10 +36,17 @@ Neither file is installed automatically. Choose either component, both, or **Not
 
 Installation is idempotent. Existing unrelated content in `AGENTS.md` is preserved, and an already matching component is left unchanged. A skill file that exactly matches a known older bundled copy is shown as **Update available** and is replaced only when you explicitly select the update. If a managed instructions section or skill file has any other difference, Actionables reports that manual review is required and does not overwrite it. Reconcile the target with the bundled files under `resources\agent-integration`, then retry from Settings.
 
+After installing the workflow skill, choose **Open Skills in Codex** to inspect
+it in the documented Skills view. This does not replace the required Codex
+restart after MCP configuration changes.
+
 Set `ACTIONABLES_AGENT_HOME` before starting the API only when Actionables should use a profile root other than the current Windows user's home directory. This override is primarily intended for isolated validation.
 
+## Optional local Codex helpers
+
 The optional Inbox triager, note groomer, and relationship auditor require the
-local Codex CLI to be installed and signed in. Verify it from the same Windows
+local Codex CLI to be installed and signed in. Helpers run only when requested.
+Verify the CLI from the same Windows
 user account that runs Actionables:
 
 ```powershell
@@ -101,6 +108,9 @@ pnpm run db:seed
 ```
 
 The second seed import must report `0 created, 0 updated, 32 unchanged`.
+
+On an existing checkout, `pnpm run db:setup` runs the combined database setup.
+Continue with [Development operation](#development-operation) to start the app.
 
 The default database is `data/actionables.db`. To isolate a database for testing or recovery:
 
@@ -209,6 +219,10 @@ Stop with `Ctrl+C`; repeat `pnpm run start` to verify a clean restart.
 ```powershell
 pnpm run verify:release
 ```
+
+This checks formatting, types, API and integration tests, browser end-to-end
+tests, automated accessibility, the production build, migrations, SQLite
+loading, seed idempotence, and the living plan.
 
 Individual diagnostics:
 
