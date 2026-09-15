@@ -810,8 +810,6 @@ function integrityItems(
     ...document.hierarchy.filter((item) => item.detachedAt === null),
   ];
   const parentByChild = new Map<string, string>();
-  const children = new Set<string>();
-  const parents = new Set<string>();
   const hierarchyPairs = new Set<string>();
   const incomingHierarchyIds = new Set(
     document.hierarchy
@@ -870,8 +868,6 @@ function integrityItems(
       );
     }
     parentByChild.set(relationship.childId, relationship.parentId);
-    parents.add(relationship.parentId);
-    children.add(relationship.childId);
     const parent = actionById.get(relationship.parentId);
     const child = actionById.get(relationship.childId);
     if (
@@ -889,15 +885,24 @@ function integrityItems(
       );
     }
   }
-  for (const id of parents) {
-    if (children.has(id)) {
-      add(
-        "hierarchy",
-        id,
-        "integrity-failure",
-        "Only one hierarchy level is supported.",
-      );
+  const checkedAncestors = new Set<string>();
+  for (const id of parentByChild.keys()) {
+    const ancestors = new Set<string>();
+    let current: string | undefined = id;
+    while (current && !checkedAncestors.has(current)) {
+      if (ancestors.has(current)) {
+        add(
+          "hierarchy",
+          id,
+          "integrity-failure",
+          "The hierarchy contains a cycle.",
+        );
+        break;
+      }
+      ancestors.add(current);
+      current = parentByChild.get(current);
     }
+    for (const ancestor of ancestors) checkedAncestors.add(ancestor);
   }
   for (const relationship of activeHierarchy) {
     const parent = actionById.get(relationship.parentId);

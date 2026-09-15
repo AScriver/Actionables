@@ -109,6 +109,15 @@ any registered project return a correction error. Explicit scope IDs retain
 their existing behavior. Directory edits require released claims and advance
 the affected scope/task versions without changing their IDs or lifecycle.
 
+## Organize subtasks
+
+In **Relationships**, create a subtask or apply a task breakdown beneath any
+task, including an existing subtask. **Link existing subtask**, **Change parent**,
+and **Detach** preserve that task's descendants and relationship history.
+Parent and child links open their immediate neighbors. Relationships must stay
+within the same project, repository and worktree; self-links and cycles are
+rejected. Each task has at most one active parent.
+
 ## Work-item progress
 
 Parents with direct tasks show **Work-item progress** in the **Relationships**

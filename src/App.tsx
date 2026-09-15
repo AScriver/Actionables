@@ -888,7 +888,7 @@ function RelationshipSection({
             Create
           </button>
         </form>
-        {!selected.parentId && !selected.archiveState.isArchived && (
+        {!selected.archiveState.isArchived && (
           <div className="relationship-add">
             <select
               value={taskBreakdown}
@@ -920,49 +920,47 @@ function RelationshipSection({
             </button>
           </div>
         )}
-        {!selected.parentId && (
-          <div className="relationship-add">
-            <select
-              value={childId}
-              onChange={(event) => setChildId(event.target.value)}
-              aria-label="Existing subtask"
-            >
-              <option value="">Link existing subtask…</option>
-              {options(
-                hierarchyCandidates.filter(
-                  (item) => !item.childIds?.length && item.id !== selected.id,
-                ),
-              )}
-            </select>
-            <button
-              type="button"
-              disabled={saving || !childId}
-              onClick={() => {
-                const child = actionables.find(
-                  (item) => item.id === Number(childId),
-                );
-                const oldParent = child?.parentId
-                  ? actionables.find((item) => item.id === child.parentId)
-                  : undefined;
-                if (!child) return;
-                void run(
-                  () =>
-                    setParent(child.id, {
-                      version: child.version,
-                      parentId: selected.id,
-                      parentVersion: selected.version,
-                      currentParentVersion: oldParent?.version,
-                    }),
-                  oldParent
-                    ? "Subtask reassigned with both relationship changes recorded."
-                    : "Existing actionable attached as a subtask.",
-                ).then(() => setChildId(""));
-              }}
-            >
-              Link
-            </button>
-          </div>
-        )}
+        <div className="relationship-add">
+          <select
+            value={childId}
+            onChange={(event) => setChildId(event.target.value)}
+            aria-label="Existing subtask"
+          >
+            <option value="">Link existing subtask…</option>
+            {options(
+              hierarchyCandidates.filter(
+                (item) => item.parentId !== selected.id,
+              ),
+            )}
+          </select>
+          <button
+            type="button"
+            disabled={saving || !childId}
+            onClick={() => {
+              const child = actionables.find(
+                (item) => item.id === Number(childId),
+              );
+              const oldParent = child?.parentId
+                ? actionables.find((item) => item.id === child.parentId)
+                : undefined;
+              if (!child) return;
+              void run(
+                () =>
+                  setParent(child.id, {
+                    version: child.version,
+                    parentId: selected.id,
+                    parentVersion: selected.version,
+                    currentParentVersion: oldParent?.version,
+                  }),
+                oldParent
+                  ? "Subtask reassigned with both relationship changes recorded."
+                  : "Existing actionable attached as a subtask.",
+              ).then(() => setChildId(""));
+            }}
+          >
+            Link
+          </button>
+        </div>
         {selectedParent && (
           <div className="relationship-add">
             <select
@@ -973,7 +971,7 @@ function RelationshipSection({
               <option value="">Change parent…</option>
               {options(
                 hierarchyCandidates.filter(
-                  (item) => !item.parentId && !item.childIds?.length,
+                  (item) => item.id !== selectedParent.id,
                 ),
               )}
             </select>

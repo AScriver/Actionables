@@ -56,7 +56,7 @@ Commit re-runs validation inside one database transaction. Scopes, actionables, 
 
 ## Relationships
 
-Explicit hierarchy and dependency records in a trusted portable document are restored after the server validates self, duplicate, scope, depth, and cycle rules.
+Explicit hierarchy and dependency records in a trusted portable document are restored after the server validates self, duplicate, scope, and cycle rules. Nested hierarchy is supported with one active parent per task.
 
 Inferred relationships are separate `relationshipSuggestions`. They never create domain facts unless individually selected. Confirmation records provenance in the relationship and associated activity. Export emits confirmed relationships as explicit relationships and does not infer them again.
 

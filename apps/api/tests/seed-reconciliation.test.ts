@@ -532,22 +532,55 @@ describe("internal seed reconciliation", () => {
       (await service.preview(duplicateRelationship)).totals.integrityFailures,
     ).toBeGreaterThan(0);
 
-    const excessiveDepth = structuredClone(document);
-    excessiveDepth.hierarchy.push({
-      portableId: "excessive-depth",
-      parentId: excessiveDepth.actionables.find(
-        (item) => item.portableId === excessiveDepth.hierarchy[0]!.childId,
-      )!.portableId,
-      childId: excessiveDepth.actionables[1]!.portableId,
+    const hierarchyCycle = structuredClone(document);
+    hierarchyCycle.hierarchy.push({
+      portableId: "hierarchy-cycle",
+      parentId: hierarchyCycle.hierarchy[0]!.childId,
+      childId: hierarchyCycle.hierarchy[0]!.parentId,
       createdAt: "2026-07-25T00:00:00.000Z",
       detachedAt: null,
       provenance: "test",
     });
     expect(
-      (await service.preview(excessiveDepth)).totals.integrityFailures,
+      (await service.preview(hierarchyCycle)).totals.integrityFailures,
     ).toBeGreaterThan(0);
     expect(await prisma.project.count()).toBe(0);
     expect(await prisma.importRun.count()).toBe(0);
+  }, 30_000);
+
+  it("restores four hierarchy levels and reconciles the seed without flattening them", async () => {
+    const prisma = await freshDatabase();
+    const service = new DataImportService(prisma);
+    const document = await seedDocument();
+    const nodes = document.actionables.slice(0, 4);
+    for (const node of nodes) node.status = "Inbox";
+    document.hierarchy = nodes.slice(1).map((child, index) => ({
+      portableId: `nested-${index}`,
+      parentId: nodes[index]!.portableId,
+      childId: child.portableId,
+      createdAt: "2026-07-25T00:00:00.000Z",
+      detachedAt: null,
+      provenance: "test",
+    }));
+    const preview = await service.preview(document);
+    expect(
+      preview.canCommit,
+      JSON.stringify(
+        preview.items.filter(
+          (item) => item.classification === "integrity-failure",
+        ),
+      ),
+    ).toBe(true);
+    await commitPreview(service, preview);
+    expect((await service.preview(document)).canCommit).toBe(true);
+    const exported = await exportPortableDocument(prisma);
+    expect(exported.hierarchy).toEqual(document.hierarchy);
+    const restored = await freshDatabase();
+    const restore = new DataImportService(restored);
+    await commitPreview(restore, await restore.preview(exported));
+    expect(
+      semanticPortableSnapshot(await exportPortableDocument(restored)),
+    ).toEqual(semanticPortableSnapshot(exported));
   }, 30_000);
 
   it("rolls back every write when the transaction fails and consumes the authorization", async () => {

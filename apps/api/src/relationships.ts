@@ -316,6 +316,7 @@ async function createSubtaskRecord(
   );
 }
 
+/** Creates an Inbox child in its immediate parent's scope. */
 export async function createSubtask(
   prisma: AppPrismaClient,
   parentOrdinal: number,
@@ -325,13 +326,6 @@ export async function createSubtask(
   return runMutation(prisma, parentOrdinal, async (tx) => {
     const parent = await requireActionable(tx, parentOrdinal, "parent");
     requireVersion(parent, input.version);
-    if (parent.hierarchyAsChild.length) {
-      throw new DomainValidationError(
-        "HIERARCHY_DEPTH_EXCEEDED",
-        { parent: ["A subtask cannot also be a parent."] },
-        "Only one hierarchy level is supported.",
-      );
-    }
     const highest = await tx.actionable.aggregate({
       _max: { sourceOrdinal: true },
     });
@@ -341,6 +335,7 @@ export async function createSubtask(
   });
 }
 
+/** Creates all template children atomically beneath the selected task. */
 export async function createTaskBreakdown(
   prisma: AppPrismaClient,
   parentOrdinal: number,
@@ -349,13 +344,6 @@ export async function createTaskBreakdown(
   return runMutation(prisma, parentOrdinal, async (tx) => {
     const parent = await requireActionable(tx, parentOrdinal, "parent");
     requireVersion(parent, input.version);
-    if (parent.hierarchyAsChild.length) {
-      throw new DomainValidationError(
-        "HIERARCHY_DEPTH_EXCEEDED",
-        { parent: ["A subtask cannot also be a parent."] },
-        "Only one hierarchy level is supported.",
-      );
-    }
     const highest = await tx.actionable.aggregate({
       _max: { sourceOrdinal: true },
     });
@@ -385,6 +373,7 @@ export async function createTaskBreakdown(
   });
 }
 
+/** Moves a subtree within its scope, preserving history and rejecting cycles. */
 export async function setParent(
   prisma: AppPrismaClient,
   childOrdinal: number,
@@ -413,13 +402,23 @@ export async function setParent(
         "Hierarchy cannot cross scopes.",
       );
     }
-    if (child.hierarchyAsParent.length || parent.hierarchyAsChild.length) {
+    const ancestors = await tx.$queryRaw<Array<{ id: string }>>`
+      WITH RECURSIVE ancestors(id) AS (
+        SELECT ${parent.id}
+        UNION
+        SELECT edge.parentId FROM HierarchyRelationship edge
+        JOIN ancestors ON edge.childId = ancestors.id
+        WHERE edge.detachedAt IS NULL
+      )
+      SELECT id FROM ancestors WHERE id = ${child.id}
+    `;
+    if (ancestors.length) {
       throw new DomainValidationError(
-        "HIERARCHY_DEPTH_EXCEEDED",
+        "HIERARCHY_CYCLE",
         {
-          parentId: ["This relationship would exceed the one-level hierarchy."],
+          parentId: ["A task cannot be moved beneath one of its descendants."],
         },
-        "Only one hierarchy level is supported.",
+        "A hierarchy cycle is not allowed.",
       );
     }
     const existing = await tx.hierarchyRelationship.findFirst({

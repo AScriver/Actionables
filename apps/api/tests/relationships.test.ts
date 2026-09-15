@@ -303,7 +303,7 @@ describe("hierarchy relationships", () => {
     ).toBe(true);
   });
 
-  it("rejects stale and nested task breakdown requests without partial creation", async () => {
+  it("rejects stale breakdowns and creates nested breakdowns atomically", async () => {
     const parent = await create("Task breakdown concurrency parent");
     const first = await app.inject({
       method: "POST",
@@ -320,6 +320,7 @@ describe("hierarchy relationships", () => {
     });
     expect(stale.statusCode).toBe(409);
     expect(stale.json().current.relationships.subtasks).toHaveLength(3);
+    expect(await prisma.actionable.count()).toBe(actionableCount);
 
     const child = first.json().item.relationships.subtasks[0].child;
     const nested = await app.inject({
@@ -327,13 +328,13 @@ describe("hierarchy relationships", () => {
       url: `/api/actionables/${child.id}/task-breakdowns`,
       payload: { version: child.version, template: "migration" },
     });
-    expect(nested.statusCode).toBe(422);
-    expect(nested.json().code).toBe("HIERARCHY_DEPTH_EXCEEDED");
-    expect(await prisma.actionable.count()).toBe(actionableCount);
+    expect(nested.statusCode, nested.body).toBe(200);
+    expect(nested.json().item.relationships.subtasks).toHaveLength(4);
+    expect(await prisma.actionable.count()).toBe(actionableCount + 4);
     expect((await get(parent.id)).relationships.subtasks).toHaveLength(3);
   });
 
-  it("creates, rejects invalid depth/scope/self, reassigns with versions, and detaches audibly", async () => {
+  it("creates four levels, rejects cycles/scope/self/stale moves, and preserves moved subtrees and history", async () => {
     let parent = await create("Parent");
     let replacement = await create("Replacement");
     let child = await create("Child");
@@ -354,6 +355,26 @@ describe("hierarchy relationships", () => {
     expect(child.relationships.parent.parent.id).toBe(parent.id);
     expect(parent.relationships.subtasks[0].child.id).toBe(child.id);
 
+    const createChild = async (id: number, title: string) => {
+      const current = await get(id);
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/actionables/${id}/subtasks`,
+        payload: { version: current.version, title },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      return get(response.json().item.relationships.subtasks.at(-1).child.id);
+    };
+    const grandchild = await createChild(child.id, "Grandchild");
+    const greatGrandchild = await createChild(
+      grandchild.id,
+      "Great-grandchild",
+    );
+    child = await get(child.id);
+    expect(greatGrandchild.scope).toEqual(parent.scope);
+    expect(greatGrandchild.parentId).toBe(grandchild.id);
+    expect((await get(grandchild.id)).parentId).toBe(child.id);
+
     const self = await app.inject({
       method: "PUT",
       url: `/api/actionables/${child.id}/parent`,
@@ -365,16 +386,17 @@ describe("hierarchy relationships", () => {
     });
     expect(self.json().code).toBe("SELF_HIERARCHY");
 
-    const depth = await app.inject({
+    const cycle = await app.inject({
       method: "PUT",
       url: `/api/actionables/${parent.id}/parent`,
       payload: {
         version: parent.version,
-        parentId: replacement.id,
-        parentVersion: replacement.version,
+        parentId: greatGrandchild.id,
+        parentVersion: greatGrandchild.version,
       },
     });
-    expect(depth.json().code).toBe("HIERARCHY_DEPTH_EXCEEDED");
+    expect(cycle.json().code).toBe("HIERARCHY_CYCLE");
+    expect((await get(parent.id)).parentId).toBeUndefined();
 
     const crossScope = await app.inject({
       method: "PUT",
@@ -388,6 +410,19 @@ describe("hierarchy relationships", () => {
     expect(crossScope.json().code).toBe("HIERARCHY_SCOPE_MISMATCH");
 
     replacement = await get(replacement.id);
+    const staleMove = await app.inject({
+      method: "PUT",
+      url: `/api/actionables/${child.id}/parent`,
+      payload: {
+        version: child.version,
+        parentId: replacement.id,
+        parentVersion: replacement.version,
+        currentParentVersion: parent.version - 1,
+      },
+    });
+    expect(staleMove.statusCode).toBe(409);
+    expect((await get(child.id)).parentId).toBe(parent.id);
+    expect((await get(replacement.id)).relationships.subtasks).toHaveLength(0);
     const reassigned = await app.inject({
       method: "PUT",
       url: `/api/actionables/${child.id}/parent`,
@@ -402,6 +437,8 @@ describe("hierarchy relationships", () => {
     child = reassigned.json().item;
     replacement = await get(replacement.id);
     expect(child.relationships.parent.parent.id).toBe(replacement.id);
+    expect((await get(grandchild.id)).parentId).toBe(child.id);
+    expect((await get(greatGrandchild.id)).parentId).toBe(grandchild.id);
     expect(
       child.activity.some(
         (event: { type: string }) => event.type === "hierarchy-reassigned",
@@ -426,6 +463,13 @@ describe("hierarchy relationships", () => {
     });
     expect(detached.statusCode).toBe(200);
     expect(detached.json().item.relationships.parent).toBeNull();
+    expect((await get(grandchild.id)).parentId).toBe(child.id);
+    expect((await get(greatGrandchild.id)).parentId).toBe(grandchild.id);
+    expect(
+      await prisma.hierarchyRelationship.count({
+        where: { childId: child.recordId, detachedAt: { not: null } },
+      }),
+    ).toBe(2);
     expect(
       detached
         .json()
