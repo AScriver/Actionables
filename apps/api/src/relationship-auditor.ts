@@ -14,8 +14,9 @@ import {
 import { defaultRelationshipAuditorPrompt } from "./assistant-prompts.js";
 import type { AppPrismaClient } from "./database.js";
 import { DomainValidationError, getActionable } from "./repository.js";
+import { getHierarchyTasks } from "./hierarchy.js";
 
-const maxDirectSubtasks = 50;
+const maxDescendants = 50;
 const maxContextCharacters = 160_000;
 
 function relationshipKey(fromId: number, toId: number) {
@@ -107,16 +108,16 @@ export async function auditWorkItemRelationships(
       "Archived work items cannot be audited.",
     );
   }
-  const childIds = root.relationships.subtasks.map(
-    (relationship) => relationship.child.id,
+  const descendants = (await getHierarchyTasks(prisma, root.recordId)).filter(
+    (task) => task.id !== root.recordId,
   );
-  if (childIds.length > maxDirectSubtasks) {
+  if (descendants.length > maxDescendants) {
     throw new AssistantContextTooLargeError(
-      `Reduce the work item to ${maxDirectSubtasks} direct subtasks or fewer and retry.`,
+      `Reduce the work item to ${maxDescendants} descendants or fewer and retry.`,
     );
   }
   const children = await Promise.all(
-    childIds.map((id) => getActionable(prisma, id)),
+    descendants.map((task) => getActionable(prisma, task.sourceOrdinal)),
   );
   const tasks = [
     root,
@@ -125,8 +126,10 @@ export async function auditWorkItemRelationships(
   const auditedTaskIds = tasks.map((item) => item.id);
   const taskIds = new Set(auditedTaskIds);
   const hierarchy = new Set(
-    root.relationships.subtasks.map((relationship) =>
-      relationshipKey(root.id, relationship.child.id),
+    tasks.flatMap((task) =>
+      task.relationships.subtasks.map((relationship) =>
+        relationshipKey(task.id, relationship.child.id),
+      ),
     ),
   );
   const dependencies = new Set<string>();

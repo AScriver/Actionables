@@ -123,7 +123,10 @@ async function activity(
   });
 }
 
-async function currentDetail(prisma: AppPrismaClient, ordinal: number) {
+async function currentDetail(
+  prisma: AppPrismaClient | Transaction,
+  ordinal: number,
+) {
   const current = await getActionable(prisma, ordinal);
   if (!current) {
     throw new DomainValidationError(
@@ -139,13 +142,15 @@ async function runMutation(
   prisma: AppPrismaClient,
   selectedOrdinal: number,
   operation: (tx: Transaction) => Promise<void>,
+  existingTransaction?: Transaction,
 ): Promise<ActionableDetail> {
   try {
-    await prisma.$transaction(operation);
+    if (existingTransaction) await operation(existingTransaction);
+    else await prisma.$transaction(operation);
   } catch (error) {
     if (error instanceof StaleRelationshipError) {
       throw new VersionConflictError(
-        await currentDetail(prisma, error.ordinal),
+        await currentDetail(existingTransaction ?? prisma, error.ordinal),
       );
     }
     const message = error instanceof Error ? error.message : "";
@@ -168,7 +173,7 @@ async function runMutation(
     }
     throw error;
   }
-  return currentDetail(prisma, selectedOrdinal);
+  return currentDetail(existingTransaction ?? prisma, selectedOrdinal);
 }
 
 function sameHierarchyScope(
@@ -322,17 +327,23 @@ export async function createSubtask(
   parentOrdinal: number,
   input: CreateSubtaskRequest,
   options: CreateSubtaskOptions = {},
+  existingTransaction?: Transaction,
 ) {
-  return runMutation(prisma, parentOrdinal, async (tx) => {
-    const parent = await requireActionable(tx, parentOrdinal, "parent");
-    requireVersion(parent, input.version);
-    const highest = await tx.actionable.aggregate({
-      _max: { sourceOrdinal: true },
-    });
-    const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
-    await createSubtaskRecord(tx, parent, ordinal, input.title, options);
-    await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
-  });
+  return runMutation(
+    prisma,
+    parentOrdinal,
+    async (tx) => {
+      const parent = await requireActionable(tx, parentOrdinal, "parent");
+      requireVersion(parent, input.version);
+      const highest = await tx.actionable.aggregate({
+        _max: { sourceOrdinal: true },
+      });
+      const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
+      await createSubtaskRecord(tx, parent, ordinal, input.title, options);
+      await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
+    },
+    existingTransaction,
+  );
 }
 
 /** Creates all template children atomically beneath the selected task. */

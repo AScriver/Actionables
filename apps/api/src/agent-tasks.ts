@@ -81,6 +81,7 @@ import {
   VersionConflictError,
 } from "./repository.js";
 import { createSubtask } from "./relationships.js";
+import { getHierarchyRoot, getHierarchyTasks } from "./hierarchy.js";
 
 const execFileAsync = promisify(execFile);
 const terminalStatuses = ["Done", "Dismissed"];
@@ -285,8 +286,12 @@ function isArchived(row: AgentTaskRow) {
   );
 }
 
-function toAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
+async function toAgentTaskSummary(
+  client: TransactionClient,
+  row: AgentTaskRow,
+): Promise<AgentTaskSummary> {
   const parentId = row.hierarchyAsChild[0]?.parent.sourceOrdinal ?? null;
+  const root = await getHierarchyRoot(client, row.id);
   const unresolvedDependencyCount = row.dependenciesAsDependent.filter(
     (relationship) =>
       relationship.waivedAt === null &&
@@ -301,7 +306,7 @@ function toAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
   return agentTaskSummarySchema.parse({
     id: row.sourceOrdinal,
     recordId: row.id,
-    workItemId: parentId ?? row.sourceOrdinal,
+    workItemId: root.sourceOrdinal,
     parentId,
     childIds: row.hierarchyAsParent.map(
       (relationship) => relationship.child.sourceOrdinal,
@@ -379,13 +384,12 @@ async function requireWorkItem(
     );
   }
   if (row.hierarchyAsChild.length > 0) {
+    const root = await getHierarchyRoot(prisma, row.id);
     throw new AgentTaskClaimError(
       "INVALID_REQUEST",
       "workItemId must identify a top-level Actionable, not one of its subtasks.",
       {
-        workItemId: [
-          `Use top-level Actionable ${row.hierarchyAsChild[0]!.parent.sourceOrdinal}.`,
-        ],
+        workItemId: [`Use top-level Actionable ${root.sourceOrdinal}.`],
       },
     );
   }
@@ -404,19 +408,24 @@ async function requireWorkItem(
   return row;
 }
 
-function requireTaskInWorkItem(row: AgentTaskRow, workItem: AgentTaskRow) {
+async function requireTaskInWorkItem(
+  client: TransactionClient,
+  row: AgentTaskRow,
+  workItem: AgentTaskRow,
+) {
+  const root = await getHierarchyRoot(client, row.id);
   const belongsToWorkItem =
-    row.id === workItem.id ||
-    row.hierarchyAsChild.some(
-      (relationship) => relationship.parentId === workItem.id,
-    );
+    root.id === workItem.id &&
+    row.projectId === workItem.projectId &&
+    row.repositoryId === workItem.repositoryId &&
+    row.worktreeId === workItem.worktreeId;
   if (!belongsToWorkItem) {
     throw new AgentTaskClaimError(
       "INVALID_REQUEST",
       "The Actionable does not belong to the requested feature or bug work item.",
       {
         id: [
-          `Choose the root or a direct subtask of Actionable ${workItem.sourceOrdinal}.`,
+          `Choose the root or a descendant of Actionable ${workItem.sourceOrdinal}.`,
         ],
       },
     );
@@ -678,107 +687,104 @@ export async function listAgentTasks(
   now = new Date(),
 ): Promise<ListAgentTasksResponse> {
   const request = parseInput(listAgentTasksRequestSchema, input);
-  const workItem =
-    request.workItemId === undefined
-      ? null
-      : await requireWorkItem(prisma, request.workItemId, {
-          allowTerminal: true,
-        });
-  const workItemState = workItem
-    ? {
-        id: workItem.sourceOrdinal,
-        status: workItem.status,
-        terminal: terminalStatuses.includes(workItem.status),
-      }
-    : null;
-  if (workItemState?.terminal) {
-    return listAgentTasksResponseSchema.parse({
-      items: [],
-      hasMore: false,
-      workItem: workItemState,
-    });
-  }
-  const baseWhere = {
-    archivedAt: null,
-    status: { notIn: terminalStatuses },
-    project: { archivedAt: null },
-    repository: { archivedAt: null },
-    worktree: { archivedAt: null },
-    ...(workItem
+  return prisma.$transaction(async (tx) => {
+    const workItem =
+      request.workItemId === undefined
+        ? null
+        : await requireWorkItem(tx, request.workItemId, {
+            allowTerminal: true,
+          });
+    const workItemState = workItem
       ? {
-          AND: [
-            {
-              OR: [
-                { id: workItem.id },
-                {
-                  hierarchyAsChild: {
-                    some: {
-                      parentId: workItem.id,
-                      detachedAt: null,
-                    },
-                  },
-                },
-              ],
-            },
-          ],
+          id: workItem.sourceOrdinal,
+          status: workItem.status,
+          terminal: terminalStatuses.includes(workItem.status),
         }
-      : {}),
-  } satisfies Prisma.ActionableWhereInput;
-  const where: Prisma.ActionableWhereInput =
-    request.view === "mine"
-      ? {
-          ...baseWhere,
-          agentTaskClaim: {
-            is: {
-              agentId: request.agentId,
-              leaseExpiresAt: { gt: now },
+      : null;
+    if (workItemState?.terminal) {
+      return listAgentTasksResponseSchema.parse({
+        items: [],
+        hasMore: false,
+        workItem: workItemState,
+      });
+    }
+    const baseWhere = {
+      archivedAt: null,
+      status: { notIn: terminalStatuses },
+      project: { archivedAt: null },
+      repository: { archivedAt: null },
+      worktree: { archivedAt: null },
+      ...(workItem
+        ? {
+            id: {
+              in: (await getHierarchyTasks(tx, workItem.id)).map(
+                (task) => task.id,
+              ),
             },
-          },
-        }
-      : {
-          ...baseWhere,
-          status: { notIn: [...terminalStatuses, "Blocked"] },
-          dependenciesAsDependent: {
-            none: {
-              removedAt: null,
-              waivedAt: null,
-              prerequisite: { status: { not: "Done" } },
-            },
-          },
-          OR: [
-            { agentTaskClaim: { is: null } },
-            {
-              agentTaskClaim: {
-                is: { leaseExpiresAt: { lte: now } },
+            projectId: workItem.projectId,
+            repositoryId: workItem.repositoryId,
+            worktreeId: workItem.worktreeId,
+          }
+        : {}),
+    } satisfies Prisma.ActionableWhereInput;
+    const where: Prisma.ActionableWhereInput =
+      request.view === "mine"
+        ? {
+            ...baseWhere,
+            agentTaskClaim: {
+              is: {
+                agentId: request.agentId,
+                leaseExpiresAt: { gt: now },
               },
             },
-          ],
-        };
-  const rows = await prisma.actionable.findMany({
-    where,
-    include: agentTaskInclude,
-    orderBy: [
-      { priority: "asc" },
-      { updatedAt: "desc" },
-      { sourceOrdinal: "asc" },
-    ],
-    take: request.limit + 1,
-  });
-  const hasMore = rows.length > request.limit;
-  return listAgentTasksResponseSchema.parse({
-    items: rows.slice(0, request.limit).map((row) => {
-      const summary = toAgentTaskSummary(row);
-      if (
-        request.view === "available" &&
-        summary.claim &&
-        new Date(summary.claim.leaseExpiresAt) <= now
-      ) {
-        return { ...summary, claim: null };
-      }
-      return summary;
-    }),
-    hasMore,
-    workItem: workItemState,
+          }
+        : {
+            ...baseWhere,
+            status: { notIn: [...terminalStatuses, "Blocked"] },
+            dependenciesAsDependent: {
+              none: {
+                removedAt: null,
+                waivedAt: null,
+                prerequisite: { status: { not: "Done" } },
+              },
+            },
+            OR: [
+              { agentTaskClaim: { is: null } },
+              {
+                agentTaskClaim: {
+                  is: { leaseExpiresAt: { lte: now } },
+                },
+              },
+            ],
+          };
+    const rows = await tx.actionable.findMany({
+      where,
+      include: agentTaskInclude,
+      orderBy: [
+        { priority: "asc" },
+        { updatedAt: "desc" },
+        { sourceOrdinal: "asc" },
+      ],
+      take: request.limit + 1,
+    });
+    const hasMore = rows.length > request.limit;
+    return listAgentTasksResponseSchema.parse({
+      items: await Promise.all(
+        rows.slice(0, request.limit).map(async (row) => {
+          const summary = await toAgentTaskSummary(tx, row);
+          if (
+            request.view === "available" &&
+            summary.claim &&
+            new Date(summary.claim.leaseExpiresAt) <= now
+          ) {
+            return { ...summary, claim: null };
+          }
+          return summary;
+        }),
+      ),
+      hasMore,
+      workItem: workItemState,
+    });
   });
 }
 
@@ -1112,6 +1118,7 @@ async function existingCreatedAgentTask(
   prisma: AppPrismaClient,
   externalKey: string,
   parentId: number | undefined,
+  workItemId: number | undefined,
   fingerprint: string,
   caller: AgentTaskCaller,
 ) {
@@ -1154,6 +1161,12 @@ async function existingCreatedAgentTask(
   }
   const detail = await getActionable(prisma, existing.sourceOrdinal);
   if (!detail) throw new Error("Created agent task could not be read.");
+  if (workItemId !== undefined && detail.workItemId !== workItemId) {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "The created task no longer belongs to the requested work item.",
+    );
+  }
   return detail;
 }
 
@@ -1171,6 +1184,7 @@ export async function createAgentTask(
       prisma,
       externalKey,
       request.parentId,
+      request.workItemId,
       fingerprint,
       caller,
     );
@@ -1227,56 +1241,51 @@ export async function createAgentTask(
         );
       }
     } else {
-      const parent = await getActionable(prisma, request.parentId);
-      if (!parent) {
-        throw new AgentTaskClaimError(
-          "NOT_FOUND",
-          "The requested parent Actionable was not found.",
-          { parentId: ["Choose an existing Actionable."] },
-        );
-      }
-      const workItem = await requireWorkItem(prisma, request.workItemId!);
-      if (parent.recordId !== workItem.id) {
-        throw new AgentTaskClaimError(
-          "INVALID_REQUEST",
-          "The requested parent is not the authorized feature or bug work item.",
+      await prisma.$transaction(async (tx) => {
+        const parent = await findTask(tx, request.parentId!);
+        if (!parent) {
+          throw new AgentTaskClaimError(
+            "NOT_FOUND",
+            "The requested parent Actionable was not found.",
+            { parentId: ["Choose an existing Actionable."] },
+          );
+        }
+        requireClaimable(parent);
+        const workItem = await requireWorkItem(tx, request.workItemId!);
+        await requireTaskInWorkItem(tx, parent, workItem);
+        await createSubtask(
+          prisma,
+          request.parentId!,
           {
-            parentId: [
-              `Choose top-level Actionable ${workItem.sourceOrdinal} as the parent.`,
-            ],
+            version: parent.version,
+            title: request.title,
           },
+          {
+            externalKey,
+            origin: "agent-task-create",
+            priority: request.priority,
+            description: request.description,
+            effort: request.effort,
+            validation: request.plannedValidation,
+            tags: request.tags,
+            statusProvenance:
+              "Created by an agent as a subtask with neutral Inbox status.",
+            rawFragment: {
+              kind: "agent-task",
+              idempotencyFingerprint: fingerprint,
+              creatorThreadId: caller.threadId,
+            },
+          },
+          tx,
         );
-      }
-      await createSubtask(
-        prisma,
-        request.parentId,
-        {
-          version: parent.version,
-          title: request.title,
-        },
-        {
-          externalKey,
-          origin: "agent-task-create",
-          priority: request.priority,
-          description: request.description,
-          effort: request.effort,
-          validation: request.plannedValidation,
-          tags: request.tags,
-          statusProvenance:
-            "Created by an agent as a subtask with neutral Inbox status.",
-          rawFragment: {
-            kind: "agent-task",
-            idempotencyFingerprint: fingerprint,
-            creatorThreadId: caller.threadId,
-          },
-        },
-      );
+      });
     }
 
     const created = await existingCreatedAgentTask(
       prisma,
       externalKey,
       request.parentId,
+      request.workItemId,
       fingerprint,
       caller,
     );
@@ -1407,6 +1416,7 @@ async function preflightAgentTaskCreate(
     prisma,
     externalKey,
     request.parentId,
+    request.workItemId,
     fingerprint,
     caller,
   );
@@ -1426,7 +1436,7 @@ async function preflightAgentTaskCreate(
     return null;
   }
 
-  const parent = await getActionable(prisma, request.parentId);
+  const parent = await findTask(prisma, request.parentId);
   if (!parent) {
     throw new AgentTaskClaimError(
       "NOT_FOUND",
@@ -1435,17 +1445,8 @@ async function preflightAgentTaskCreate(
     );
   }
   const workItem = await requireWorkItem(prisma, request.workItemId!);
-  if (parent.recordId !== workItem.id) {
-    throw new AgentTaskClaimError(
-      "INVALID_REQUEST",
-      "The requested parent is not the authorized feature or bug work item.",
-      {
-        parentId: [
-          `Choose top-level Actionable ${workItem.sourceOrdinal} as the parent.`,
-        ],
-      },
-    );
-  }
+  requireClaimable(parent);
+  await requireTaskInWorkItem(prisma, parent, workItem);
   return null;
 }
 
@@ -1611,7 +1612,7 @@ async function planAgentTaskPreparation(
   const row = await findMutationTask(tx, request.id);
   requireClaimable(row);
   const workItem = await requireWorkItem(tx, request.workItemId);
-  requireTaskInWorkItem(row, workItem);
+  await requireTaskInWorkItem(tx, row, workItem);
   if (creatorThreadId(row.rawFragmentJson) !== caller.threadId) {
     throw new AgentTaskClaimError(
       "CREATOR_THREAD_MISMATCH",
@@ -2092,7 +2093,7 @@ export async function getScopedTerminalAgentTask(
     if (!row) {
       throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
     }
-    requireTaskInWorkItem(row, workItem);
+    await requireTaskInWorkItem(tx, row, workItem);
     if (isArchived(row)) {
       throw new AgentTaskClaimError(
         "ARCHIVED",
@@ -2854,7 +2855,7 @@ async function claimAgentTaskUnlocked<T = never>(
       const row = await findTask(tx, sourceOrdinal);
       requireClaimable(row);
       const workItem = await requireWorkItem(tx, request.workItemId);
-      requireTaskInWorkItem(row, workItem);
+      await requireTaskInWorkItem(tx, row, workItem);
       if (
         row.agentTaskClaim?.leaseExpiresAt &&
         row.agentTaskClaim.leaseExpiresAt > now
@@ -2915,7 +2916,7 @@ async function claimAgentTaskUnlocked<T = never>(
         throw new Error("Claim transaction did not return the created claim.");
       }
       const response = claimAgentTaskResponseSchema.parse({
-        task: toAgentTaskSummary(task),
+        task: await toAgentTaskSummary(tx, task),
         claim: {
           agentId: request.agentId,
           claimToken,
@@ -3082,7 +3083,7 @@ async function recoverAgentTaskClaimResult<T = never>(
         throw new Error("Claim recovery did not return the active claim.");
       }
       const response = recoverAgentTaskClaimResponseSchema.parse({
-        task: toAgentTaskSummary(task),
+        task: await toAgentTaskSummary(tx, task),
         claim: {
           agentId,
           claimToken,
@@ -3149,7 +3150,7 @@ async function renewAgentTaskClaimResult<T = never>(
     const task = await findTask(tx, sourceOrdinal);
     if (!task) throw new Error("Renewed agent task could not be read.");
     const response = renewAgentTaskClaimResponseSchema.parse({
-      task: toAgentTaskSummary(task),
+      task: await toAgentTaskSummary(tx, task),
     });
     return {
       expired: false as const,
@@ -3234,7 +3235,7 @@ async function releaseAgentTaskClaimResult<T = never>(
     const task = await findTask(tx, sourceOrdinal);
     if (!task) throw new Error("Released agent task could not be read.");
     const response = releaseAgentTaskClaimResponseSchema.parse({
-      task: toAgentTaskSummary(task),
+      task: await toAgentTaskSummary(tx, task),
     });
     return {
       expired: false as const,

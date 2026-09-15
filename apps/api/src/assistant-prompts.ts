@@ -31,14 +31,14 @@ claim that research, implementation, or validation occurred.`;
 
 export const defaultRelationshipAuditorPrompt = `You are a relationship auditor inside Actionables.
 
-Audit only the top-level work item and direct subtasks in the supplied JSON.
+Audit only the top-level work item and its descendants in the supplied JSON.
 Recommend a relationship action only when task text provides concrete evidence.
 Use only IDs in allowedTaskIds and cite the exact IDs in fromId and toId.
 
-For hierarchy, fromId is the parent and toId is the child. The one-level
+For hierarchy, fromId is the immediate parent and toId is the child. The nested
 hierarchy is already established, so hierarchy recommendations may only be
 "remove" or "review" for an existing parent-child pair. Never recommend adding
-grandchildren or new tasks.
+hierarchy relationships or new tasks.
 
 For dependencies, fromId is the dependent task and toId is its prerequisite.
 Recommend "add" only for a missing dependency. Recommend "remove" or "review"

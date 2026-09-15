@@ -316,10 +316,10 @@ describe("Actionables MCP", () => {
         "a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag",
       );
       expect(client.getInstructions()).toContain(
-        "keep the root as the coordination record and create the minimum direct task set covering every implementation slice",
+        "keep that task as the coordination record and create the minimum child task set covering every implementation slice",
       );
       expect(client.getInstructions()).toContain(
-        "narrow it to one non-overlapping slice and create only the remaining slices as sibling direct tasks under the same top-level work item",
+        "do not flatten nested work into siblings",
       );
       expect(client.getInstructions()).toContain(
         "Do not split by technical layer, create adjacent cleanup, or duplicate scope",
@@ -381,7 +381,7 @@ describe("Actionables MCP", () => {
         (tool) => tool.name === "actionables.create_task",
       );
       const directTaskGuidance =
-        "For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent.";
+        "For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields.";
       const createTaskInputSchema = createTaskTool?.inputSchema as {
         required?: string[];
         properties?: Record<
@@ -396,7 +396,7 @@ describe("Actionables MCP", () => {
       expect(client.getInstructions()).toContain(directTaskGuidance);
       expect(createTaskTool?.description).toContain(directTaskGuidance);
       expect(createTaskTool?.description).toContain(
-        "never use a direct task as the parent",
+        "the parent must belong to that work item",
       );
       expect(createTaskInputSchema.required).toEqual(
         expect.arrayContaining(["priority", "effort", "tags"]),
@@ -616,7 +616,7 @@ describe("Actionables MCP", () => {
 
     try {
       const readFailure = vi
-        .spyOn(prisma.actionable, "findMany")
+        .spyOn(prisma, "$transaction")
         .mockRejectedValueOnce(new Error("private read diagnostic"));
       const readError = errorOutput(
         await connected.client.callTool({
@@ -1022,7 +1022,7 @@ describe("Actionables MCP", () => {
       const tokenRecovery =
         "Use claim.claimToken returned by claim_task or recover_task_claim";
       const placementRecovery =
-        "set both parentId and workItemId to the same authorized top-level Actionable ID";
+        "set parentId to its immediate parent and workItemId to the original top-level Actionable";
 
       const withoutVersion: Record<string, unknown> = { ...updateBase };
       delete withoutVersion.version;
@@ -1255,6 +1255,249 @@ describe("Actionables MCP", () => {
         tagsJson: childArguments.tags,
         agentTaskClaim: null,
       });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("creates and works four levels under the original root and rejects stale membership", async () => {
+    const { client, transport } = await connectClient();
+    type Task = {
+      id: number;
+      workItemId: number;
+      version: number;
+      recordId: string;
+      status: string;
+      parent: { id: number } | null;
+    };
+    const call = async <T>(name: string, args: Record<string, unknown>) =>
+      output<T>(
+        await client.callTool({ name: `actionables.${name}`, arguments: args }),
+      );
+    const request = (title: string, placement: Record<string, unknown>) => ({
+      idempotencyKey: randomUUID(),
+      title,
+      description: "Nested agent workflow",
+      plannedValidation: ["Verify nested workflow"],
+      ...validTaskClassification,
+      ...placement,
+    });
+    const detail = async (id: number) =>
+      (
+        await app.inject({ method: "GET", url: `/api/actionables/${id}` })
+      ).json().item;
+    try {
+      const root = await call<Task>(
+        "create_task",
+        request("Nested MCP root", scope),
+      );
+      const other = await call<Task>(
+        "create_task",
+        request("Other MCP root", scope),
+      );
+      const child = await call<Task>(
+        "create_task",
+        request("Nested MCP child", { workItemId: root.id, parentId: root.id }),
+      );
+      const items = ["grandchild", "sibling"].map((title) =>
+        request(`Nested MCP ${title}`, {
+          workItemId: root.id,
+          parentId: child.id,
+        }),
+      );
+      const preview = await call<{ summary: { failed: number } }>(
+        "bulk_create_tasks",
+        { mode: "preview", items },
+      );
+      expect(preview.summary.failed).toBe(0);
+      const applied = await call<{ items: Array<{ id: number }> }>(
+        "bulk_create_tasks",
+        { mode: "apply", items },
+      );
+      const replayed = await call<{
+        summary: { replayed: number };
+        items: Array<{ id: number }>;
+      }>("bulk_create_tasks", { mode: "apply", items });
+      expect(replayed.summary.replayed).toBe(2);
+      expect(replayed.items.map((item) => item.id)).toEqual(
+        applied.items.map((item) => item.id),
+      );
+      const grandchildId = applied.items[0].id;
+      const leafRequest = request("Nested MCP great-grandchild", {
+        workItemId: root.id,
+        parentId: grandchildId,
+      });
+      const leaf = await call<Task>("create_task", leafRequest);
+      expect(await call<Task>("create_task", leafRequest)).toMatchObject({
+        id: leaf.id,
+        workItemId: root.id,
+        parent: { id: grandchildId },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.create_task",
+            arguments: request("Wrong root nested create", {
+              workItemId: other.id,
+              parentId: grandchildId,
+            }),
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      const list = async (workItemId: number) =>
+        call<{
+          items: Array<{
+            id: number;
+            version: number;
+            parentId: number | null;
+            workItemId: number;
+          }>;
+        }>("list_tasks", { view: "available", workItemId, limit: 100 });
+      const available = await list(root.id);
+      expect(
+        available.items.map((item) => item.id).sort((a, b) => a - b),
+      ).toEqual(
+        [
+          root.id,
+          child.id,
+          ...applied.items.map((item) => item.id),
+          leaf.id,
+        ].sort((a, b) => a - b),
+      );
+      expect(available.items.find((item) => item.id === leaf.id)).toMatchObject(
+        { workItemId: root.id, parentId: grandchildId },
+      );
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.claim_task",
+            arguments: {
+              id: leaf.id,
+              workItemId: other.id,
+              version: leaf.version,
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      let claimed = await call<{ task: Task; claim: { claimToken: string } }>(
+        "claim_task",
+        { id: leaf.id, workItemId: root.id, version: leaf.version },
+      );
+      expect(
+        await call<Task>("get_task", {
+          id: leaf.id,
+          claimToken: claimed.claim.claimToken,
+        }),
+      ).toMatchObject({ workItemId: root.id, parent: { id: grandchildId } });
+      await call("handoff_task", {
+        id: leaf.id,
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+        appendResearch: [
+          "Inspected nested create and current root membership.",
+        ],
+      });
+      const listed = (await list(root.id)).items.find(
+        (item) => item.id === leaf.id,
+      )!;
+      claimed = await call("claim_task", {
+        id: leaf.id,
+        workItemId: root.id,
+        version: listed.version,
+      });
+      let version = claimed.task.version;
+      const mutate = async (name: string, args: Record<string, unknown>) => {
+        const receipt = await call<{ version: number }>(name, {
+          id: leaf.id,
+          claimToken: claimed.claim.claimToken,
+          version,
+          ...args,
+        });
+        version = receipt.version;
+      };
+      await mutate("transition_task", { status: "Researching" });
+      await mutate("update_task", {
+        finding: "Nested scope verified",
+        resolution: "Completed the nested MCP execution scenario.",
+      });
+      await mutate("transition_task", { status: "Ready" });
+      await mutate("transition_task", { status: "In progress" });
+      await mutate("record_task_validation", {
+        type: "Automated test",
+        outcome: "Passed",
+        evidence: "Nested MCP integration scenario passed.",
+      });
+      await mutate("transition_task", { status: "Done" });
+      expect(
+        await call<Task>("get_task", { id: leaf.id, workItemId: root.id }),
+      ).toMatchObject({ status: "Done", workItemId: root.id });
+      const currentChild = await detail(child.id);
+      const currentRoot = await detail(root.id);
+      const moved = await app.inject({
+        method: "PUT",
+        url: `/api/actionables/${child.id}/parent`,
+        payload: {
+          version: currentChild.version,
+          parentId: other.id,
+          parentVersion: (await detail(other.id)).version,
+          currentParentVersion: currentRoot.version,
+        },
+      });
+      expect(moved.statusCode, moved.body).toBe(200);
+      expect((await list(root.id)).items.map((item) => item.id)).toEqual([
+        root.id,
+      ]);
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: { id: leaf.id, workItemId: root.id },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.create_task",
+            arguments: leafRequest,
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.claim_task",
+            arguments: {
+              id: grandchildId,
+              workItemId: root.id,
+              version: (await detail(grandchildId)).version,
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        await call<Task>("get_task", { id: leaf.id, workItemId: other.id }),
+      ).toMatchObject({ workItemId: other.id, parent: { id: grandchildId } });
+      const detached = await app.inject({
+        method: "DELETE",
+        url: `/api/actionables/${child.id}/parent`,
+        payload: {
+          version: (await detail(child.id)).version,
+          parentVersion: (await detail(other.id)).version,
+        },
+      });
+      expect(detached.statusCode).toBe(200);
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: { id: leaf.id, workItemId: other.id },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        await call<Task>("get_task", { id: leaf.id, workItemId: child.id }),
+      ).toMatchObject({ workItemId: child.id });
     } finally {
       await transport.close();
     }
@@ -2058,7 +2301,7 @@ describe("Actionables MCP", () => {
     }
   });
 
-  it("rejects malformed placement, unknown or nested parents, and conflicting retries", async () => {
+  it("rejects malformed placement, unknown parents and conflicting retries while allowing nested parents", async () => {
     const root = await createTask({ title: "Creation boundary root" });
     const { client, transport } = await connectClient();
     try {
@@ -2176,21 +2419,21 @@ describe("Actionables MCP", () => {
           },
         }),
       );
-      const nested = errorOutput(
+      const nested = output<{ workItemId: number; parent: { id: number } }>(
         await client.callTool({
           name: "actionables.create_task",
           arguments: {
             idempotencyKey: randomUUID(),
             workItemId: root.sourceOrdinal,
             parentId: child.id,
-            title: "Forbidden grandchild",
+            title: "Supported grandchild",
             ...validTaskClassification,
           },
         }),
       );
       expect(nested).toMatchObject({
-        code: "INVALID_REQUEST",
-        errors: { parentId: expect.any(Array) },
+        workItemId: root.sourceOrdinal,
+        parent: { id: child.id },
       });
 
       const reusedKey = randomUUID();

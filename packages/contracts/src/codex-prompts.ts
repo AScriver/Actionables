@@ -6,9 +6,9 @@ export const codexPromptVariables = {
   taskId: "Selected task ID",
   taskTitle: "Selected task title, inserted as literal text",
   phaseAction: "Begin, resume, or continue wording for the recorded phase",
-  splitInstructions: "Research splitting guidance for a root or direct task",
+  splitInstructions: "Research splitting guidance beneath the selected task",
   implementationInstructions:
-    "Ready checks and implementation or root-finalization guidance",
+    "Ready checks and implementation or coordination-task finalization guidance",
 } as const;
 
 const variablePattern = /\{\{([^{}]*)\}\}/g;
@@ -68,6 +68,7 @@ export const defaultCodexImplementationPrompt = `Use Actionables work item #{{wo
 export function renderCodexStartPrompt(
   task: {
     id: number;
+    workItemId: number;
     title: string;
     parentId?: number;
     status: string;
@@ -78,32 +79,32 @@ export function renderCodexStartPrompt(
   const research = task.status === "Inbox" || task.status === "Researching";
   if (!research && task.status !== "Ready" && task.status !== "In progress")
     return null;
-  const workItemId = task.parentId ?? task.id;
-  const isCoordinationRoot =
-    task.parentId === undefined && task.relationships.subtasks.length > 0;
-  const implementation = isCoordinationRoot
-    ? task.status === "Ready"
-      ? "Confirm this top-level task remains the coordination record; do not implement or duplicate any direct task's scope. Use the direct task statuses in the root detail to confirm every required task is terminal, and hand off with the coordination blocker if any remain nonterminal. Otherwise move the root to In progress before finalizing it"
-      : "Confirm this top-level task remains the coordination record; do not implement or duplicate any direct task's scope. Use the direct task statuses in the root detail to confirm every required task is terminal, and hand off with the coordination blocker if any remain nonterminal. Otherwise finalize the root"
-    : task.status === "Ready"
-      ? "Confirm the scope, then move the task to In progress before editing. Implement the stated outcome"
-      : "Confirm the scope, continue implementing the stated outcome";
+  const workItemId = task.workItemId;
+  let implementation: string;
+  if (task.relationships.subtasks.length > 0) {
+    implementation =
+      "Confirm this task remains the coordination record for its subtree; do not implement or duplicate any child task's scope. Use the child inventory to confirm every required descendant is terminal, and hand off with the coordination blocker if any remain nonterminal. ";
+    if (task.status === "Ready")
+      implementation +=
+        "Otherwise move this task to In progress before finalizing it";
+    else implementation += "Otherwise finalize this task";
+  } else if (task.status === "Ready") {
+    implementation =
+      "Confirm the scope, then move the task to In progress before editing. Implement the stated outcome";
+  } else {
+    implementation =
+      "Confirm the scope, continue implementing the stated outcome";
+  }
+  let phaseAction = "resume implementation from In progress";
+  if (task.status === "Inbox") phaseAction = "begin";
+  else if (task.status === "Researching") phaseAction = "resume";
+  else if (task.status === "Ready") phaseAction = "continue from Ready";
   const values: Record<keyof typeof codexPromptVariables, string> = {
     workItemId: String(workItemId),
     taskId: String(task.id),
     taskTitle: task.title,
-    phaseAction:
-      task.status === "Inbox"
-        ? "begin"
-        : task.status === "Researching"
-          ? "resume"
-          : task.status === "Ready"
-            ? "continue from Ready"
-            : "resume implementation from In progress",
-    splitInstructions:
-      task.parentId === undefined
-        ? `If research establishes multiple independently implementable outcomes, keep this top-level task as the coordination record and create the minimum necessary direct task for every implementation slice under it; use #${task.id} as both \`workItemId\` and \`parentId\` for each created task. Do not narrow the root to an implementation slice. If the task has one outcome, do not split it.`
-        : `If research establishes multiple independently implementable outcomes, narrow this direct task to one non-overlapping slice and create the minimum remaining slices as sibling direct tasks under work item #${task.parentId}; use #${task.parentId} as both \`workItemId\` and \`parentId\` for each sibling, and do not create children under #${task.id}. If the task has one outcome, do not split it.`,
+    phaseAction,
+    splitInstructions: `If research establishes multiple independently implementable outcomes, keep this task as the coordination record and create the minimum necessary child task for every implementation slice beneath it; use #${workItemId} as \`workItemId\` and #${task.id} as \`parentId\` for each created task. Do not narrow the coordination task to an implementation slice. If the task has one outcome, do not split it.`,
     implementationInstructions: `${task.status === "Ready" ? `${readinessInstructions} ` : ""}${implementation}`,
   };
   const template = codexPromptTemplateSchema.parse(

@@ -636,8 +636,8 @@ function RelationshipAuditor({
         <div>
           <h3>Relationship auditor</h3>
           <p className="section-help">
-            Reviews #{selected.id} and its {selected.childIds?.length ?? 0}{" "}
-            direct subtasks. Recommendations never change relationships.
+            Reviews #{selected.id} and its descendants. Recommendations never
+            change relationships.
           </p>
         </div>
         <button

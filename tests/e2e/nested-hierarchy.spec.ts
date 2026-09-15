@@ -61,6 +61,18 @@ test("create, break down, link, move and detach nested subtrees", async ({
       .click();
     await inspector.getByRole("tab", { name: "Relationships" }).click();
   }
+  const leafId = Number(new URL(page.url()).pathname.split("/").at(-1));
+  const codexHref = new URL(
+    (await page
+      .getByRole("link", { name: "Open in Codex" })
+      .getAttribute("href"))!,
+  );
+  expect(codexHref.searchParams.get("prompt")).toContain(
+    `Use Actionables work item #${root.id}. Claim task #${leafId}`,
+  );
+  expect(codexHref.searchParams.get("prompt")).toContain(
+    `use #${root.id} as \`workItemId\` and #${leafId} as \`parentId\``,
+  );
   await page.getByLabel("Task breakdown template").selectOption("research");
   await page.getByRole("button", { name: "Apply template" }).click();
   await expect(

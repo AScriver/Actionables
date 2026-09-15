@@ -44,6 +44,8 @@ import {
   transitionExplanation,
 } from "./actionable-transitions.js";
 
+import { getHierarchyRoot } from "./hierarchy.js";
+
 const actionableInclude = {
   project: true,
   repository: true,
@@ -347,7 +349,9 @@ function toSummary(row: ActionableRow): ActionableSummary {
   });
 }
 
-function toDetail(row: ActionableRow): ActionableDetail {
+function toDetail(
+  row: ActionableRow & { workItemId: number },
+): ActionableDetail {
   const children = row.hierarchyAsParent.map(
     (relationship) => relationship.child,
   );
@@ -368,6 +372,7 @@ function toDetail(row: ActionableRow): ActionableDetail {
   const now = new Date();
   return actionableDetailSchema.parse({
     ...toSummary(row),
+    workItemId: row.workItemId,
     directTaskProgress: children.length
       ? {
           total: children.length,
@@ -545,10 +550,13 @@ async function findActionableRow(
   client: AppPrismaClient | TransactionClient,
   sourceOrdinal: number,
 ) {
-  return client.actionable.findUnique({
+  const row = await client.actionable.findUnique({
     where: { sourceOrdinal },
     include: actionableInclude,
   });
+  if (!row) return null;
+  const root = await getHierarchyRoot(client, row.id);
+  return { ...row, workItemId: root.sourceOrdinal };
 }
 
 const priorityRank = new Map(
@@ -1258,18 +1266,25 @@ export async function listInboxTriageCandidates(
   scope: Partial<Pick<ActionableQuery, "project" | "repository" | "worktree">>,
   limit: number,
 ): Promise<ActionableDetail[]> {
-  return (await allActionableRows(prisma))
-    .filter(
-      (row) =>
-        (!scope.project || row.projectId === scope.project) &&
-        (!scope.repository || row.repositoryId === scope.repository) &&
-        (!scope.worktree || row.worktreeId === scope.worktree) &&
-        !archiveState(row).isArchived &&
-        row.status === "Inbox",
-    )
-    .sort((left, right) => left.sourceOrdinal - right.sourceOrdinal)
-    .slice(0, limit)
-    .map(toDetail);
+  return Promise.all(
+    (await allActionableRows(prisma))
+      .filter(
+        (row) =>
+          (!scope.project || row.projectId === scope.project) &&
+          (!scope.repository || row.repositoryId === scope.repository) &&
+          (!scope.worktree || row.worktreeId === scope.worktree) &&
+          !archiveState(row).isArchived &&
+          row.status === "Inbox",
+      )
+      .sort((left, right) => left.sourceOrdinal - right.sourceOrdinal)
+      .slice(0, limit)
+      .map(async (row) =>
+        toDetail({
+          ...row,
+          workItemId: (await getHierarchyRoot(prisma, row.id)).sourceOrdinal,
+        }),
+      ),
+  );
 }
 
 export async function getDashboard(

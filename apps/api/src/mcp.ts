@@ -254,6 +254,7 @@ const compactTruncatedFieldSchema = z.enum([
 const compactTaskSchema = z
   .object({
     id: z.number().int().positive(),
+    workItemId: z.number().int().positive(),
     recordId: z.string().min(1),
     title: z.string().max(240),
     priority: z.string().max(40),
@@ -590,6 +591,7 @@ function compactTask(
   }
   const detail = {
     id: task.id,
+    workItemId: task.workItemId,
     recordId: task.recordId,
     title: truncate(task.title, 240),
     priority: task.priority,
@@ -946,7 +948,7 @@ function createActionablesMcpServer(
     {
       title: "Create Actionable",
       description:
-        "Create one task with a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag, then return its detail. For a top-level task, either provide projectId, repositoryId, and worktreeId or provide repositoryPath with ensureScope true to resolve and provision the local Git scope. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. The server inherits that root's scope. Reuse the idempotency UUID only for an exact retry.",
+        "Create one task with a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag, then return its detail. For a top-level task, either provide projectId, repositoryId, and worktreeId or provide repositoryPath with ensureScope true to resolve and provision the local Git scope. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. The server inherits the parent's scope. Reuse the idempotency UUID only for an exact retry.",
       inputSchema: createAgentTaskRequestSchema,
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, idempotentHint: true },

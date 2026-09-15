@@ -367,6 +367,7 @@ export const actionableSummarySchema = z.object({
 });
 
 export const actionableDetailSchema = actionableSummarySchema.extend({
+  workItemId: z.number().int().positive(),
   directTaskProgress: z
     .object({
       total: z.number().int().nonnegative(),
@@ -822,7 +823,7 @@ export const agentTaskVersionRecoveryMessage =
 export const agentTaskClaimTokenRecoveryMessage =
   "Use claim.claimToken returned by claim_task or recover_task_claim; if it was discarded, list mine and recover the claim.";
 export const agentTaskDirectPlacementRecoveryMessage =
-  "For one direct task or sibling, set both parentId and workItemId to the same authorized top-level Actionable ID; omit both for a top-level task.";
+  "For a subtask, set parentId to its immediate parent and workItemId to the original top-level Actionable; omit both for a top-level task.";
 export const agentTaskHandoffContentRecoveryMessage =
   "Provide at least one of finding, addFiles, appendResearch, appendPlannedValidation, or validation. If no task content needs to change, call actionables.release_task instead.";
 
@@ -1536,7 +1537,7 @@ export const createAgentTaskRequestSchema = z
       .positive({ error: agentTaskDirectPlacementRecoveryMessage })
       .optional()
       .describe(
-        "Optional parent Actionable ID. For a direct task, set both parentId and workItemId to the same authorized top-level Actionable; omit both for a top-level task.",
+        "Optional immediate parent Actionable ID at any depth within workItemId; omit both for a top-level task.",
       ),
     workItemId: z
       .number({ error: agentTaskDirectPlacementRecoveryMessage })
@@ -1544,7 +1545,7 @@ export const createAgentTaskRequestSchema = z
       .positive({ error: agentTaskDirectPlacementRecoveryMessage })
       .optional()
       .describe(
-        "Top-level feature or bug Actionable that authorizes direct-task creation. For a direct task, set it to the same top-level Actionable as parentId.",
+        "Original top-level feature or bug Actionable authorizing subtask creation. The immediate parent may be any task in that work item.",
       ),
     projectId: z
       .string()

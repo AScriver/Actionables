@@ -71,7 +71,7 @@ partial, and failed batches separately.
 
 Note generation never saves an Actionable directly: review and explicitly apply
 a note proposal in the Research notes tab. Relationship-audit recommendations
-are limited to one top-level work item and its direct subtasks, and the audit UI
+are limited to one top-level work item and all its descendants, and the audit UI
 has no relationship mutation controls. No `OPENAI_API_KEY` is required for
 these local-CLI integrations.
 

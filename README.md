@@ -17,7 +17,7 @@ built-in Codex handoff._
 
 - A durable task record with priorities, intended outcomes, source references,
   file locations, research notes, and planned validation.
-- Organize work by project, repository, and worktree, with one level of
+- Organize work by project, repository, and worktree, with nested
   scoped subtasks so Codex only discovers work from the selected feature or bug.
 - An explicit lifecycle—`Inbox` → `Researching` → `Ready` → `In progress` →
   `Done`—with blocked and dismissed states.

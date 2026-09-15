@@ -14,6 +14,7 @@ const templates = {
 };
 const task = {
   id: 47,
+  workItemId: 42,
   parentId: 42,
   title: "Literal {{taskId}} & $&\n日本語",
   status: "Inbox",
@@ -44,8 +45,7 @@ describe("Codex prompt templates", () => {
       { ...templates, codexImplementationPrompt: custom },
     );
     expect(prompt).toContain(`42|47|${task.title}|continue from Ready|`);
-    expect(prompt).toContain("sibling direct tasks under work item #42");
-    expect(prompt).toContain("do not create children under #47");
+    expect(prompt).toContain("use #42 as `workItemId` and #47 as `parentId`");
     expect(prompt).toContain(
       "Before requesting Ready or moving Ready to In progress",
     );
@@ -55,9 +55,9 @@ describe("Codex prompt templates", () => {
   });
 
   it("preserves root splitting and coordination finalization", () => {
-    const root = { ...task, parentId: undefined };
+    const root = { ...task, workItemId: 47, parentId: undefined };
     expect(renderCodexStartPrompt(root, templates)).toContain(
-      "use #47 as both `workItemId` and `parentId`",
+      "use #47 as `workItemId` and #47 as `parentId`",
     );
     const coordination = {
       ...root,
@@ -65,17 +65,23 @@ describe("Codex prompt templates", () => {
       relationships: { subtasks: [{}] },
     };
     expect(renderCodexStartPrompt(coordination, templates)).toContain(
-      "do not implement or duplicate any direct task's scope",
+      "do not implement or duplicate any child task's scope",
     );
     expect(renderCodexStartPrompt(coordination, templates)).toContain(
-      "move the root to In progress before finalizing it",
+      "move this task to In progress before finalizing it",
     );
     const resumed = renderCodexStartPrompt(
       { ...coordination, status: "In progress" },
       templates,
     );
-    expect(resumed).toContain("Otherwise finalize the root");
+    expect(resumed).toContain("Otherwise finalize this task");
     expect(resumed).not.toContain("Before requesting Ready");
+    const nested = renderCodexStartPrompt(
+      { ...coordination, workItemId: 12, parentId: 42 },
+      templates,
+    );
+    expect(nested).toContain("Use Actionables work item #12. Claim task #47");
+    expect(nested).toContain("coordination record for its subtree");
   });
 
   it.each(["Done", "Dismissed", "Blocked"])(

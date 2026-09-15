@@ -1873,8 +1873,23 @@ describe("Actionables API", () => {
         url: `/api/actionables/${root.id}`,
       })
     ).json().item;
+    const nested = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${firstChild.id}/subtasks`,
+      payload: {
+        version: (
+          await app!.inject({
+            method: "GET",
+            url: `/api/actionables/${firstChild.id}`,
+          })
+        ).json().item.version,
+        title: "Nested audit task",
+      },
+    });
+    expect(nested.statusCode).toBe(200);
+    const grandchild = nested.json().item.relationships.subtasks[0].child;
     const before = await Promise.all(
-      [root.id, firstChild.id, secondChild.id].map(
+      [root.id, firstChild.id, secondChild.id, grandchild.id].map(
         async (id) =>
           (
             await app!.inject({
@@ -1902,6 +1917,7 @@ describe("Actionables API", () => {
       recommendations: [
         recommendation("hierarchy", "add", root.id, firstChild.id),
         recommendation("hierarchy", "review", root.id, firstChild.id),
+        recommendation("hierarchy", "review", firstChild.id, grandchild.id),
         recommendation("dependency", "add", secondChild.id, firstChild.id),
         recommendation("dependency", "remove", secondChild.id, firstChild.id),
         recommendation("dependency", "add", firstChild.id, secondChild.id),
@@ -1923,16 +1939,17 @@ describe("Actionables API", () => {
         workItemId: root.id,
         basedOnVersion: root.version,
         model: "gpt-5.6-terra",
-        auditedTaskIds: [root.id, firstChild.id, secondChild.id],
+        auditedTaskIds: [root.id, firstChild.id, secondChild.id, grandchild.id],
         recommendations: [
           recommendation("hierarchy", "review", root.id, firstChild.id),
+          recommendation("hierarchy", "review", firstChild.id, grandchild.id),
           recommendation("dependency", "remove", secondChild.id, firstChild.id),
           recommendation("dependency", "add", firstChild.id, secondChild.id),
         ],
       });
       expect(assistantRequests).toHaveLength(1);
       expect(assistantRequests[0]!.prompt).toContain(
-        `"allowedTaskIds":[${root.id},${firstChild.id},${secondChild.id}]`,
+        `"allowedTaskIds":[${root.id},${firstChild.id},${secondChild.id},${grandchild.id}]`,
       );
       expect(assistantRequests[0]!.prompt).toContain(
         "Relationship recommendations are advisory and will not be applied.",
@@ -1956,7 +1973,7 @@ describe("Actionables API", () => {
       expect(assistantRequests).toHaveLength(1);
 
       const after = await Promise.all(
-        [root.id, firstChild.id, secondChild.id].map(
+        [root.id, firstChild.id, secondChild.id, grandchild.id].map(
           async (id) =>
             (
               await app!.inject({
@@ -1970,6 +1987,40 @@ describe("Actionables API", () => {
     } finally {
       assistantOutput = previousOutput;
     }
+  });
+
+  it("bounds relationship-audit context across all descendant levels", async () => {
+    const response = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: createBody("Bounded nested audit"),
+    });
+    let parent = response.json().item;
+    const rootId = parent.id;
+    for (let index = 0; index < 51; index++) {
+      const saved = await app!.inject({
+        method: "POST",
+        url: `/api/actionables/${parent.id}/subtasks`,
+        payload: {
+          version: parent.version,
+          title: `Audit descendant ${index}`,
+        },
+      });
+      expect(saved.statusCode).toBe(200);
+      parent = saved.json().item.relationships.subtasks[0].child;
+    }
+    const root = (
+      await app!.inject({ method: "GET", url: `/api/actionables/${rootId}` })
+    ).json().item;
+    const before = assistantRequests.length;
+    const audit = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${rootId}/assistant/relationship-audit`,
+      payload: { version: root.version },
+    });
+    expect(audit.statusCode).toBe(422);
+    expect(audit.json().code).toBe("ASSISTANT_CONTEXT_TOO_LARGE");
+    expect(assistantRequests).toHaveLength(before);
   });
 
   it("rejects malformed relationship-audit output without changing the work item", async () => {

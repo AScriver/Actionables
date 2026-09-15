@@ -15,7 +15,7 @@ Use Actionables as the coordination record for substantive work without letting 
 4. If no owned task clearly matches and no `workItemId` was provided, do not list `available`; continue without claiming and report the missing tracking scope.
 5. Otherwise call `actionables.list_tasks` with `view: available` and that `workItemId`.
 6. Treat a scoped list with `workItem.terminal: true` as a successful read even when `items` is empty. Inspect a known Done or Dismissed task with `actionables.get_task` using its top-level `workItemId`; page truncated fields with `actionables.get_task_detail` using that same `workItemId`. Terminal inspection is read-only and does not create lifecycle ownership.
-7. Claim only the root or a descendant returned from an active work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token. Read the latest version from `task.version` and the secret capability from `claim.claimToken`; do not immediately fetch again.
+7. Claim only the root or a direct task returned from an active work item, using the same `workItemId` and listed version. The server assigns the claim to the calling Codex thread and returns compact task detail plus the secret token. Read the latest version from `task.version` and the secret capability from `claim.claimToken`; do not immediately fetch again.
 8. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing any dependent mutation and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Use `recovery.action` and `recovery.guidance` for the next step, and retain `correlationId` when server diagnostics are needed. `retryable` and `nextAction` are legacy compatibility fields, not the retry decision. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
 9. Inspect `task.truncation.reconciliationGuidance` before treating compact detail as complete. When present, use `actionables.get_task_detail` for every supported implementation-critical field it names: pass the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. On `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading active work with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, normal flow may continue because any reported loss is noncritical to scope and planned validation.
 10. For a newly claimed Inbox task, transition to Researching before beginning investigation.
@@ -37,7 +37,7 @@ adjacent task.
 - For a creation-only request, create each authorized Actionable unclaimed in Inbox and stop unless the user also requested triage, research, or implementation.
 - Generate one caller-stable idempotency UUID for each intended task. Reuse it only for an exact retry and never for a different task.
 - Provide a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag for every created task.
-- For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. The server inherits the parent's scope.
+- For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. The server inherits that root's scope.
 - For a top-level task with known scope IDs, pass `projectId`, `repositoryId`, and `worktreeId`.
 - If the current local Git repository is not tracked yet, pass its absolute path as `repositoryPath` with `ensureScope: true`. The server resolves the Git roots and atomically creates any missing project, repository, or worktree before creating the task.
 - For a tracked monorepo, pass a path inside the intended registered project directory. The deepest matching project directory selects the scope; a sibling or ambiguous checkout-root path must be corrected, or use the known explicit scope IDs.
@@ -72,12 +72,12 @@ phase.
 ## Split researched work
 
 - Split only when research confirms multiple independently implementable outcomes. A task with one outcome remains one task.
-- For a task at any depth, keep that task as the coordination record and create the minimum child task set covering every implementation slice beneath it, using the original root as workItemId. Do not narrow the root to one slice.
-- Nested coordination tasks may contain further subtasks. Keep each task beneath its intended immediate parent; do not flatten nested work into siblings.
+- For a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. Do not narrow the root to one slice.
+- For an existing direct task, narrow it to one non-overlapping slice and create only the remaining slices as sibling direct tasks under the same top-level work item. Do not create grandchildren.
 - Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, or duplicate scope.
 - Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox unless the user separately authorized more work on them.
 - Unless a dedicated relationship tool is available, record dependencies only as task notes and do not claim that dependency relationships were created.
-- Move a research-complete split task to Ready as the coordination record. Later work on that task coordinates its children and aggregate validation instead of implementing or duplicating their scope. The original top-level Actionable remains workItemId at every depth.
+- Move a research-complete split root to Ready as the coordination record. Later work on that root coordinates its direct tasks and aggregate validation instead of implementing or duplicating their scope.
 
 ## Maintain the task
 

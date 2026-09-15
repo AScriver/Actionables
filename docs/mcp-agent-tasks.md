@@ -61,7 +61,7 @@ do not supply or invent an `agentId`.
 The server instructions direct agents to use this sequence:
 
 1. List `mine`.
-2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For one direct task or sibling, provide the authorized top-level Actionable as both workItemId and parentId, omit placement fields, and never use a direct task as the parent. Reuse a UUID only for an exact retry.
+2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. Reuse a UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy the structured `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Retain `correlationId` when diagnostics are needed. `retryable` and `nextAction` remain only for legacy compatibility. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
@@ -70,10 +70,10 @@ The server instructions direct agents to use this sequence:
 8. For a newly claimed Inbox task, transition to `Researching` before investigation.
 9. Before transitioning to `Ready` or advancing Ready to `In progress`, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
 10. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
-11. Split only when research confirms multiple independently implementable outcomes. For a top-level task, keep the root as the coordination record and create the minimum direct task set covering every implementation slice. For an existing direct task, narrow it to one slice and create only the remaining slices as siblings under the same root. A single outcome remains one task.
-12. Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, duplicate scope, or create grandchildren.
+11. Split only when research confirms multiple independently implementable outcomes. For a task at any depth, keep that task as the coordination record and create the minimum child task set covering every implementation slice beneath it, using the original root as workItemId. Keep nested coordination tasks beneath their immediate parent while retaining the original root as workItemId. A single outcome remains one task.
+12. Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, or duplicate scope.
 13. Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, record dependencies only as task notes and do not claim that dependency relationships were created.
-14. Before reporting research complete, move the task to `Ready` only when `readiness.requiredForReady` is empty and Ready appears in `permittedTransitions`. A split root remains the coordination record; later work coordinates its direct tasks and aggregate validation instead of duplicating their implementation scope.
+14. Before reporting research complete, move the task to `Ready` only when `readiness.requiredForReady` is empty and Ready appears in `permittedTransitions`. A split task at any depth remains the coordination record for its children and aggregate validation. The original top-level Actionable remains `workItemId`.
 15. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
 16. Mutate with the latest version and secret claim token.
 17. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
@@ -83,7 +83,7 @@ The server instructions direct agents to use this sequence:
 
 When implementation uncovers a need for more investigation, `In progress` can return directly to `Researching` with a meaningful reason. The transition is recorded in task activity; do not route through a semantically false Ready state.
 
-A work item is one existing top-level Actionable representing the feature or bug plus its direct subtasks. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
+A work item is one existing top-level Actionable representing the feature or bug plus all its descendants. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
 Available discovery returns only active, unarchived, nonterminal tasks that are
 not manually blocked, have no unresolved dependency, and have no unexpired
@@ -96,9 +96,12 @@ views and return empty `items` for a terminal root. Every list response includes
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to
-verify creation. A direct task or sibling can be created only when `workItemId`
-and `parentId` identify the same active, top-level Actionable; it inherits that
-root's project, repository, and worktree. Grandchildren are rejected. For a
+verify creation. For a subtask, `workItemId` identifies the original top-level
+Actionable and `parentId` identifies its immediate parent at any depth beneath
+that root. It inherits the parent's project, repository and worktree. Root
+membership is checked again on creation retries and after moves or detachment.
+Detailed records and generated Codex prompts report the actual `workItemId`.
+For a
 top-level task, existing scope IDs
 remain supported. When `repositoryPath` and `ensureScope: true` are supplied
 instead, the server verifies the local Git path, resolves its repository and
@@ -121,7 +124,7 @@ prepared, replayed, or failed during apply. Each item has its own caller-stable
 UUID; an exact replay returns that item's prior result, while changing an
 applied item using its UUID conflicts.
 
-Bulk preparation is limited to explicit, unclaimed top-level or direct tasks
+Bulk preparation is limited to explicit, unclaimed top-level or descendant tasks
 created by the current Codex thread within the authorized `workItemId`. Use the
 normal list, claim, and reconciliation workflow for pre-existing tasks. Each
 bulk item supplies that `workItemId` and its current `version`; it neither
@@ -174,7 +177,7 @@ mutations use the server's default renewal period.
 `actionables.get_task` and `actionables.get_task_detail` accept exactly one read
 authorization. Active work uses its valid `claimToken`. Read-only inspection of
 a Done or Dismissed task uses the explicit top-level `workItemId`; the server
-validates that the target is the root or one direct task, rejects archived and
+validates that the target is the root or one descendant, rejects archived and
 nonterminal targets, and returns `terminal: true` on compact terminal detail.
 Terminal reads do not recreate or renew claims, change versions, or add activity.
 Paged detail remains version- and content-hash-bound across a later reopen. A
@@ -297,7 +300,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or one direct subtask, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or a subtask at any depth, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.
