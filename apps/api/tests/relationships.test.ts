@@ -136,110 +136,133 @@ async function move(
 }
 
 describe("hierarchy relationships", () => {
-  it("rolls up attached direct tasks using real claim, dependency and validation state", async () => {
-    const parent = await create("Progress rollup parent");
-    expect(parent.directTaskProgress).toBeNull();
-    const statuses = [
-      "Done",
-      "Dismissed",
-      "In progress",
-      "Blocked",
-      "Ready",
-      "Inbox",
-    ];
-    const children: Array<{ id: number; recordId: string }> = [];
-    const phase = new Date(Date.now() - 60_000);
-    for (const [index, status] of statuses.entries()) {
-      const child = await create(`Progress child ${index}`);
-      children.push(child);
-      await prisma.hierarchyRelationship.create({
-        data: { parentId: parent.recordId, childId: child.recordId },
-      });
-      await prisma.actionable.update({
-        where: { id: child.recordId },
-        data: { status, ...(index === 5 ? { archivedAt: new Date() } : {}) },
-      });
-      await prisma.actionableStatusHistory.create({
+  it.each(["direct", "nested"])(
+    "rolls up %s tasks using real claim, dependency and validation state",
+    async (shape) => {
+      const parent = await create(`Progress rollup parent ${shape}`);
+      expect(parent.directTaskProgress).toBeNull();
+      const statuses = [
+        "Done",
+        "Dismissed",
+        "In progress",
+        "Blocked",
+        "Ready",
+        "Inbox",
+      ];
+      const children: Array<{ id: number; recordId: string }> = [];
+      const phase = new Date(Date.now() - 60_000);
+      for (const [index, status] of statuses.entries()) {
+        const child = await create(`Progress child ${index}`);
+        children.push(child);
+        let parentId = parent.recordId;
+        if (shape === "nested" && index >= 2) {
+          parentId = children[Math.floor(index / 2)].recordId;
+        }
+        await prisma.hierarchyRelationship.create({
+          data: { parentId, childId: child.recordId },
+        });
+        await prisma.actionable.update({
+          where: { id: child.recordId },
+          data: { status, ...(index === 5 ? { archivedAt: new Date() } : {}) },
+        });
+        await prisma.actionableStatusHistory.create({
+          data: {
+            actionableId: child.recordId,
+            previousStatus: "Ready",
+            newStatus: "In progress",
+            origin: "fixture",
+            occurredAt: phase,
+          },
+        });
+      }
+      for (const index of [2, 4])
+        await prisma.agentTaskClaim.create({
+          data: {
+            actionableId: children[index].recordId,
+            agentId: "rollup-fixture",
+            claimTokenHash: randomUUID(),
+            leaseExpiresAt: new Date(
+              Date.now() + (index === 2 ? 60_000 : -60_000),
+            ),
+          },
+        });
+      const edge = await prisma.dependencyRelationship.create({
         data: {
-          actionableId: child.recordId,
-          previousStatus: "Ready",
-          newStatus: "In progress",
-          origin: "fixture",
-          occurredAt: phase,
+          dependentId: children[4].recordId,
+          prerequisiteId: children[1].recordId,
         },
       });
-    }
-    for (const index of [2, 4])
-      await prisma.agentTaskClaim.create({
-        data: {
-          actionableId: children[index].recordId,
-          agentId: "rollup-fixture",
-          claimTokenHash: randomUUID(),
-          leaseExpiresAt: new Date(
-            Date.now() + (index === 2 ? 60_000 : -60_000),
-          ),
-        },
+      const validation = (
+        index: number,
+        recordedAt: Date,
+        outcome = "Passed",
+        supersedesId?: string,
+      ) =>
+        prisma.validationRecord.create({
+          data: {
+            actionableId: children[index].recordId,
+            type: "Automated test",
+            outcome,
+            notesMd: "Fixture",
+            evidenceMd: "Fixture",
+            origin: "fixture",
+            recordedAt,
+            supersedesId,
+          },
+        });
+      await validation(0, new Date());
+      await validation(2, new Date(phase.getTime() - 1));
+      const superseded = await validation(3, new Date());
+      await validation(3, new Date(), "Failed", superseded.id);
+      expect((await get(parent.id)).directTaskProgress).toEqual({
+        total: 6,
+        completed: 1,
+        dismissed: 1,
+        open: 4,
+        blocked: 2,
+        unclaimed: 2,
+        validationReady: 1,
       });
-    const edge = await prisma.dependencyRelationship.create({
-      data: {
-        dependentId: children[4].recordId,
-        prerequisiteId: children[1].recordId,
-      },
-    });
-    const validation = (
-      index: number,
-      recordedAt: Date,
-      outcome = "Passed",
-      supersedesId?: string,
-    ) =>
-      prisma.validationRecord.create({
-        data: {
-          actionableId: children[index].recordId,
-          type: "Automated test",
-          outcome,
-          notesMd: "Fixture",
-          evidenceMd: "Fixture",
-          origin: "fixture",
-          recordedAt,
-          supersedesId,
-        },
+      const listed = await app.inject({
+        method: "GET",
+        url: `/api/actionables?q=${encodeURIComponent(parent.title)}`,
       });
-    await validation(0, new Date());
-    await validation(2, new Date(phase.getTime() - 1));
-    const superseded = await validation(3, new Date());
-    await validation(3, new Date(), "Failed", superseded.id);
-    expect((await get(parent.id)).directTaskProgress).toEqual({
-      total: 6,
-      completed: 1,
-      dismissed: 1,
-      open: 4,
-      blocked: 2,
-      unclaimed: 2,
-      validationReady: 1,
-    });
-    await validation(2, new Date());
-    await prisma.dependencyRelationship.update({
-      where: { id: edge.id },
-      data: { waivedAt: new Date(), waiverReason: "Fixture waiver" },
-    });
-    await prisma.agentTaskClaim.delete({
-      where: { actionableId: children[4].recordId },
-    });
-    await prisma.hierarchyRelationship.updateMany({
-      where: { childId: children[5].recordId },
-      data: { detachedAt: new Date() },
-    });
-    expect((await get(parent.id)).directTaskProgress).toEqual({
-      total: 5,
-      completed: 1,
-      dismissed: 1,
-      open: 3,
-      blocked: 1,
-      unclaimed: 2,
-      validationReady: 2,
-    });
-    expect((await get(children[0].id)).directTaskProgress).toBeNull();
-  });
+      expect(
+        listed
+          .json()
+          .items.find((item: { id: number }) => item.id === parent.id)
+          .childCompletion,
+      ).toEqual({ terminal: 2, total: 6 });
+      if (shape === "nested") {
+        expect((await get(children[1].id)).directTaskProgress).toMatchObject({
+          total: 4,
+          open: 4,
+        });
+      }
+      await validation(2, new Date());
+      await prisma.dependencyRelationship.update({
+        where: { id: edge.id },
+        data: { waivedAt: new Date(), waiverReason: "Fixture waiver" },
+      });
+      await prisma.agentTaskClaim.delete({
+        where: { actionableId: children[4].recordId },
+      });
+      await prisma.hierarchyRelationship.updateMany({
+        where: { childId: children[5].recordId },
+        data: { detachedAt: new Date() },
+      });
+      expect((await get(parent.id)).directTaskProgress).toEqual({
+        total: 5,
+        completed: 1,
+        dismissed: 1,
+        open: 3,
+        blocked: 1,
+        unclaimed: 2,
+        validationReady: 2,
+      });
+      expect((await get(children[0].id)).directTaskProgress).toBeNull();
+    },
+  );
 
   it.each([
     [
@@ -674,6 +697,228 @@ describe("dependency relationships", () => {
 });
 
 describe("parent lifecycle integration", () => {
+  async function attach(childId: number, parentId: number) {
+    const child = await get(childId);
+    const parent = await get(parentId);
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/actionables/${childId}/parent`,
+      payload: {
+        version: child.version,
+        parentId,
+        parentVersion: parent.version,
+        currentParentVersion: child.relationships.parent?.parent.version,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json().item;
+  }
+
+  async function validate(id: number) {
+    const item = await get(id);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${id}/validation-records`,
+      payload: {
+        version: item.version,
+        type: "Automated test",
+        outcome: "Passed",
+        evidence: "Nested lifecycle test fixture evidence",
+        notes: "",
+        origin: "user",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json().item;
+  }
+
+  async function finish(id: number) {
+    let item = await get(id);
+    if (item.status === "Inbox") item = await move(item, "Researching");
+    if (item.status === "Researching") item = await move(item, "Ready");
+    if (item.status === "Ready") item = await move(item, "In progress");
+    item = await validate(id);
+    return move(item, "Done");
+  }
+
+  it("checks work beneath terminal intermediates and reopens every completed ancestor with fresh validation required", async () => {
+    const root = await create("Deep lifecycle root");
+    const child = await create("Dismissed intermediate");
+    const grandchild = await create("Completed intermediate");
+    const leaf = await create("Deep lifecycle leaf");
+    await attach(child.id, root.id);
+    await attach(grandchild.id, child.id);
+    await attach(leaf.id, grandchild.id);
+    await move(await get(child.id), "Dismissed", {
+      reason: "Coordination delegated to its descendant",
+    });
+    await move(await get(grandchild.id), "Dismissed", {
+      reason: "Coordination delegated to its descendant",
+    });
+    let current = await move(await get(root.id), "Researching");
+    current = await move(current, "Ready");
+    current = await move(current, "In progress");
+    const premature = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${root.id}/status-transitions`,
+      payload: {
+        version: current.version,
+        status: "Done",
+        completionOverrideReason: "Cannot skip descendant work",
+        origin: "user",
+      },
+    });
+    expect(premature.json().code).toBe("INCOMPLETE_SUBTASKS");
+    expect(premature.json().errors.children).toEqual([
+      `${leaf.id}: ${leaf.title} (Inbox)`,
+    ]);
+    const editedCompletion = await app.inject({
+      method: "PATCH",
+      url: `/api/actionables/${root.id}`,
+      payload: {
+        ...body(root.title),
+        version: current.version,
+        status: "Done",
+      },
+    });
+    expect(editedCompletion.json().code).toBe("INCOMPLETE_SUBTASKS");
+    await finish(leaf.id);
+    await move(await get(grandchild.id), "Ready", {
+      reason: "Resume coordination validation",
+    });
+    await finish(grandchild.id);
+    const completedRoot = await finish(root.id);
+    await move(await get(leaf.id), "Ready", {
+      reason: "Deep regression requires follow-up",
+    });
+    for (const id of [root.id, grandchild.id]) {
+      const reopened = await get(id);
+      expect(reopened.status).toBe("Ready");
+      expect(
+        reopened.activity.filter(
+          (event: { type: string }) => event.type === "parent-auto-reopened",
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          context: expect.objectContaining({
+            childOrdinal: String(leaf.id),
+            reason: "Deep regression requires follow-up",
+            origin: "child-reopen",
+          }),
+        }),
+      ]);
+      expect(reopened.statusHistory[0]).toMatchObject({
+        previousStatus: "Done",
+        newStatus: "Ready",
+        origin: "child-reopen",
+      });
+    }
+    expect((await get(child.id)).status).toBe("Dismissed");
+    expect((await get(root.id)).childCompletion).toEqual({
+      terminal: 1,
+      total: 3,
+    });
+    const stale = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${root.id}/status-transitions`,
+      payload: {
+        version: completedRoot.version,
+        status: "In progress",
+        origin: "user",
+      },
+    });
+    expect(stale.json().code).toBe("VERSION_CONFLICT");
+    await finish(leaf.id);
+    await finish(grandchild.id);
+    current = await move(await get(root.id), "In progress");
+    const missingValidation = await app.inject({
+      method: "POST",
+      url: `/api/actionables/${root.id}/status-transitions`,
+      payload: { version: current.version, status: "Done", origin: "user" },
+    });
+    expect(missingValidation.json().code).toBe("VALIDATION_REQUIRED");
+    expect((await finish(root.id)).childCompletion).toEqual({
+      terminal: 3,
+      total: 3,
+    });
+  });
+
+  it.each(["create", "breakdown", "move", "terminal move"])(
+    "keeps ancestors consistent after %s and detach",
+    async (operation) => {
+      const root = await create(`Ancestor ${operation} root`);
+      const child = await create(`Ancestor ${operation} child`);
+      const grandchild = await create(`Ancestor ${operation} grandchild`);
+      await attach(child.id, root.id);
+      await attach(grandchild.id, child.id);
+      await finish(grandchild.id);
+      await finish(child.id);
+      await finish(root.id);
+      const parent = await get(grandchild.id);
+      let attachedId: number;
+      if (operation === "create" || operation === "breakdown") {
+        const path = operation === "create" ? "subtasks" : "task-breakdowns";
+        const payload =
+          operation === "create"
+            ? { version: parent.version, title: "New deep work" }
+            : { version: parent.version, template: "research" };
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/actionables/${parent.id}/${path}`,
+          payload,
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        attachedId = response.json().item.relationships.subtasks[0].child.id;
+      } else {
+        const subtree = await create(`Moved subtree ${operation}`);
+        if (operation === "move") {
+          const leaf = await create("Open beneath dismissed subtree");
+          await attach(leaf.id, subtree.id);
+        }
+        await move(await get(subtree.id), "Dismissed", {
+          reason: "Retain work in descendants",
+        });
+        await attach(subtree.id, parent.id);
+        attachedId = subtree.id;
+      }
+      const expected = operation === "terminal move" ? "Done" : "Ready";
+      for (const id of [root.id, child.id, grandchild.id]) {
+        const saved = await get(id);
+        expect(saved.status).toBe(expected);
+        expect(
+          saved.activity.filter(
+            (event: { type: string }) => event.type === "parent-auto-reopened",
+          ),
+        ).toHaveLength(expected === "Done" ? 0 : 1);
+      }
+      const attached = await get(attachedId);
+      const detached = await app.inject({
+        method: "DELETE",
+        url: `/api/actionables/${attachedId}/parent`,
+        payload: {
+          version: attached.version,
+          parentVersion: (await get(grandchild.id)).version,
+        },
+      });
+      expect(detached.statusCode, detached.body).toBe(200);
+      expect((await get(root.id)).status).toBe(expected);
+      const remaining = operation === "breakdown" ? 4 : 2;
+      expect((await get(root.id)).directTaskProgress.total).toBe(remaining);
+      expect(
+        detached
+          .json()
+          .item.activity.some(
+            (event: { type: string }) => event.type === "hierarchy-detached",
+          ),
+      ).toBe(true);
+      if (operation === "move")
+        expect(detached.json().item.directTaskProgress).toMatchObject({
+          total: 1,
+          open: 1,
+        });
+    },
+  );
+
   it("gates parent completion and transactionally reopens only a Done parent when a child reopens", async () => {
     let parent = await create("Lifecycle parent");
     let child = await create("Lifecycle child");

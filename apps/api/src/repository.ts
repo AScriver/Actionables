@@ -44,7 +44,7 @@ import {
   transitionExplanation,
 } from "./actionable-transitions.js";
 
-import { getHierarchyRoot } from "./hierarchy.js";
+import { getHierarchyRoot, getHierarchyTasks } from "./hierarchy.js";
 
 const actionableInclude = {
   project: true,
@@ -110,9 +110,12 @@ const actionableInclude = {
   agentTaskClaim: true,
 } satisfies Prisma.ActionableInclude;
 
-type ActionableRow = Prisma.ActionableGetPayload<{
+type StoredActionableRow = Prisma.ActionableGetPayload<{
   include: typeof actionableInclude;
 }>;
+type ActionableRow = StoredActionableRow & {
+  descendants: StoredActionableRow["hierarchyAsParent"][number]["child"][];
+};
 type TransactionClient = Prisma.TransactionClient;
 
 export class DomainValidationError extends Error {
@@ -278,8 +281,8 @@ function toSummary(row: ActionableRow): ActionableSummary {
   const childIds = row.hierarchyAsParent.map(
     (relationship) => relationship.child.sourceOrdinal,
   );
-  const terminalChildren = row.hierarchyAsParent.filter((relationship) =>
-    ["Done", "Dismissed"].includes(relationship.child.status),
+  const terminalChildren = row.descendants.filter((child) =>
+    ["Done", "Dismissed"].includes(child.status),
   ).length;
   return actionableSummarySchema.parse({
     id: row.sourceOrdinal,
@@ -344,7 +347,7 @@ function toSummary(row: ActionableRow): ActionableSummary {
     childIds: childIds.length > 0 ? childIds : undefined,
     childCompletion:
       childIds.length > 0
-        ? { terminal: terminalChildren, total: childIds.length }
+        ? { terminal: terminalChildren, total: row.descendants.length }
         : undefined,
   });
 }
@@ -352,9 +355,7 @@ function toSummary(row: ActionableRow): ActionableSummary {
 function toDetail(
   row: ActionableRow & { workItemId: number },
 ): ActionableDetail {
-  const children = row.hierarchyAsParent.map(
-    (relationship) => relationship.child,
-  );
+  const children = row.descendants;
   const openChildren = children.filter(
     (child) => child.status !== "Done" && child.status !== "Dismissed",
   );
@@ -556,7 +557,20 @@ async function findActionableRow(
   });
   if (!row) return null;
   const root = await getHierarchyRoot(client, row.id);
-  return { ...row, workItemId: root.sourceOrdinal };
+  const descendants = row.hierarchyAsParent.length
+    ? await client.actionable.findMany({
+        where: {
+          id: {
+            in: (await getHierarchyTasks(client, row.id))
+              .filter((task) => task.id !== row.id)
+              .map((task) => task.id),
+          },
+        },
+        include: actionableInclude.hierarchyAsParent.include.child.include,
+        orderBy: { sourceOrdinal: "asc" },
+      })
+    : [];
+  return { ...row, descendants, workItemId: root.sourceOrdinal };
 }
 
 const priorityRank = new Map(
@@ -773,9 +787,25 @@ export function actionableQueryRecord(query: ActionableQuery) {
 }
 
 async function allActionableRows(prisma: AppPrismaClient) {
-  return prisma.actionable.findMany({
+  const rows = await prisma.actionable.findMany({
     include: actionableInclude,
     orderBy: { sourceOrdinal: "asc" },
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return rows.map((row): ActionableRow => {
+    const descendants: StoredActionableRow[] = [];
+    const pending = row.hierarchyAsParent.map((edge) => edge.childId);
+    const visited = new Set([row.id]);
+    while (pending.length) {
+      const id = pending.pop()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      const child = byId.get(id);
+      if (!child) continue;
+      descendants.push(child);
+      pending.push(...child.hierarchyAsParent.map((edge) => edge.childId));
+    }
+    return { ...row, descendants };
   });
 }
 
@@ -1555,7 +1585,7 @@ export async function archiveImpact(
   id: string,
 ): Promise<ArchiveImpactResponse | null> {
   let target: ScopeArchiveRow | null;
-  let rows: ActionableRow[];
+  let rows: StoredActionableRow[];
   if (kind === "actionable") {
     const ordinal = Number(id);
     if (!Number.isSafeInteger(ordinal) || ordinal < 1) return null;
@@ -2062,19 +2092,21 @@ function validateTransition(
     return { reason, completionMode: "none", validationRecordId: null };
   }
 
-  const incompleteChildren = current.hierarchyAsParent
-    .map((relationship) => relationship.child)
-    .filter((child) => child.status !== "Done" && child.status !== "Dismissed");
+  const incompleteChildren = current.descendants.filter(
+    (child) => child.status !== "Done" && child.status !== "Dismissed",
+  );
   if (incompleteChildren.length > 0) {
     throw new DomainValidationError(
       "INCOMPLETE_SUBTASKS",
       {
-        status: ["A parent cannot be Done while it has nonterminal subtasks."],
+        status: [
+          "A parent cannot be Done while it has nonterminal descendants.",
+        ],
         children: incompleteChildren.map(
           (child) => `${child.sourceOrdinal}: ${child.title} (${child.status})`,
         ),
       },
-      "Complete or dismiss every direct subtask before completing this parent.",
+      "Complete or dismiss every descendant before completing this parent.",
     );
   }
 
@@ -2284,6 +2316,74 @@ export async function updateActionable(
     : prisma.$transaction(operation);
 }
 
+/** Reopens completed ancestors of unfinished work, retaining an audited history. */
+export async function reopenCompletedAncestors(
+  transaction: TransactionClient,
+  child: { id: string; sourceOrdinal: number },
+  reason: string,
+  origin: "child-reopen" | "hierarchy-change",
+) {
+  const parents = await transaction.$queryRaw<
+    Array<{ id: string; sourceOrdinal: number; version: number }>
+  >`
+    WITH RECURSIVE descendants(id) AS (
+      SELECT ${child.id}
+      UNION
+      SELECT edge.childId FROM HierarchyRelationship edge
+      JOIN descendants ON edge.parentId = descendants.id
+      WHERE edge.detachedAt IS NULL
+    ), ancestors(id) AS (
+      SELECT task.id FROM Actionable task
+      JOIN descendants ON descendants.id = task.id
+      WHERE task.status NOT IN ('Done', 'Dismissed')
+      UNION
+      SELECT edge.parentId FROM HierarchyRelationship edge
+      JOIN ancestors ON edge.childId = ancestors.id
+      WHERE edge.detachedAt IS NULL
+    )
+    SELECT task.id, task.sourceOrdinal, task.version FROM Actionable task
+    JOIN ancestors ON ancestors.id = task.id
+    WHERE task.status = 'Done'
+    ORDER BY task.sourceOrdinal
+  `;
+  for (const parent of parents) {
+    const updated = await transaction.actionable.updateMany({
+      where: { id: parent.id, version: parent.version, status: "Done" },
+      data: {
+        status: "Ready",
+        updatedLabel: "just now",
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count !== 1) {
+      const latest = await currentOrNotFound(transaction, parent.sourceOrdinal);
+      if (!latest) throw new Error("The ancestor to reopen no longer exists.");
+      throw new VersionConflictError(toDetail(latest));
+    }
+    await transaction.actionableStatusHistory.create({
+      data: {
+        actionableId: parent.id,
+        previousStatus: "Done",
+        newStatus: "Ready",
+        origin,
+      },
+    });
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: parent.id,
+        type: "parent-auto-reopened",
+        summary: "Automatically reopened because descendant work is unfinished",
+        metadataJson: inputJson({
+          childActionableId: child.id,
+          childOrdinal: String(child.sourceOrdinal),
+          reason,
+          origin,
+        }),
+      },
+    });
+  }
+}
+
 export async function transitionActionable(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
@@ -2359,52 +2459,16 @@ export async function transitionActionable(
         : {},
     );
 
-    if (parentRelationship) {
-      const parent = parentRelationship.parent;
-      const parentUpdated = await transaction.actionable.updateMany({
-        where: { id: parent.id, version: parent.version, status: "Done" },
-        data: {
-          status: "Ready",
-          updatedLabel: "just now",
-          version: { increment: 1 },
-        },
-      });
-      if (parentUpdated.count !== 1) {
-        const latestParent = await currentOrNotFound(
-          transaction,
-          parent.sourceOrdinal,
-        );
-        if (!latestParent) {
-          throw new DomainValidationError(
-            "PARENT_NOT_FOUND",
-            { parent: ["The parent actionable no longer exists."] },
-            "The parent actionable could not be reopened.",
-          );
-        }
-        throw new VersionConflictError(toDetail(latestParent));
-      }
-      await transaction.actionableStatusHistory.create({
-        data: {
-          actionableId: parent.id,
-          previousStatus: "Done",
-          newStatus: "Ready",
-          origin: "child-reopen",
-        },
-      });
-      await transaction.activityEvent.create({
-        data: {
-          actionableId: parent.id,
-          type: "parent-auto-reopened",
-          summary: "Automatically reopened because a subtask reopened",
-          metadataJson: inputJson({
-            hierarchyRelationshipId: parentRelationship.id,
-            childActionableId: current.id,
-            childOrdinal: String(current.sourceOrdinal),
-            reason: decision.reason,
-            origin: "child-reopen",
-          }),
-        },
-      });
+    if (
+      input.status === "Ready" &&
+      (previousStatus === "Done" || previousStatus === "Dismissed")
+    ) {
+      await reopenCompletedAncestors(
+        transaction,
+        current,
+        decision.reason,
+        "child-reopen",
+      );
     }
     const saved = await currentOrNotFound(transaction, sourceOrdinal);
     return saved ? toDetail(saved) : null;

@@ -126,13 +126,22 @@ ancestors do not match. Use the Relationships links to navigate their parents.
 
 ## Work-item progress
 
-Parents with direct tasks show **Work-item progress** in the **Relationships**
+Parents with subtasks show **Work-item progress** in the **Relationships**
 tab: completed, dismissed, open, blocked, unclaimed and validation-ready counts.
-All attached direct tasks count, including archived tasks. Blocked and unclaimed
-are subsets of open; an expired claim remains claimed until released.
+All attached descendants count exactly once, including archived tasks. Blocked
+and unclaimed are subsets of open; an expired claim remains claimed until released.
 Validation ready means a current, unsuperseded Passed record under the existing
-completion policy. The parent still needs its own validation and every direct
-task must be Done or Dismissed before parent completion.
+completion policy. List-row fractions count Done or Dismissed descendants out of
+all attached descendants. Immediate child links remain separate from these totals.
+The parent still needs its own Resolution and qualifying validation, and every
+descendant must be Done or Dismissed before parent completion, even beneath a
+terminal intermediate task.
+
+Reopening a deep task or adding unfinished work through creation, breakdown or
+reparenting reopens affected Done ancestors to Ready in the same transaction,
+with activity and status history. Dismissed ancestors stay Dismissed. Moving or
+detaching work updates progress but never automatically completes an ancestor;
+normal implementation and validation are still required.
 
 ## Default scope for new Actionables
 
@@ -231,14 +240,14 @@ ID variables to identify the correct work. Unknown names, malformed double
 braces and missing IDs are rejected. Expressions are not evaluated, and inserted
 titles are never interpreted as template syntax.
 
-| Variable | Value |
-| --- | --- |
-| `{{workItemId}}` | Governing top-level Actionable ID (required) |
-| `{{taskId}}` | Selected Actionable ID (required) |
-| `{{taskTitle}}` | Selected title as literal text |
-| `{{phaseAction}}` | Begin/resume research or continue/resume implementation |
-| `{{splitInstructions}}` | Root or direct-task research splitting guidance |
-| `{{implementationInstructions}}` | Ready preflight and implementation or coordination-root finalization guidance |
+| Variable                         | Value                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------- |
+| `{{workItemId}}`                 | Governing top-level Actionable ID (required)                                  |
+| `{{taskId}}`                     | Selected Actionable ID (required)                                             |
+| `{{taskTitle}}`                  | Selected title as literal text                                                |
+| `{{phaseAction}}`                | Begin/resume research or continue/resume implementation                       |
+| `{{splitInstructions}}`          | Research splitting guidance for the selected task                             |
+| `{{implementationInstructions}}` | Ready preflight and implementation or coordination-task finalization guidance |
 
 The defaults retain the existing lifecycle, scope, splitting, validation and
 handoff instructions. Custom templates affect both **Open in Codex** and

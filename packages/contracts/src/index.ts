@@ -358,6 +358,7 @@ export const actionableSummarySchema = z.object({
   blocks: z.array(z.number().int().positive()).optional(),
   parentId: z.number().int().positive().optional(),
   childIds: z.array(z.number().int().positive()).optional(),
+  // Counts all attached descendants; childIds remains the immediate children.
   childCompletion: z
     .object({
       terminal: z.number().int().nonnegative(),
@@ -368,6 +369,7 @@ export const actionableSummarySchema = z.object({
 
 export const actionableDetailSchema = actionableSummarySchema.extend({
   workItemId: z.number().int().positive(),
+  // Historical wire name: progress now includes every attached descendant once.
   directTaskProgress: z
     .object({
       total: z.number().int().nonnegative(),

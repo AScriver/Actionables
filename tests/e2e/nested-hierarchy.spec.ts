@@ -1,6 +1,172 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("deep completion and reopening refresh ancestor progress through dismissed intermediates", async ({
+  page,
+}, testInfo) => {
+  const scopes = await (await page.request.get("/api/scopes")).json();
+  const project = scopes.projects[0];
+  const repository = project.repositories[0];
+  const worktree = repository.worktrees[0];
+  const nodes: Array<{ id: number; title: string }> = [];
+  const detail = async (id: number) =>
+    (await (await page.request.get(`/api/actionables/${id}`)).json()).item;
+  for (const level of ["root", "child", "grandchild", "leaf"]) {
+    const response = await page.request.post("/api/actionables", {
+      data: {
+        title: `Progress browser ${level}`,
+        priority: "Medium",
+        effort: "S",
+        evidenceState: "Confirmed",
+        projectId: project.id,
+        repositoryId: repository.id,
+        worktreeId: worktree.id,
+        finding: "Deep completion regression",
+        description: "Complete and reopen through terminal intermediates",
+        resolution: "Validated the nested workflow",
+        research: ["Inspected hierarchy lifecycle"],
+        validation: ["Verify descendant states"],
+        tags: [],
+        userSources: [],
+      },
+    });
+    expect(response.status()).toBe(201);
+    const task = (await response.json()).item;
+    const parent = nodes.at(-1);
+    if (parent) {
+      const attached = await page.request.put(
+        `/api/actionables/${task.id}/parent`,
+        {
+          data: {
+            version: task.version,
+            parentId: parent.id,
+            parentVersion: (await detail(parent.id)).version,
+          },
+        },
+      );
+      expect(attached.ok()).toBe(true);
+    }
+    nodes.push(task);
+  }
+  for (const [index, node] of nodes.entries()) {
+    const statuses =
+      index === 1 || index === 2
+        ? ["Dismissed"]
+        : ["Researching", "Ready", "In progress"];
+    for (const status of statuses) {
+      const response = await page.request.post(
+        `/api/actionables/${node.id}/status-transitions`,
+        {
+          data: {
+            version: (await detail(node.id)).version,
+            status,
+            origin: "user",
+            reason: "Work is tracked in descendants",
+          },
+        },
+      );
+      expect(response.ok()).toBe(true);
+    }
+    if (index === 0 || index === 3) {
+      const validation = await page.request.post(
+        `/api/actionables/${node.id}/validation-records`,
+        {
+          data: {
+            version: (await detail(node.id)).version,
+            type: "Automated test",
+            outcome: "Passed",
+            evidence: "Browser fixture evidence",
+            notes: "",
+            origin: "user",
+          },
+        },
+      );
+      expect(validation.ok()).toBe(true);
+    }
+  }
+  await page.goto(`/actionables/${nodes[0].id}`);
+  const inspector = page.getByRole("complementary", {
+    name: "Selected actionable",
+  });
+  const relationships = () =>
+    inspector.getByRole("tab", { name: "Relationships" }).click();
+  const progress = page.getByRole("region", { name: "Work-item progress" });
+  const count = (label: string) =>
+    progress
+      .locator("div")
+      .filter({ has: page.getByText(label, { exact: true }) });
+  const followChildren = async () => {
+    for (const node of nodes.slice(1)) {
+      await relationships();
+      await inspector
+        .getByRole("button", {
+          name: `${node.id} · ${node.title}`,
+          exact: true,
+        })
+        .click();
+    }
+  };
+  const followParents = async () => {
+    for (const node of nodes.slice(0, 3).reverse()) {
+      await relationships();
+      await inspector
+        .locator(".relationship-parent")
+        .getByRole("button", { name: new RegExp(node.title) })
+        .click();
+    }
+    await relationships();
+  };
+  await relationships();
+  await expect(progress).toContainText(
+    "All attached descendants, including archived",
+  );
+  await expect(count("Completed")).toHaveText("Completed0 / 3");
+  await expect(count("Dismissed")).toHaveText("Dismissed2");
+  await expect(count("Open")).toHaveText("Open1");
+  await inspector.getByRole("button", { name: "Done", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Done" }).click();
+  await expect(inspector.getByRole("alert")).toContainText(
+    "nonterminal descendants",
+  );
+  await inspector.getByRole("button", { name: "Cancel", exact: true }).click();
+  await followChildren();
+  await inspector.getByRole("button", { name: "Done", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Done" }).click();
+  await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
+  await followParents();
+  await expect(count("Completed")).toHaveText("Completed1 / 3");
+  await expect(count("Open")).toHaveText("Open0");
+  await inspector.getByRole("button", { name: "Done", exact: true }).click();
+  await inspector.getByRole("button", { name: "Confirm Done" }).click();
+  await expect(inspector.getByLabel(/^Done\./)).toBeVisible();
+  await followChildren();
+  await inspector.getByRole("button", { name: "Ready", exact: true }).click();
+  await expect(
+    inspector.getByText(/also reopen any Done ancestors/),
+  ).toBeVisible();
+  await inspector
+    .getByLabel("Reopening reason")
+    .fill("Deep work needs another pass");
+  await inspector.getByRole("button", { name: "Confirm Ready" }).click();
+  await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
+  await followParents();
+  await expect(inspector.getByLabel(/^Ready\./)).toBeVisible();
+  await expect(count("Completed")).toHaveText("Completed0 / 3");
+  await expect(count("Open")).toHaveText("Open1");
+  await page.reload();
+  await relationships();
+  await expect(count("Dismissed")).toHaveText("Dismissed2");
+  await expect(
+    page
+      .getByRole("row", { name: /Progress browser root/ })
+      .locator(".child-count"),
+  ).toHaveText("2/3");
+  await page.screenshot({
+    path: testInfo.outputPath("nested-progress-reopened.png"),
+    fullPage: true,
+  });
+});
+
 test("create, break down, link, move and detach nested subtrees", async ({
   page,
 }) => {

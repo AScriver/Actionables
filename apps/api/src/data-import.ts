@@ -905,19 +905,22 @@ function integrityItems(
     for (const ancestor of ancestors) checkedAncestors.add(ancestor);
   }
   for (const relationship of activeHierarchy) {
-    const parent = actionById.get(relationship.parentId);
     const child = actionById.get(relationship.childId);
-    if (
-      parent?.status === "Done" &&
-      child &&
-      !["Done", "Dismissed"].includes(child.status)
-    ) {
-      add(
-        "hierarchy",
-        relationship.portableId,
-        "integrity-failure",
-        "A completed parent cannot have a nonterminal active child.",
-      );
+    if (!child || ["Done", "Dismissed"].includes(child.status)) continue;
+    let parentId: string | undefined = relationship.parentId;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      if (actionById.get(parentId)?.status === "Done") {
+        add(
+          "hierarchy",
+          relationship.portableId,
+          "integrity-failure",
+          "A completed parent cannot have a nonterminal active descendant.",
+        );
+        break;
+      }
+      parentId = parentByChild.get(parentId);
     }
   }
 

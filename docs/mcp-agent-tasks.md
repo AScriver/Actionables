@@ -264,6 +264,14 @@ documented operator recovery or using the matching application version. Retry
 only after `/api/health` reports `schema: "current"`. Do not switch, reset,
 delete, or hand-edit a populated database to make the check pass.
 
+Detail responses expose the same descendant progress as the dashboard in the
+historically named `directTaskProgress` field. Counts include every attached
+descendant once, including archived tasks; `subtasks` still lists immediate
+children. Done requires all descendants to be Done or Dismissed, even through a
+terminal intermediate task, plus the task's own Resolution and qualifying
+validation. Reopening or attaching unfinished nested work reopens affected Done
+ancestors to Ready with audited history; refresh their versions before continuing.
+
 The enforced implementation path is `Inbox → Researching → Ready → In progress`.
 `Inbox → Ready` is rejected. Active work can become `Ready` only with non-empty
 finding, description, Research, and planned validation fields. The server

@@ -331,7 +331,7 @@ describe("Actionables MCP", () => {
         "in the current task and every created task. Leave created tasks unclaimed in Inbox",
       );
       expect(client.getInstructions()).toContain(
-        "Move a research-complete split root to Ready as the coordination record",
+        "Move a research-complete split task to Ready as the coordination record",
       );
       const tools = (await client.listTools()).tools;
       const names = tools.map((tool) => tool.name).sort();
@@ -1256,6 +1256,159 @@ describe("Actionables MCP", () => {
         agentTaskClaim: null,
       });
     } finally {
+      await transport.close();
+    }
+  });
+
+  it("shares descendant progress and completion gates with dashboard lifecycle mutations", async () => {
+    const { client, transport } = await connectClient();
+    type Task = {
+      id: number;
+      version: number;
+      status: string;
+      directTaskProgress: unknown;
+    };
+    const call = async <T>(name: string, args: Record<string, unknown>) =>
+      output<T>(
+        await client.callTool({ name: `actionables.${name}`, arguments: args }),
+      );
+    const detail = async (id: number) =>
+      (
+        await app.inject({ method: "GET", url: `/api/actionables/${id}` })
+      ).json().item;
+    const create = (title: string, placement: Record<string, unknown>) =>
+      call<Task>("create_task", {
+        idempotencyKey: randomUUID(),
+        title,
+        description: "Nested completion scenario",
+        plannedValidation: ["Verify descendant completion"],
+        ...validTaskClassification,
+        ...placement,
+      });
+    const transition = async (id: number, status: string, reason: string) => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/actionables/${id}/status-transitions`,
+        payload: {
+          version: (await detail(id)).version,
+          status,
+          reason,
+          origin: "user",
+        },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+    };
+    try {
+      const root = await create("MCP descendant progress root", scope);
+      const child = await create("MCP dismissed child", {
+        workItemId: root.id,
+        parentId: root.id,
+      });
+      const grandchild = await create("MCP dismissed grandchild", {
+        workItemId: root.id,
+        parentId: child.id,
+      });
+      const leaf = await create("MCP unfinished leaf", {
+        workItemId: root.id,
+        parentId: grandchild.id,
+      });
+      for (const task of [child, grandchild])
+        await transition(task.id, "Dismissed", "Delegate work to descendants");
+      const listed = await call<{ items: Task[] }>("list_tasks", {
+        view: "available",
+        workItemId: root.id,
+      });
+      const claimed = await call<{ task: Task; claim: { claimToken: string } }>(
+        "claim_task",
+        {
+          id: root.id,
+          workItemId: root.id,
+          version: listed.items.find((task) => task.id === root.id)!.version,
+        },
+      );
+      let version = claimed.task.version;
+      const mutate = async (name: string, args: Record<string, unknown>) => {
+        const receipt = await call<{ version: number }>(name, {
+          id: root.id,
+          claimToken: claimed.claim.claimToken,
+          version,
+          ...args,
+        });
+        version = receipt.version;
+      };
+      await mutate("transition_task", { status: "Researching" });
+      await mutate("update_task", {
+        finding: "Descendant completion must agree across clients",
+        appendResearch: ["Inspected the shared transition guard"],
+        resolution: "Verified all descendant dispositions",
+      });
+      await mutate("transition_task", { status: "Ready" });
+      await mutate("transition_task", { status: "In progress" });
+      await mutate("record_task_validation", {
+        type: "Automated test",
+        outcome: "Passed",
+        evidence: "MCP completion fixture evidence",
+      });
+      const progress = await call<Task>("get_task", {
+        id: root.id,
+        claimToken: claimed.claim.claimToken,
+      });
+      expect(progress.directTaskProgress).toEqual(
+        (await detail(root.id)).directTaskProgress,
+      );
+      expect(progress.directTaskProgress).toMatchObject({
+        total: 3,
+        completed: 0,
+        dismissed: 2,
+        open: 1,
+        unclaimed: 1,
+      });
+      const premature = errorOutput(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            id: root.id,
+            claimToken: claimed.claim.claimToken,
+            version,
+            status: "Done",
+          },
+        }),
+      );
+      expect(premature.code).toBe("INCOMPLETE_SUBTASKS");
+      await transition(leaf.id, "Dismissed", "The leaf is no longer required");
+      await mutate("transition_task", { status: "Done" });
+      const completed = await call<Task>("get_task", {
+        id: root.id,
+        workItemId: root.id,
+      });
+      expect(completed.status).toBe("Done");
+      expect(completed.directTaskProgress).toMatchObject({
+        total: 3,
+        dismissed: 3,
+        open: 0,
+      });
+      await transition(leaf.id, "Ready", "The leaf is required again");
+      const reopened = await detail(root.id);
+      expect(reopened.status).toBe("Ready");
+      expect(reopened.directTaskProgress).toMatchObject({
+        total: 3,
+        dismissed: 2,
+        open: 1,
+      });
+      expect((await detail(child.id)).status).toBe("Dismissed");
+      expect((await detail(grandchild.id)).status).toBe("Dismissed");
+      expect(
+        (
+          await call<{ items: Task[] }>("list_tasks", {
+            view: "available",
+            workItemId: root.id,
+          })
+        ).items
+          .map((task) => task.id)
+          .sort(),
+      ).toEqual([root.id, leaf.id].sort());
+    } finally {
+      await client.close();
       await transport.close();
     }
   });

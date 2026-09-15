@@ -562,6 +562,19 @@ describe("internal seed reconciliation", () => {
       detachedAt: null,
       provenance: "test",
     }));
+    const unfinished = structuredClone(document);
+    unfinished.actionables[0]!.status = "Done";
+    unfinished.actionables[1]!.status = "Dismissed";
+    unfinished.actionables[2]!.status = "Dismissed";
+    const invalid = await service.preview(unfinished);
+    expect(invalid.canCommit).toBe(false);
+    expect(
+      invalid.items.some((item) =>
+        item.errors.some((message) =>
+          message.includes("nonterminal active descendant"),
+        ),
+      ),
+    ).toBe(true);
     const preview = await service.preview(document);
     expect(
       preview.canCommit,

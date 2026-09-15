@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  actionableDetailSchema,
   actionableReadinessSchema,
   actionablesErrorPayload,
   agentTaskClaimCredentialSchema,
@@ -255,6 +256,7 @@ const compactTaskSchema = z
   .object({
     id: z.number().int().positive(),
     workItemId: z.number().int().positive(),
+    directTaskProgress: actionableDetailSchema.shape.directTaskProgress,
     recordId: z.string().min(1),
     title: z.string().max(240),
     priority: z.string().max(40),
@@ -630,6 +632,7 @@ function compactTask(
         : {}),
     })),
     readiness: task.readiness,
+    directTaskProgress: task.directTaskProgress,
     permittedTransitions: task.permittedTransitions,
     validationRecords: task.validationRecords.slice(-5).map((record) => ({
       id: record.id,

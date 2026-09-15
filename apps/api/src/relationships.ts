@@ -16,6 +16,7 @@ import type { AppPrismaClient } from "./database.js";
 import {
   DomainValidationError,
   getActionable,
+  reopenCompletedAncestors,
   VersionConflictError,
 } from "./repository.js";
 
@@ -319,6 +320,7 @@ async function createSubtaskRecord(
     `Attached to parent ${parent.sourceOrdinal}`,
     context,
   );
+  return child;
 }
 
 /** Creates an Inbox child in its immediate parent's scope. */
@@ -339,8 +341,20 @@ export async function createSubtask(
         _max: { sourceOrdinal: true },
       });
       const ordinal = (highest._max.sourceOrdinal ?? 0) + 1;
-      await createSubtaskRecord(tx, parent, ordinal, input.title, options);
+      const child = await createSubtaskRecord(
+        tx,
+        parent,
+        ordinal,
+        input.title,
+        options,
+      );
       await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
+      await reopenCompletedAncestors(
+        tx,
+        child,
+        `Created subtask ${ordinal}`,
+        "hierarchy-change",
+      );
     },
     existingTransaction,
   );
@@ -360,15 +374,18 @@ export async function createTaskBreakdown(
     });
     const firstOrdinal = (highest._max.sourceOrdinal ?? 0) + 1;
     const titles = taskBreakdownTemplates[input.template];
+    const children = [];
     for (const [index, title] of titles.entries()) {
-      await createSubtaskRecord(tx, parent, firstOrdinal + index, title, {
-        origin: `task-breakdown:${input.template}`,
-        rawFragment: json({
-          kind: "task-breakdown",
-          template: input.template,
+      children.push(
+        await createSubtaskRecord(tx, parent, firstOrdinal + index, title, {
+          origin: `task-breakdown:${input.template}`,
+          rawFragment: json({
+            kind: "task-breakdown",
+            template: input.template,
+          }),
+          statusProvenance: `Created from the built-in ${input.template} task breakdown with neutral Inbox status.`,
         }),
-        statusProvenance: `Created from the built-in ${input.template} task breakdown with neutral Inbox status.`,
-      });
+      );
     }
     await bump(tx, parent.id, parent.sourceOrdinal, parent.version);
     await activity(
@@ -380,6 +397,12 @@ export async function createTaskBreakdown(
         template: input.template,
         subtasksCreated: String(titles.length),
       },
+    );
+    await reopenCompletedAncestors(
+      tx,
+      children[0]!,
+      `Created ${input.template} task breakdown`,
+      "hierarchy-change",
     );
   });
 }
@@ -506,6 +529,12 @@ export async function setParent(
       "hierarchy-attached",
       `Attached subtask ${child.sourceOrdinal}`,
       context,
+    );
+    await reopenCompletedAncestors(
+      tx,
+      child,
+      `Attached subtask ${child.sourceOrdinal} to parent ${parent.sourceOrdinal}`,
+      "hierarchy-change",
     );
   });
 }

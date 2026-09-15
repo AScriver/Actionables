@@ -814,7 +814,7 @@ function RelationshipSection({
         <section aria-labelledby={`work-item-progress-${selected.id}`}>
           <h3 id={`work-item-progress-${selected.id}`}>Work-item progress</h3>
           <p>
-            All attached direct tasks, including archived. Blocked and unclaimed
+            All attached descendants, including archived. Blocked and unclaimed
             are subsets of open; validation ready means current Passed evidence.
           </p>
           <dl className="agent-claim-details work-item-progress">
@@ -1299,9 +1299,9 @@ function LifecycleControls({
             )}
             {target === "Ready" &&
               (selected.status === "Done" || selected.status === "Dismissed") &&
-              selected.relationships.parent?.parent.status === "Done" && (
+              selected.relationships.parent && (
                 <p>
-                  Reopening this subtask will also reopen its Done parent to
+                  Reopening this subtask will also reopen any Done ancestors to
                   Ready in the same transaction.
                 </p>
               )}
@@ -7418,7 +7418,10 @@ export default function App() {
                         {item.title}
                       </span>
                       {item.childCompletion && (
-                        <span className="child-count">
+                        <span
+                          className="child-count"
+                          title="Done or Dismissed descendants / all attached descendants"
+                        >
                           {item.childCompletion.terminal}/
                           {item.childCompletion.total}
                         </span>
