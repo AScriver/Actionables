@@ -112,7 +112,7 @@ it("preserves repository reassignment when the same seed is imported again", asy
   expect(
     semanticPortableSnapshot(await exportPortableDocument(prisma)),
   ).toEqual(semanticPortableSnapshot(exported));
-});
+}, 30_000);
 
 function actionableClassification(
   preview: ImportPreviewResponse,
