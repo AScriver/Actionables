@@ -204,7 +204,7 @@ button {
 
 .repository-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) 25px;
   align-items: center;
   height: 35px;
   padding: 0 2px 0 15px;
@@ -979,6 +979,71 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.row-checkbox {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.findings-table.has-selection {
+  grid-template-rows: auto 39px minmax(0, 1fr);
+}
+
+.bulk-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.bulk-toolbar button {
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.bulk-dialog {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  color: var(--text-strong);
+}
+
+.bulk-dialog::backdrop {
+  background: rgba(4, 7, 9, 0.76);
+}
+
+.bulk-content {
+  padding: 16px;
+}
+
+.bulk-items {
+  max-height: 40dvh;
+  overflow-y: auto;
+  padding-left: 20px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.bulk-items li + li {
+  margin-top: 12px;
+}
+
+.bulk-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.bulk-field textarea {
+  width: 100%;
+  resize: vertical;
 }
 
 .finding-title {
@@ -3827,7 +3892,8 @@ button {
   align-items: center;
 }
 
-.scope-action-row .icon-button {
+.scope-action-row .icon-button,
+.repository-row .icon-button {
   width: 24px;
   height: 24px;
   border: 0;

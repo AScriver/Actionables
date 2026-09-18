@@ -4,14 +4,20 @@ import type {
   ScopeOptionsResponse,
 } from "@actionables/contracts";
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
-async function createScopedFixture(request: APIRequestContext, name: string) {
+async function createScopedFixture(
+  request: APIRequestContext,
+  name: string,
+  localPath = `C:\\repos\\${name}`,
+) {
   const repositoryResponse = await request.post("/api/repositories", {
     data: {
       projectMode: "new",
       projectName: `${name} project`,
       name: `${name} repository`,
-      localPath: `C:\\repos\\${name}`,
+      localPath,
     },
   });
   expect(repositoryResponse.ok()).toBeTruthy();
@@ -38,7 +44,7 @@ async function createScopedFixture(request: APIRequestContext, name: string) {
   return { scope, item };
 }
 
-test("repositories render as independent parents with selectable worktree children", async ({
+test("repositories start collapsed and expand independently with selectable worktree children", async ({
   page,
 }) => {
   const initialScopes: ScopeOptionsResponse = await (
@@ -62,7 +68,8 @@ test("repositories render as independent parents with selectable worktree childr
   ).json();
   const repositories = scopes.projects
     .filter((candidate) => !candidate.archivedAt)
-    .flatMap((candidate) => candidate.repositories);
+    .flatMap((candidate) => candidate.repositories)
+    .filter((candidate) => !candidate.archivedAt);
   const repository = project.repositories.find(
     (candidate) => !candidate.archivedAt && candidate.worktrees.length > 0,
   )!;
@@ -76,10 +83,13 @@ test("repositories render as independent parents with selectable worktree childr
   await expect(tree.locator(".project-row")).toHaveCount(0);
   await expect(
     sidebar.getByRole("button", { name: /^Archive repository / }),
-  ).toHaveCount(0);
+  ).toHaveCount(repositories.length);
   await expect(tree.locator(":scope > .repository-group")).toHaveCount(
     repositories.length,
   );
+  await expect(
+    tree.locator('.repository-expander[aria-expanded="false"]'),
+  ).toHaveCount(repositories.length);
   const group = tree.locator(".repository-group").filter({
     has: page.getByRole("button", { name: repository.name, exact: true }),
   });
@@ -101,6 +111,12 @@ test("repositories render as independent parents with selectable worktree childr
   const worktreeButton = group
     .locator(".worktree-row")
     .filter({ hasText: worktree.name });
+  await expect(worktreeButton).toBeHidden();
+  const expander = group.locator(".repository-expander");
+  await expect(expander).toHaveAccessibleName(
+    `Expand repository ${repository.name}`,
+  );
+  await expander.press("Enter");
   await worktreeButton.click();
   await expect(worktreeButton).toHaveClass(/is-selected/);
   await expect(repositoryButton).not.toHaveAttribute("aria-current", "page");
@@ -108,7 +124,11 @@ test("repositories render as independent parents with selectable worktree childr
   expect(location.searchParams.get("worktree")).toBe(worktree.id);
   const scopedUrl = page.url();
 
-  const expander = group.locator(".repository-expander");
+  const sibling = tree.locator(".repository-group").filter({
+    has: page.getByRole("button", { name: siblingName, exact: true }),
+  });
+  await expect(sibling.locator(".worktree-row").first()).toBeHidden();
+  await sibling.locator(".repository-expander").click();
   await expect(expander).toHaveAccessibleName(
     `Collapse repository ${repository.name}`,
   );
@@ -116,15 +136,7 @@ test("repositories render as independent parents with selectable worktree childr
   await expect(expander).toHaveAttribute("aria-expanded", "false");
   await expect(worktreeButton).toBeHidden();
   await expect(page).toHaveURL(scopedUrl);
-  await expect(
-    tree
-      .locator(".repository-group")
-      .filter({
-        has: page.getByRole("button", { name: siblingName, exact: true }),
-      })
-      .locator(".worktree-row")
-      .first(),
-  ).toBeVisible();
+  await expect(sibling.locator(".worktree-row").first()).toBeVisible();
   await expander.press("Space");
   await expect(worktreeButton).toBeVisible();
   await expect(worktreeButton).toHaveClass(/is-selected/);
@@ -137,6 +149,9 @@ test("repositories render as independent parents with selectable worktree childr
   await expect(worktreeButton).toHaveClass(/is-selected/);
   await page.reload();
   await expect(worktreeButton).toHaveClass(/is-selected/);
+  await expect(expander).toHaveAttribute("aria-expanded", "false");
+  await expect(worktreeButton).toBeHidden();
+  await expect(sibling.locator(".worktree-row").first()).toBeHidden();
   await page
     .getByRole("banner")
     .getByRole("button", { name: project.name, exact: true })
@@ -146,28 +161,122 @@ test("repositories render as independent parents with selectable worktree childr
   ).toBeVisible();
 });
 
-test("repository archival and restoration remain available outside the sidebar", async ({
+test("archives and restores repositories from the sidebar while preserving their work and local files", async ({
   page,
-}) => {
+}, testInfo) => {
+  const localPath = testInfo.outputPath(`repository-${Date.now()}`);
+  const localFile = resolve(localPath, "keep.txt");
+  await mkdir(localPath, { recursive: true });
+  await writeFile(localFile, "Keep local repository files.");
   const { scope, item } = await createScopedFixture(
     page.request,
     `Sidebar archive ${Date.now()}`,
+    localPath,
   );
   const repository = scope.scopes.projects.find(
     (project) => project.id === scope.projectId,
   )!.repositories[0]!;
-  const archived = await page.request.post(
-    `/api/scopes/repository/${repository.id}/archive`,
-    {
-      data: { version: repository.version },
-    },
+  const filters = new URLSearchParams({
+    project: scope.projectId,
+    repository: scope.repositoryId,
+    worktree: scope.worktreeId,
+    q: item.title,
+    priority: "Medium",
+  });
+  await page.goto(`/?${filters}`);
+  const sidebar = page.getByRole("complementary", {
+    name: "Repositories and worktrees",
+  });
+  const archiveButton = sidebar.getByRole("button", {
+    name: `Archive repository ${repository.name}`,
+    exact: true,
+  });
+  await expect(archiveButton).toBeVisible();
+  const impactUrl = `**/api/archive-impact/repository/${repository.id}`;
+  await page.route(impactUrl, (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        type: "https://actionables.local/problems/service_unavailable",
+        title: "Repository impact is unavailable. Close and try again.",
+        status: 503,
+        code: "SERVICE_UNAVAILABLE",
+        requestId: "repository-impact-failure",
+      },
+    }),
   );
-  expect(archived.ok()).toBeTruthy();
-  const archivedScopes: ScopeOptionsResponse = await archived.json();
+  await archiveButton.press("Enter");
+  const dialog = page.getByRole("dialog", {
+    name: `Archive ${repository.name}?`,
+  });
+  const confirm = dialog.getByRole("button", {
+    name: `Archive ${repository.name}`,
+    exact: true,
+  });
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Repository impact is unavailable",
+  );
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(archiveButton).toBeFocused();
+  await page.unroute(impactUrl);
+
+  await archiveButton.press("Enter");
+  await expect(dialog).toContainText("1 actionable will be effectively hidden");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(archiveButton).toBeFocused();
+  await expect(page).toHaveURL(new RegExp(`worktree=${scope.worktreeId}`));
+
+  const archiveUrl = `**/api/scopes/repository/${repository.id}/archive`;
+  await page.route(archiveUrl, (route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        type: "https://actionables.local/problems/version_conflict",
+        title: "This scope record has a newer saved version.",
+        status: 409,
+        code: "VERSION_CONFLICT",
+        requestId: "repository-archive-conflict",
+      },
+    }),
+  );
+  await archiveButton.click();
+  await confirm.click();
+  await expect(dialog.getByRole("alert")).toContainText("newer saved version");
+  const unchanged = (
+    await (await page.request.get(`/api/actionables/${item.id}`)).json()
+  ).item;
+  expect(unchanged.archiveState.isArchived).toBe(false);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(archiveButton).toBeFocused();
+  await page.unroute(archiveUrl);
+
+  await archiveButton.press("Enter");
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(archiveButton).toHaveCount(0);
+  await expect(
+    sidebar.getByRole("button", { name: repository.name, exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Search actionables")).toBeFocused();
+  filters.delete("repository");
+  filters.delete("worktree");
+  expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual(
+    Object.fromEntries(filters),
+  );
+  await page.reload();
+  await expect(archiveButton).toHaveCount(0);
+  const archivedScopes: ScopeOptionsResponse = await (
+    await page.request.get("/api/scopes")
+  ).json();
   const archivedRepository = archivedScopes.projects.find(
     (project) => project.id === scope.projectId,
   )!.repositories[0]!;
   expect(archivedRepository.archivedAt).not.toBeNull();
+  expect(archivedRepository.worktrees[0]!.id).toBe(scope.worktreeId);
+  expect(await readFile(localFile, "utf8")).toBe(
+    "Keep local repository files.",
+  );
   const inherited = (
     await (await page.request.get(`/api/actionables/${item.id}`)).json()
   ).item;
@@ -176,27 +285,72 @@ test("repository archival and restoration remain available outside the sidebar",
     isArchived: true,
     directlyArchived: false,
   });
-  await page.goto(`/archive?q=${encodeURIComponent(item.title)}`);
+  await sidebar.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page.locator(`[data-actionable-id="${item.id}"]`)).toBeVisible();
-  await expect(
-    page
-      .locator(".sidebar")
-      .getByRole("button", { name: /^(Archive|Restore) repository / }),
-  ).toHaveCount(0);
-
-  const restored = await page.request.post(
-    `/api/scopes/repository/${repository.id}/restore`,
-    {
-      data: { version: archivedRepository.version },
-    },
+  const restoreButton = sidebar.getByRole("button", {
+    name: `Restore repository ${repository.name}`,
+    exact: true,
+  });
+  await expect(restoreButton).toBeVisible();
+  const archivedGroup = sidebar.locator(".repository-group").filter({
+    has: page.getByRole("button", {
+      name: `Restore repository ${repository.name}`,
+      exact: true,
+    }),
+  });
+  await archivedGroup.locator(".repository-select").click();
+  await expect(page).toHaveURL(/\/archive\?/);
+  expect(new URL(page.url()).searchParams.get("repository")).toBe(
+    repository.id,
   );
-  expect(restored.ok()).toBeTruthy();
+  await archivedGroup.locator(".repository-expander").click();
+  await archivedGroup.locator(".worktree-row").click();
+  await expect(page).toHaveURL(/\/archive\?/);
+  expect(new URL(page.url()).searchParams.get("worktree")).toBe(
+    scope.worktreeId,
+  );
+  await page.screenshot({
+    path: "output/playwright/repository-removal-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open project navigation" }).click();
+  await restoreButton.press("Enter");
+  const restoreDialog = page.getByRole("dialog", {
+    name: `Restore ${repository.name}?`,
+  });
+  await expect(restoreDialog).toBeVisible();
+  await expect(
+    restoreDialog.getByRole("button", {
+      name: `Restore ${repository.name}`,
+      exact: true,
+    }),
+  ).toBeEnabled();
+  await expect(restoreDialog).not.toContainText("will be effectively hidden");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "output/playwright/repository-removal-mobile.png",
+    fullPage: true,
+  });
+  await restoreDialog
+    .getByRole("button", { name: `Restore ${repository.name}`, exact: true })
+    .click();
+  await expect(restoreDialog).toHaveCount(0);
   const restoredItem = (
     await (await page.request.get(`/api/actionables/${item.id}`)).json()
   ).item;
   expect(restoredItem.status).toBe(item.status);
   expect(restoredItem.archiveState.isArchived).toBe(false);
+  expect(await readFile(localFile, "utf8")).toBe(
+    "Keep local repository files.",
+  );
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/?q=${encodeURIComponent(item.title)}`);
+  await expect(archiveButton).toBeVisible();
   await expect(page.locator(`[data-actionable-id="${item.id}"]`)).toBeVisible();
 });
 
@@ -266,6 +420,7 @@ test("Actionables clears every scope while preserving unrelated filters and allo
       exact: true,
     }),
   });
+  await group.locator(".repository-expander").click();
   await group.locator(".worktree-row").click();
   expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
     ...unrelated,

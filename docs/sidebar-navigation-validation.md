@@ -1,5 +1,11 @@
 # Sidebar changes: local completion evidence
 
+The September 7 results below describe the earlier sidebar behavior. Repository
+archive/restore controls were restored on September 17 to support removal from
+active navigation. Archived repositories now appear in the sidebar only in
+**Archive**. See [Manage repositories and projects](how-to.md#manage-repositories-and-projects)
+for the current behavior.
+
 Verified September 7, 2026 in `C:\Code\Actionables`, starting from clean commit
 `f1202b8` on branch `AScriver`. These IDs refer to the unavailable work-PC
 tracker. No tracker records were created, claimed, or updated. At the user's

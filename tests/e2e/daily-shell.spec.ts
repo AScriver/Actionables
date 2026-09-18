@@ -115,6 +115,9 @@ test("desktop sidebar collapses to an accessible navigation rail without losing 
 
   await expect(selectedWorktree).toHaveClass(/is-selected/);
   await expect(selectedWorktree).toContainText(worktree.name);
+  await sidebar
+    .getByRole("button", { name: `Expand repository ${repository.name}` })
+    .click();
   const collapse = sidebar.getByRole("button", {
     name: "Collapse left sidebar",
   });

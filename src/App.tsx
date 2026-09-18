@@ -134,6 +134,7 @@ import {
   codexThreadUrlFromAgentId,
 } from "./codex-links";
 import { Markdown } from "./Markdown";
+import { BulkActionsDialog, type BulkAction } from "./BulkActionsDialog";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
 type InspectorTab =
@@ -5620,11 +5621,12 @@ function ArchiveDialog({
             </p>
           </div>
         </div>
-        {pending ? (
+        {pending && (
           <div className="archive-impact" role="status">
             Checking impact…
           </div>
-        ) : impact ? (
+        )}
+        {!pending && impact && !target.archived && (
           <div className="archive-impact">
             <strong>Impact</strong>
             {impact.warnings.length ? (
@@ -5637,7 +5639,7 @@ function ArchiveDialog({
               <p>No related active work will be hidden.</p>
             )}
           </div>
-        ) : null}
+        )}
         {error && (
           <div className="inline-error" role="alert">
             {error}
@@ -5657,7 +5659,7 @@ function ArchiveDialog({
             type="button"
             className="primary-action"
             onClick={onConfirm}
-            disabled={pending || saving}
+            disabled={pending || saving || !impact}
           >
             {saving ? `${action}ing…` : `${action} ${target.name}`}
           </button>
@@ -5800,9 +5802,9 @@ export default function App() {
   const [scopeMenuOpen, setScopeMenuOpen] = useState<
     "project" | "worktree" | null
   >(null);
-  const [collapsedRepositories, setCollapsedRepositories] = useState<
-    Set<string>
-  >(() => new Set());
+  const [expandedRepositories, setExpandedRepositories] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [expandedParents, setExpandedParents] = useState<Set<number>>(() => {
     try {
       return new Set<number>(
@@ -5825,6 +5827,16 @@ export default function App() {
     new Set(),
   );
   const [notice, setNotice] = useState("");
+  const [bulkSelection, setBulkSelection] = useState<{
+    context: string;
+    ids: number[];
+  }>({ context: "", ids: [] });
+  const [bulkTargets, setBulkTargets] = useState<{
+    action: BulkAction;
+    items: ActionableSummary[];
+  } | null>(null);
+  const bulkReturnFocus = useRef<HTMLElement | null>(null);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [archiveTarget, setArchiveTarget] =
     useState<ArchiveDialogTarget | null>(null);
@@ -5882,7 +5894,14 @@ export default function App() {
   const actionables = listQuery.data?.items ?? [];
   const selected = detailQuery.data;
   const scopes = scopesQuery.data?.projects ?? [];
-  const sidebarProjects = scopes.filter((project) => !project.archivedAt);
+  const sidebarProjects = scopes
+    .filter((project) => !project.archivedAt)
+    .map((project) => ({
+      ...project,
+      repositories: project.repositories.filter(
+        (repository) => view === "archive" || !repository.archivedAt,
+      ),
+    }));
   const activeProject = query.project
     ? scopes.find((item) => item.id === query.project)
     : undefined;
@@ -6090,8 +6109,42 @@ export default function App() {
     return rows;
   }, [actionables, hierarchicalList, expandedParents]);
 
+  const selectionContext = `${view}?${searchFor(query)}`;
+  const selectedRows = visibleRows.filter(
+    (item) =>
+      bulkSelection.context === selectionContext &&
+      bulkSelection.ids.includes(item.id),
+  );
+  const visibleIds = visibleRows.map((item) => item.id).join(",");
+  useEffect(() => {
+    setBulkSelection((current) => ({
+      context: selectionContext,
+      ids:
+        current.context === selectionContext
+          ? current.ids.filter((id) =>
+              visibleRows.some((item) => item.id === id),
+            )
+          : [],
+    }));
+  }, [selectionContext, visibleIds]);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate =
+        selectedRows.length > 0 && selectedRows.length < visibleRows.length;
+    }
+  }, [selectedRows.length, visibleRows.length]);
+
+  const openBulk = (action: BulkAction) => {
+    bulkReturnFocus.current = document.activeElement as HTMLElement;
+    setBulkTargets({ action, items: selectedRows });
+  };
+
   const selectRow = (item: ActionableSummary) => {
-    replaceLocation("actionables", item.id, query);
+    replaceLocation(
+      view === "archive" ? "archive" : "actionables",
+      item.id,
+      query,
+    );
     setActiveTab("finding");
     setInspectorHidden(false);
     if (window.matchMedia("(max-width: 760px)").matches)
@@ -6253,7 +6306,13 @@ export default function App() {
 
   const closeArchive = () => {
     setArchiveTarget(null);
-    window.requestAnimationFrame(() => archiveReturnFocus.current?.focus());
+    window.requestAnimationFrame(() => {
+      if (archiveReturnFocus.current?.isConnected) {
+        archiveReturnFocus.current.focus();
+      } else {
+        searchInputRef.current?.focus();
+      }
+    });
   };
 
   const confirmArchive = async () => {
@@ -6269,12 +6328,20 @@ export default function App() {
         );
         queryClient.setQueryData(["actionable", saved.id], saved);
       } else {
-        await setScopeArchived(
+        const scopes = await setScopeArchived(
           archiveTarget.kind,
           archiveTarget.id,
           archiveTarget.version,
           !archiveTarget.archived,
         );
+        queryClient.setQueryData(["scopes"], scopes);
+        if (
+          archiveTarget.kind === "repository" &&
+          !archiveTarget.archived &&
+          query.repository === archiveTarget.id
+        ) {
+          patchQuery({ repository: "", worktree: "" });
+        }
       }
       setNotice(
         `${archiveTarget.name} ${archiveTarget.archived ? "restored" : "archived"}.`,
@@ -6551,11 +6618,11 @@ export default function App() {
                   <button
                     type="button"
                     className="repository-expander"
-                    aria-label={`${collapsedRepositories.has(repository.id) ? "Expand" : "Collapse"} repository ${repository.name}`}
-                    aria-expanded={!collapsedRepositories.has(repository.id)}
+                    aria-label={`${expandedRepositories.has(repository.id) ? "Collapse" : "Expand"} repository ${repository.name}`}
+                    aria-expanded={expandedRepositories.has(repository.id)}
                     aria-controls={`repository-worktrees-${repository.id}`}
                     onClick={() =>
-                      setCollapsedRepositories((current) => {
+                      setExpandedRepositories((current) => {
                         const next = new Set(current);
                         if (next.has(repository.id)) next.delete(repository.id);
                         else next.add(repository.id);
@@ -6563,10 +6630,10 @@ export default function App() {
                       })
                     }
                   >
-                    {collapsedRepositories.has(repository.id) ? (
-                      <ChevronRight aria-hidden="true" />
-                    ) : (
+                    {expandedRepositories.has(repository.id) ? (
                       <ChevronDown aria-hidden="true" />
+                    ) : (
+                      <ChevronRight aria-hidden="true" />
                     )}
                   </button>
                   <button
@@ -6584,17 +6651,31 @@ export default function App() {
                           repository: repository.id,
                           worktree: "",
                         },
-                        "actionables",
+                        view === "archive" ? "archive" : "actionables",
                       )
                     }
                   >
                     <span>{repository.name}</span>
                     {repository.archivedAt && <Archive aria-label="Archived" />}
                   </button>
+                  <IconButton
+                    label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
+                    onClick={() =>
+                      openArchive(
+                        "repository",
+                        repository.id,
+                        repository.name,
+                        repository.version,
+                        Boolean(repository.archivedAt),
+                      )
+                    }
+                  >
+                    {repository.archivedAt ? <ArchiveRestore /> : <Archive />}
+                  </IconButton>
                 </div>
                 <div
                   id={`repository-worktrees-${repository.id}`}
-                  hidden={collapsedRepositories.has(repository.id)}
+                  hidden={!expandedRepositories.has(repository.id)}
                 >
                   {repository.worktrees.map((worktree) => (
                     <div className="scope-action-row" key={worktree.id}>
@@ -6615,7 +6696,7 @@ export default function App() {
                               repository: repository.id,
                               worktree: worktree.id,
                             },
-                            "actionables",
+                            view === "archive" ? "archive" : "actionables",
                           )
                         }
                       />
@@ -7252,15 +7333,69 @@ export default function App() {
             </div>
           )}
           <div
-            className="findings-table"
+            className={`findings-table ${selectedRows.length ? "has-selection" : ""}`}
             role="table"
             aria-label="Actionable findings"
           >
+            {selectedRows.length > 0 && (
+              <div className="bulk-toolbar" role="row">
+                <div role="cell">
+                  <span role="status">{selectedRows.length} selected</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBulkSelection({ context: selectionContext, ids: [] })
+                    }
+                  >
+                    Clear selection
+                  </button>
+                  <button type="button" onClick={() => openBulk("dismiss")}>
+                    Dismiss selected
+                  </button>
+                  <button type="button" onClick={() => openBulk("edit")}>
+                    Edit selected
+                  </button>
+                  {selectedRows.some(
+                    (item) => !item.archiveState.isArchived,
+                  ) && (
+                    <button type="button" onClick={() => openBulk("archive")}>
+                      Archive selected
+                    </button>
+                  )}
+                  {selectedRows.some(
+                    (item) => item.archiveState.isArchived,
+                  ) && (
+                    <button type="button" onClick={() => openBulk("restore")}>
+                      Restore selected
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="table-header table-grid" role="row">
               <div
                 role="columnheader"
                 aria-sort={activeSort === "title" ? "ascending" : undefined}
               >
+                <input
+                  ref={selectAllRef}
+                  className="row-checkbox"
+                  type="checkbox"
+                  aria-label="Select all shown Actionables"
+                  checked={
+                    visibleRows.length > 0 &&
+                    selectedRows.length === visibleRows.length
+                  }
+                  disabled={!visibleRows.length}
+                  onChange={(event) =>
+                    setBulkSelection({
+                      context: selectionContext,
+                      ids: event.target.checked
+                        ? visibleRows.map((item) => item.id)
+                        : [],
+                    })
+                  }
+                />
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "title" })}
@@ -7388,6 +7523,27 @@ export default function App() {
                     }}
                   >
                     <div className="finding-cell" role="cell">
+                      <input
+                        type="checkbox"
+                        className="row-checkbox"
+                        aria-label={`Select #${item.id} ${item.title}`}
+                        checked={selectedRows.some(
+                          (selected) => selected.id === item.id,
+                        )}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const ids = selectedRows.map(
+                            (selected) => selected.id,
+                          );
+                          setBulkSelection({
+                            context: selectionContext,
+                            ids: event.target.checked
+                              ? [...ids, item.id]
+                              : ids.filter((id) => id !== item.id),
+                          });
+                        }}
+                      />
                       {item.childIds?.length && hierarchicalList ? (
                         <button
                           type="button"
@@ -7656,10 +7812,31 @@ export default function App() {
           onCreated={handleRepositoryCreated}
         />
       )}
+      {bulkTargets && (
+        <BulkActionsDialog
+          action={bulkTargets.action}
+          targets={bulkTargets.items}
+          onApplied={async (succeededIds) => {
+            setBulkSelection((current) => ({
+              ...current,
+              ids: current.ids.filter((id) => !succeededIds.includes(id)),
+            }));
+            await invalidateDailyUse();
+          }}
+          onClose={() => {
+            setBulkTargets(null);
+            window.requestAnimationFrame(() => {
+              if (bulkReturnFocus.current?.isConnected)
+                bulkReturnFocus.current.focus();
+              else selectAllRef.current?.focus();
+            });
+          }}
+        />
+      )}
       {archiveTarget && (
         <ArchiveDialog
           target={archiveTarget}
-          impact={impactQuery.data}
+          impact={impactQuery.isError ? undefined : impactQuery.data}
           pending={impactQuery.isPending}
           saving={archiveSaving}
           error={

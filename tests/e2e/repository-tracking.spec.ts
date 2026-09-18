@@ -151,13 +151,15 @@ test("adds an additional repository and makes it immediately selectable", async 
   await expect(
     page.getByRole("button", { name: repositoryName, exact: true }),
   ).toBeVisible();
+  const repository = page.locator(".repository-group").filter({
+    has: page.getByRole("button", { name: repositoryName, exact: true }),
+  });
+  await expect(repository.locator(".worktree-row")).toBeHidden();
+  await repository
+    .getByRole("button", { name: `Expand repository ${repositoryName}` })
+    .click();
   await expect(
-    page
-      .locator(".repository-group")
-      .filter({
-        has: page.getByRole("button", { name: repositoryName, exact: true }),
-      })
-      .getByRole("button", { name: /^Default/ }),
+    repository.getByRole("button", { name: /^Default/ }),
   ).toBeVisible();
   await expect(page).toHaveURL(/repository=/);
   await expect(page).toHaveURL(/worktree=/);

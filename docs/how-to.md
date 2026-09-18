@@ -9,6 +9,7 @@ to Codex.
 
 - [Run Actionables and connect Codex](#run-actionables-and-connect-codex)
 - [Navigate the dashboard](#navigate-the-dashboard)
+- [Select multiple Actionables](#select-multiple-actionables)
 - [Manage repositories and projects](#manage-repositories-and-projects)
 - [Organize subtasks](#organize-subtasks)
 - [Work-item progress](#work-item-progress)
@@ -35,17 +36,68 @@ through the [Windows setup guide](windows-setup.md#optional-codex-instructions-a
 
 ## Navigate the dashboard
 
-The sidebar lists repositories with their branches/worktrees underneath. Each
-repository can be expanded or collapsed independently. Project scopes remain
-available through the top-bar selector and repository setup. Choosing
+The sidebar lists repositories with their branches/worktrees underneath.
+Repositories start collapsed on each page load and can be expanded or collapsed
+independently. Project scopes remain available through the top-bar selector and
+repository setup. Choosing
 **Actionables** clears the project, repository, and worktree filters while
 preserving other filters; the existing **Done** shortcut still returns to active
 work when you choose **Actionables**. **Settings** is at the bottom of the
-sidebar and remains available in its collapsed navigation rail. Repository
-archive actions are no longer shown in the sidebar; scope archival through the
-API is unchanged.
+sidebar and remains available in its collapsed navigation rail.
+
+## Select multiple Actionables
+
+Use the row checkboxes to select items independently of the open inspector.
+**Select all shown Actionables** selects only visible, loaded rows, including
+expanded children. It never selects hidden descendants or another page. The
+header checkbox shows a mixed state for a partial selection. **Clear selection**
+clears it; changing filters, sorting, scope or view also clears it, and collapsing
+a branch removes its hidden selections.
+
+Choose **Dismiss selected**, review the selected IDs, eligibility and relationship
+impacts, then enter one required reason and confirm. Terminal and archived items
+are excluded. Only explicitly selected eligible items change; unselected subtasks
+stay unchanged. Dismissal is not completion. Each change uses the same version
+checks and activity history as individual dismissal. Existing agent claims remain
+unchanged by this human action.
+
+Use **Archive selected** to review the existing per-item hierarchy and dependency
+warnings before hiding items. Use **Restore selected** in Archive to bring directly
+archived items back. Each action lists eligible and excluded targets before
+confirmation and preserves workflow status, content and relationships. An item
+hidden by an archived project, repository or worktree cannot be restored here;
+restore its archived scope separately first. Neither action automatically changes
+an unselected task or scope. A selection containing both active and archived items
+offers both actions and explains which items each action excludes.
+
+Choose **Edit selected** to set a common priority or effort, or add/remove tags.
+Select the field and value, review each before/after value, then confirm. Each
+update uses that item's current detail and version, preserving its other fields,
+sources, workflow, scope, claims and relationships. Metadata edits retain the
+same behavior for terminal and archived items as individual edits.
+
+Separate tags with commas. Tag matching ignores case and retains existing
+spelling; additions do not introduce duplicates and removals preserve unrelated
+tags. Tags must be nonblank and at most 60 characters, with at most 30 resulting
+tags per item. Items needing no change or exceeding a limit are excluded without
+a write. A concurrent edit requires **Review remaining** before retrying so its
+new content is preserved.
+
+The dialog reports each success, exclusion and failure. Successful items leave
+the selection; remaining visible items stay selected. **Review remaining** loads
+current details before another confirmation. Interrupted responses are read back
+before retry, and confirmed successes are never submitted again. Canceling before
+confirmation performs no writes; an executing batch must finish before closing.
 
 ## Manage repositories and projects
+
+To remove a repository from active navigation, use its **Archive repository**
+button in **Repositories**, review the affected work, and confirm. The repository
+and its worktrees disappear from the active sidebar and remain hidden after
+refresh. If that repository was selected, its repository/worktree filters clear;
+the project and other filters remain. Open **Archive** to find the repository and
+use **Restore repository** to bring it back. Archiving preserves Actionables,
+relationships, workflow status, history, and all local repository files.
 
 Manage existing repository assignments under **Settings → Repository projects**.
 Choose another active project or **No project**, then **Save assignment**.
