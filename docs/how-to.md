@@ -47,12 +47,18 @@ sidebar and remains available in its collapsed navigation rail.
 
 ## Select multiple Actionables
 
-Use the row checkboxes to select items independently of the open inspector.
-**Select all shown Actionables** selects only visible, loaded rows, including
-expanded children. It never selects hidden descendants or another page. The
-header checkbox shows a mixed state for a partial selection. **Clear selection**
-clears it; changing filters, sorting, scope or view also clears it, and collapsing
-a branch removes its hidden selections.
+Click a row to select it and open the inspector. **Ctrl-click** (or **Cmd-click**)
+adds or removes a row without opening it. **Shift-click** selects the visible
+range from the last selection anchor; **Ctrl/Cmd+Shift-click** adds that range to
+the selection. Selected rows are highlighted; no checkboxes are shown.
+
+With a row focused, **Space** toggles it, **Shift+Up/Down** extends the range,
+**Ctrl/Cmd+A** selects all shown rows, and **Escape** clears selection. **Enter**
+opens a row without changing the selection. The toolbar also offers **Select all
+shown** and **Clear selection**.
+Only visible, loaded rows are selected, including expanded children, never hidden
+descendants or another page. Changing filters, sorting, scope or view clears the
+selection and range anchor; collapsing a branch removes its hidden selections.
 
 Choose **Dismiss selected**, review the selected IDs, eligibility and relationship
 impacts, then enter one required reason and confirm. Terminal and archived items

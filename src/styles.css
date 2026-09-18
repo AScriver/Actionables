@@ -660,6 +660,7 @@ button {
 
 .primary-action,
 .toolbar-button,
+.bulk-toolbar button,
 .icon-button {
   display: inline-flex;
   align-items: center;
@@ -677,6 +678,7 @@ button {
 
 .primary-action:hover,
 .toolbar-button:hover,
+.bulk-toolbar button:hover,
 .icon-button:hover {
   background: var(--surface-hover);
   border-color: #3a4650;
@@ -960,13 +962,18 @@ button {
 }
 
 .finding-row:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  outline: 2px solid var(--text-strong);
+  outline-offset: -3px;
 }
 
 .finding-row.is-selected {
   z-index: 2;
   background: var(--surface-selected);
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.finding-row.is-inspected:not(.is-selected) {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .finding-row > div {
@@ -979,14 +986,6 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.row-checkbox {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 .findings-table.has-selection {

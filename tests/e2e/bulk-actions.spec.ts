@@ -82,87 +82,198 @@ async function attach(
   expect(response.ok()).toBe(true);
 }
 
-function checkbox(page: Page, item: { id: number; title: string }) {
-  return page.getByRole("checkbox", {
-    name: `Select #${item.id} ${item.title}`,
-    exact: true,
-  });
+function row(page: Page, item: { id: number }) {
+  return page.locator(`[data-actionable-id="${item.id}"]`);
 }
 
-test("selection stays visible, supports keyboard, and leaves row opening independent", async ({
+async function selectAllShown(page: Page) {
+  await page.locator(".finding-row").first().press("Control+a");
+}
+
+test("row modifiers toggle, replace and extend visible ranges without opening rows", async ({
   page,
 }) => {
-  const tag = `selection-${randomUUID()}`;
-  const parent = await create(page, `${tag} parent`, [tag]);
-  const child = await create(page, `${tag} child`, [tag]);
-  const other = await create(page, `${tag} other`, [tag]);
+  const prefix = `modifiers-${randomUUID()}`;
+  const items = [];
+  for (let index = 0; index < 5; index++)
+    items.push(await create(page, `${prefix} ${index}`));
+  await page.goto(`/?q=${prefix}&sort=title`);
+  const selected = page.locator('.finding-row[aria-selected="true"]');
+  await expect(page.getByRole("table").getByRole("checkbox")).toHaveCount(0);
+  await row(page, items[0]).locator(".finding-title").click();
+  const opened = page.url();
+  await expect(selected).toHaveCount(1);
+  await row(page, items[4])
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
+  await expect(selected).toHaveCount(2);
+  await expect(page).toHaveURL(opened);
+  await row(page, items[2])
+    .locator(".finding-title")
+    .click({ modifiers: ["Shift"] });
+  await expect(selected).toHaveCount(3);
+  await expect(row(page, items[0])).toHaveAttribute("aria-selected", "false");
+  await row(page, items[3])
+    .locator(".finding-title")
+    .click({ modifiers: ["Shift"] });
+  await expect(selected).toHaveCount(2);
+  await expect(row(page, items[2])).toHaveAttribute("aria-selected", "false");
+  await row(page, items[0])
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
+  await row(page, items[1])
+    .locator(".finding-title")
+    .click({ modifiers: ["Control", "Shift"] });
+  await expect(selected).toHaveCount(4);
+  await expect(row(page, items[2])).toHaveAttribute("aria-selected", "false");
+  await row(page, items[4])
+    .locator(".finding-title")
+    .click({ modifiers: ["Meta"] });
+  await expect(selected).toHaveCount(3);
+  await expect(row(page, items[4])).toHaveAttribute("aria-selected", "false");
+  await expect(page).toHaveURL(opened);
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
+  await page.screenshot({
+    path: "output/playwright/task528-modifier-selection.png",
+    fullPage: true,
+  });
+  expect(
+    (await new AxeBuilder({ page }).include(".findings-table").analyze())
+      .violations,
+  ).toEqual([]);
+  await row(page, items[1]).locator(".finding-title").click();
+  await expect(selected).toHaveCount(1);
+  await expect(page).toHaveURL(new RegExp(`/actionables/${items[1].id}`));
+});
+
+test("keyboard selection toggles, extends ranges, selects shown rows and clears", async ({
+  page,
+}) => {
+  const prefix = `selection-keys-${randomUUID()}`;
+  const items = [];
+  for (let index = 0; index < 3; index++)
+    items.push(await create(page, `${prefix} ${index}`));
+  await page.goto(`/?q=${prefix}&sort=title`);
+  const selected = page.locator('.finding-row[aria-selected="true"]');
+  await row(page, items[0]).press("Space");
+  await expect(selected).toHaveCount(1);
+  await row(page, items[0]).press("Shift+ArrowDown");
+  await expect(selected).toHaveCount(2);
+  await expect(row(page, items[1])).toBeFocused();
+  await row(page, items[1]).press("Shift+ArrowUp");
+  await expect(selected).toHaveCount(1);
+  await row(page, items[0]).press("Control+ArrowDown");
+  await expect(selected).toHaveCount(1);
+  await expect(row(page, items[1])).toBeFocused();
+  await row(page, items[1]).press("Space");
+  await expect(selected).toHaveCount(2);
+  await row(page, items[1]).press("Meta+a");
+  await expect(selected).toHaveCount(3);
+  await row(page, items[1]).press("Escape");
+  await expect(selected).toHaveCount(0);
+  await selectAllShown(page);
+  await expect(selected).toHaveCount(3);
+  await page.getByRole("button", { name: "Clear selection" }).click();
+  await expect(selected).toHaveCount(0);
+  await row(page, items[0]).press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/actionables/${items[0].id}`));
+  await expect(selected).toHaveCount(0);
+  await row(page, items[0]).press("Shift+ArrowDown");
+  await expect(selected).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Select all shown", exact: true })
+    .click();
+  await expect(selected).toHaveCount(3);
+  const search = page.getByLabel("Search actionables");
+  await search.press("Control+a");
+  await expect(search).toHaveValue(prefix);
+  await expect(selected).toHaveCount(3);
+});
+
+test("selection and range anchors stay within visible rows and reset with context", async ({
+  page,
+}) => {
+  const prefix = `selection-${randomUUID()}`;
+  const parent = await create(page, `${prefix} parent`, [prefix]);
+  const child = await create(page, `${prefix} child`, [prefix]);
+  const other = await create(page, `${prefix} other`, [prefix]);
   await attach(page, child, parent);
   await page.goto("/");
-  await expect(checkbox(page, parent)).toBeVisible();
-  await expect(checkbox(page, child)).toHaveCount(0);
-  const all = page.getByRole("checkbox", {
-    name: "Select all shown Actionables",
-  });
-  await checkbox(page, parent).focus();
-  await page.keyboard.press("Space");
+  await expect(row(page, parent)).toBeVisible();
+  await expect(row(page, child)).toHaveCount(0);
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
-  await expect(all).toBeChecked({ indeterminate: true });
   await expect(page).not.toHaveURL(new RegExp(`/actionables/${parent.id}`));
-  await page.locator(`[data-actionable-id="${other.id}"]`).press("Enter");
+  await row(page, other).press("Enter");
   await expect(page).toHaveURL(new RegExp(`/actionables/${other.id}`));
-  await expect(checkbox(page, parent)).toBeChecked();
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "true");
   const shown = await page.locator(".finding-row").count();
-  await all.check();
+  await selectAllShown(page);
   await expect(
     page.getByText(`${shown} selected`, { exact: true }),
   ).toBeVisible();
-  await expect(checkbox(page, child)).toHaveCount(0);
+  await expect(row(page, child)).toHaveCount(0);
   await page.getByRole("button", { name: "Clear selection" }).click();
-  await checkbox(page, parent).check();
-  await checkbox(page, other).check();
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
+  await row(page, other)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: `Expand subtasks for ${parent.title}` })
     .click();
-  await checkbox(page, child).check();
+  await row(page, child)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await expect(page.getByText("3 selected", { exact: true })).toBeVisible();
   await page
     .getByRole("button", { name: `Collapse subtasks for ${parent.title}` })
     .click();
   await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
+  await row(page, other)
+    .locator(".finding-title")
+    .click({ modifiers: ["Shift"] });
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await page
-    .getByRole("button", { name: "Expand subtasks for " + parent.title })
+    .getByRole("button", { name: `Expand subtasks for ${parent.title}` })
     .click();
-  await expect(checkbox(page, child)).not.toBeChecked();
+  await expect(row(page, child)).toHaveAttribute("aria-selected", "false");
   await page.getByRole("button", { name: "Clear selection" }).click();
-  await expect(all).not.toBeChecked();
-  await checkbox(page, parent).check();
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page.getByLabel("Search actionables").fill(other.title);
-  await expect(checkbox(page, parent)).toHaveCount(0);
+  await expect(row(page, parent)).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Dismiss selected", exact: true }),
   ).toHaveCount(0);
+  await row(page, other)
+    .locator(".finding-title")
+    .click({ modifiers: ["Shift"] });
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await page.getByLabel("Search actionables").fill("");
-  await expect(checkbox(page, parent)).not.toBeChecked();
-  await checkbox(page, parent).check();
-  await page
-    .getByRole("columnheader")
-    .filter({ hasText: "Priority" })
-    .getByRole("button")
-    .click();
-  // Priority is the default; a real sort/context change uses Finding.
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("columnheader")
     .filter({ hasText: "Finding" })
     .getByRole("button")
     .click();
-  await expect(checkbox(page, parent)).not.toBeChecked();
-  await checkbox(page, parent).check();
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Clear selection" }),
   ).toHaveCount(0);
   await page.goBack();
-  await expect(checkbox(page, parent)).not.toBeChecked();
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
 });
 
 test("dismissal confirms selected items, preserves unselected descendants and claims, and audits every reason", async ({
@@ -191,7 +302,9 @@ test("dismissal confirms selected items, preserves unselected descendants and cl
   }
   await page.goto(`/?q=${prefix}&status=all`);
   for (const item of [parent, child, terminal])
-    await checkbox(page, item).check();
+    await row(page, item)
+      .locator(".finding-title")
+      .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
@@ -246,7 +359,7 @@ test("dismissal confirms selected items, preserves unselected descendants and cl
   expect((await detail(page, untouched.id)).status).toBe("Inbox");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
-  await expect(checkbox(page, parent)).not.toBeChecked();
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
 });
 
 test("partial failure and stale versions require fresh review without replaying successes", async ({
@@ -256,9 +369,7 @@ test("partial failure and stale versions require fresh review without replaying 
   const first = await create(page, `${prefix} first`);
   const stale = await create(page, `${prefix} stale`);
   await page.goto(`/?q=${prefix}&status=all`);
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
@@ -305,8 +416,10 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
       await route.abort("failed");
     },
   );
-  await page.goto(`/?q=${prefix}&status=all`);
-  await checkbox(page, item).check();
+  await page.goto(`/?q=${prefix}`);
+  await row(page, item)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
@@ -335,6 +448,9 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
       (event) => event.type === "dismissed",
     ),
   ).toHaveLength(1);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.locator(".finding-row")).toHaveCount(0);
+  await expect(page.getByLabel("Search actionables")).toBeFocused();
 });
 
 test("unavailable readback stays uncertain until refreshed and never repeats the saved action", async ({
@@ -358,7 +474,9 @@ test("unavailable readback stays uncertain until refreshed and never repeats the
     },
   );
   await page.goto(`/?q=${item.title}&status=all`);
-  await checkbox(page, item).check();
+  await row(page, item)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
@@ -406,8 +524,12 @@ test("bulk archive and restore preserve parent/child content, status and relatio
   ).toBe(true);
   const before = [await detail(page, parent.id), await detail(page, child.id)];
   await page.goto(`/?q=${prefix}&status=all`);
-  await checkbox(page, parent).check();
-  await checkbox(page, child).check();
+  await row(page, parent)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
+  await row(page, child)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Archive selected", exact: true })
     .click();
@@ -436,7 +558,7 @@ test("bulk archive and restore preserve parent/child content, status and relatio
     "2 succeeded",
   );
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(checkbox(page, parent)).toHaveCount(0);
+  await expect(row(page, parent)).toHaveCount(0);
   expect((await detail(page, untouched.id)).archiveState.directlyArchived).toBe(
     false,
   );
@@ -448,10 +570,8 @@ test("bulk archive and restore preserve parent/child content, status and relatio
     expect((await route.fetch()).ok()).toBe(true);
     await route.abort("failed");
   });
-  await expect(checkbox(page, parent)).toBeVisible();
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await expect(row(page, parent)).toBeVisible();
+  await selectAllShown(page);
   await page.locator(`[data-actionable-id="${parent.id}"]`).press("Enter");
   await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
   await page
@@ -539,9 +659,7 @@ test("bulk restore excludes inherited archive states without restoring scopes", 
     ).ok(),
   ).toBe(true);
   await page.goto(`/?q=${prefix}&archived=all&status=all`);
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await expect(page.getByText("4 selected", { exact: true })).toBeVisible();
   await page
     .getByRole("button", { name: "Restore selected", exact: true })
@@ -593,9 +711,7 @@ test("archive handles stale and interrupted writes without repeating successful 
     },
   );
   await page.goto(`/?q=${prefix}&status=all`);
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Archive selected", exact: true })
     .click();
@@ -644,7 +760,9 @@ test("archive impact failures and mismatched versions must be reviewed before wr
     await route.continue();
   });
   await page.goto(`/?q=${item.title}`);
-  await checkbox(page, item).check();
+  await row(page, item)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Archive selected", exact: true })
     .click();
@@ -715,7 +833,10 @@ test("bulk priority and effort preserve each item's content, sources, status, sc
     ["priority", "Critical"],
     ["effort", "L"],
   ]) {
-    for (const item of before) await checkbox(page, item).check();
+    for (const item of before)
+      await row(page, item)
+        .locator(".finding-title")
+        .click({ modifiers: ["Control"] });
     await page
       .getByRole("button", { name: "Edit selected", exact: true })
       .click();
@@ -786,9 +907,7 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   await transition(page, full.id, "Dismissed");
   const fullBefore = await detail(page, full.id);
   await page.goto(`/?q=${prefix}&status=all`);
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Edit selected", exact: true })
     .click();
@@ -825,9 +944,7 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   ]);
   expect((await detail(page, full.id)).version).toBe(fullBefore.version);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Edit selected", exact: true })
     .click();
@@ -845,7 +962,9 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   });
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   const unchanged = await detail(page, first.id);
-  await checkbox(page, first).check();
+  await row(page, first)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Edit selected", exact: true })
     .click();
@@ -879,9 +998,7 @@ test("bulk metadata reconciles interrupted writes and preserves concurrent edits
     await route.abort("failed");
   });
   await page.goto(`/?q=${prefix}`);
-  await page
-    .getByRole("checkbox", { name: "Select all shown Actionables" })
-    .check();
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Edit selected", exact: true })
     .click();
@@ -929,7 +1046,9 @@ test("@a11y bulk controls remain usable on desktop and mobile", async ({
 }) => {
   const item = await create(page, `accessible-${randomUUID()}`);
   await page.goto(`/?q=${item.title}`);
-  await checkbox(page, item).check();
+  await row(page, item)
+    .locator(".finding-title")
+    .click({ modifiers: ["Control"] });
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     for (const button of await page.locator(".bulk-toolbar button").all()) {
@@ -968,4 +1087,16 @@ test("@a11y bulk controls remain usable on desktop and mobile", async ({
       ),
     ).toBe(true);
   }
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.getByRole("button", { name: "Shortcuts", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 844 });
+  const help = page.locator("#shortcut-help");
+  await expect(help).toContainText("Ctrl/Cmd-click");
+  const bounds = await help.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+  await page.screenshot({
+    path: "output/playwright/task528-selection-shortcuts-320.png",
+    fullPage: true,
+  });
 });

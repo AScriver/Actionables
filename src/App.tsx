@@ -5830,13 +5830,13 @@ export default function App() {
   const [bulkSelection, setBulkSelection] = useState<{
     context: string;
     ids: number[];
-  }>({ context: "", ids: [] });
+    anchor: number | null;
+  }>({ context: "", ids: [], anchor: null });
   const [bulkTargets, setBulkTargets] = useState<{
     action: BulkAction;
     items: ActionableSummary[];
   } | null>(null);
   const bulkReturnFocus = useRef<HTMLElement | null>(null);
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [archiveTarget, setArchiveTarget] =
     useState<ArchiveDialogTarget | null>(null);
@@ -6125,14 +6125,49 @@ export default function App() {
               visibleRows.some((item) => item.id === id),
             )
           : [],
+      anchor:
+        current.context === selectionContext &&
+        visibleRows.some((item) => item.id === current.anchor)
+          ? current.anchor
+          : null,
     }));
   }, [selectionContext, visibleIds]);
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate =
-        selectedRows.length > 0 && selectedRows.length < visibleRows.length;
+
+  const selectRows = (
+    item: ActionableSummary,
+    modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+    rangeAnchor = bulkSelection.anchor,
+  ) => {
+    const additive = modifiers.ctrlKey || modifiers.metaKey;
+    const previousIds = selectedRows.map((row) => row.id);
+    let ids = [item.id];
+    let anchor = item.id;
+    if (modifiers.shiftKey) {
+      const index = visibleRows.findIndex((row) => row.id === item.id);
+      let anchorIndex = visibleRows.findIndex((row) => row.id === rangeAnchor);
+      if (bulkSelection.context !== selectionContext || anchorIndex < 0)
+        anchorIndex = index;
+      // Keep the anchor stable so repeated Shift selection can grow or shrink.
+      anchor = visibleRows[anchorIndex].id;
+      const range = visibleRows
+        .slice(Math.min(index, anchorIndex), Math.max(index, anchorIndex) + 1)
+        .map((row) => row.id);
+      ids = additive ? [...new Set([...previousIds, ...range])] : range;
+    } else if (additive) {
+      ids = previousIds.includes(item.id)
+        ? previousIds.filter((id) => id !== item.id)
+        : [...previousIds, item.id];
     }
-  }, [selectedRows.length, visibleRows.length]);
+    setBulkSelection({ context: selectionContext, ids, anchor });
+  };
+
+  const selectAllShown = () => {
+    setBulkSelection({
+      context: selectionContext,
+      ids: visibleRows.map((item) => item.id),
+      anchor: visibleRows[0]?.id ?? null,
+    });
+  };
 
   const openBulk = (action: BulkAction) => {
     bulkReturnFocus.current = document.activeElement as HTMLElement;
@@ -7036,6 +7071,24 @@ export default function App() {
                 <span>
                   <kbd>c</kbd> create
                 </span>
+                <span>
+                  <kbd>Ctrl/Cmd-click</kbd> toggle row
+                </span>
+                <span>
+                  <kbd>Shift-click</kbd> range
+                </span>
+                <span>
+                  <kbd>Space</kbd> toggle row
+                </span>
+                <span>
+                  <kbd>Shift+↑/↓</kbd> range
+                </span>
+                <span>
+                  <kbd>Ctrl/Cmd+A</kbd> select shown
+                </span>
+                <span>
+                  <kbd>Esc</kbd> clear selection
+                </span>
               </div>
             )}
           </div>
@@ -7336,6 +7389,7 @@ export default function App() {
             className={`findings-table ${selectedRows.length ? "has-selection" : ""}`}
             role="table"
             aria-label="Actionable findings"
+            aria-describedby="row-selection-help"
           >
             {selectedRows.length > 0 && (
               <div className="bulk-toolbar" role="row">
@@ -7344,10 +7398,17 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() =>
-                      setBulkSelection({ context: selectionContext, ids: [] })
+                      setBulkSelection({
+                        context: selectionContext,
+                        ids: [],
+                        anchor: null,
+                      })
                     }
                   >
                     Clear selection
+                  </button>
+                  <button type="button" onClick={selectAllShown}>
+                    Select all shown
                   </button>
                   <button type="button" onClick={() => openBulk("dismiss")}>
                     Dismiss selected
@@ -7377,25 +7438,6 @@ export default function App() {
                 role="columnheader"
                 aria-sort={activeSort === "title" ? "ascending" : undefined}
               >
-                <input
-                  ref={selectAllRef}
-                  className="row-checkbox"
-                  type="checkbox"
-                  aria-label="Select all shown Actionables"
-                  checked={
-                    visibleRows.length > 0 &&
-                    selectedRows.length === visibleRows.length
-                  }
-                  disabled={!visibleRows.length}
-                  onChange={(event) =>
-                    setBulkSelection({
-                      context: selectionContext,
-                      ids: event.target.checked
-                        ? visibleRows.map((item) => item.id)
-                        : [],
-                    })
-                  }
-                />
                 <button
                   type="button"
                   onClick={() => patchQuery({ sort: "title" })}
@@ -7503,47 +7545,90 @@ export default function App() {
                 );
               }}
             >
-              {visibleRows.map((item) => {
-                const selectedRow = item.id === selectedId;
+              {visibleRows.map((item, index) => {
+                const selectedRow = selectedRows.some(
+                  (row) => row.id === item.id,
+                );
+                const inspected = item.id === selectedId;
                 const isChild = Boolean(item.parentId);
                 const expanded = expandedParents.has(item.id);
                 const guideClass = isChild ? "child-guide" : "row-spacer";
                 const indentation = { marginInlineStart: item.depth * 16 };
                 return (
                   <div
-                    className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${isChild ? "is-child" : ""}`}
+                    className={`finding-row table-grid ${selectedRow ? "is-selected" : ""} ${inspected ? "is-inspected" : ""} ${isChild ? "is-child" : ""}`}
                     role="row"
                     aria-selected={selectedRow}
+                    aria-current={inspected ? "true" : undefined}
+                    aria-describedby="row-selection-help"
                     tabIndex={0}
                     data-actionable-id={item.id}
                     key={item.id}
-                    onClick={() => selectRow(item)}
+                    onMouseDown={(event) => {
+                      if (
+                        event.shiftKey &&
+                        !(event.target as HTMLElement).closest("button, a")
+                      )
+                        event.preventDefault();
+                    }}
+                    onClick={(event) => {
+                      event.currentTarget.focus();
+                      selectRows(item, event);
+                      if (!event.ctrlKey && !event.metaKey && !event.shiftKey)
+                        selectRow(item);
+                    }}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") selectRow(item);
+                      if (event.target !== event.currentTarget) return;
+                      if (
+                        (event.ctrlKey || event.metaKey) &&
+                        event.key.toLowerCase() === "a"
+                      ) {
+                        event.preventDefault();
+                        selectAllShown();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setBulkSelection({
+                          context: selectionContext,
+                          ids: [],
+                          anchor: null,
+                        });
+                      } else if (event.key === "Enter") {
+                        event.preventDefault();
+                        selectRow(item);
+                      } else if (event.key === " ") {
+                        event.preventDefault();
+                        selectRows(item, {
+                          ctrlKey: !event.shiftKey || event.ctrlKey,
+                          metaKey: event.metaKey,
+                          shiftKey: event.shiftKey,
+                        });
+                      } else if (
+                        event.key === "ArrowUp" ||
+                        event.key === "ArrowDown"
+                      ) {
+                        event.preventDefault();
+                        const nextIndex =
+                          index + (event.key === "ArrowDown" ? 1 : -1);
+                        const next = visibleRows[nextIndex];
+                        if (!next) return;
+                        if (
+                          event.shiftKey ||
+                          (!event.ctrlKey && !event.metaKey)
+                        )
+                          selectRows(
+                            next,
+                            event,
+                            bulkSelection.anchor ?? item.id,
+                          );
+                        tableBodyRef.current
+                          ?.querySelector<HTMLElement>(
+                            `[data-actionable-id="${next.id}"]`,
+                          )
+                          ?.focus();
+                      }
                     }}
                   >
                     <div className="finding-cell" role="cell">
-                      <input
-                        type="checkbox"
-                        className="row-checkbox"
-                        aria-label={`Select #${item.id} ${item.title}`}
-                        checked={selectedRows.some(
-                          (selected) => selected.id === item.id,
-                        )}
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        onChange={(event) => {
-                          const ids = selectedRows.map(
-                            (selected) => selected.id,
-                          );
-                          setBulkSelection({
-                            context: selectionContext,
-                            ids: event.target.checked
-                              ? [...ids, item.id]
-                              : ids.filter((id) => id !== item.id),
-                          });
-                        }}
-                      />
                       {item.childIds?.length && hierarchicalList ? (
                         <button
                           type="button"
@@ -7689,6 +7774,12 @@ export default function App() {
             </div>
           </div>
           <footer className="table-footer">
+            <span id="row-selection-help" className="sr-only">
+              Ctrl or Command-click toggles a row. Shift-click selects a range.
+              Space toggles the focused row; Shift with arrow keys extends the
+              range. Ctrl or Command+A selects all shown rows. Escape clears
+              selection. Enter opens a row.
+            </span>
             <span>
               {visibleRows.length} visible rows ·{" "}
               {listQuery.data?.result.topLevel ?? 0} top-level ·{" "}
@@ -7820,6 +7911,10 @@ export default function App() {
             setBulkSelection((current) => ({
               ...current,
               ids: current.ids.filter((id) => !succeededIds.includes(id)),
+              anchor:
+                current.anchor !== null && succeededIds.includes(current.anchor)
+                  ? null
+                  : current.anchor,
             }));
             await invalidateDailyUse();
           }}
@@ -7828,7 +7923,13 @@ export default function App() {
             window.requestAnimationFrame(() => {
               if (bulkReturnFocus.current?.isConnected)
                 bulkReturnFocus.current.focus();
-              else selectAllRef.current?.focus();
+              else {
+                const row =
+                  tableBodyRef.current?.querySelector<HTMLElement>(
+                    ".finding-row",
+                  );
+                (row ?? searchInputRef.current)?.focus();
+              }
             });
           }}
         />
