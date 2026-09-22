@@ -6,6 +6,10 @@ import {
   defaultCodexImplementationPrompt,
   defaultCodexResearchPrompt,
   renderCodexStartPrompt,
+  renderCodexSubtaskPrompt,
+  eligibleCodexSubtasks,
+  type InspectAgentTaskResponse,
+  type ActionableDetail,
 } from "@actionables/contracts";
 
 const templates = {
@@ -22,6 +26,118 @@ const task = {
 };
 
 describe("Codex prompt templates", () => {
+  it("shows equally eligible leaves and waits to finalize nested parents until their children are terminal", () => {
+    const item = (
+      id: number,
+      overrides: Partial<InspectAgentTaskResponse["task"]> = {},
+    ) =>
+      ({
+        id,
+        workItemId: 534,
+        parentId: 534,
+        childCount: 0,
+        status: "Ready",
+        version: 1,
+        availableForClaim: true,
+        readiness: { requiredForReady: [], blockers: [] },
+        ...overrides,
+      }) as InspectAgentTaskResponse["task"];
+    const inventory = {
+      task: item(534, { parentId: null }),
+      nextAfterId: null,
+      descendants: [
+        item(536, { status: "Done", availableForClaim: false }),
+        item(537),
+        item(538),
+        item(539, { availableForClaim: false }),
+        item(540, { childCount: 1 }),
+        item(541, { parentId: 540 }),
+        item(542, { status: "Dismissed", availableForClaim: false }),
+      ],
+    };
+    expect(eligibleCodexSubtasks(inventory).map((task) => task.id)).toEqual([
+      537, 538, 541,
+    ]);
+    inventory.descendants[5] = item(541, {
+      parentId: 540,
+      status: "Done",
+      availableForClaim: false,
+    });
+    expect(eligibleCodexSubtasks(inventory).map((task) => task.id)).toEqual([
+      537, 538, 540,
+    ]);
+    inventory.task.availableForClaim = false;
+    expect(eligibleCodexSubtasks(inventory)).toEqual([]);
+  });
+
+  it("keeps next-child and sequential authorization explicit with root, scope and prerequisite references", () => {
+    const child = {
+      ...task,
+      id: 537,
+      workItemId: 534,
+      status: "Ready",
+      scope: {
+        projectName: "Dashboard",
+        repositoryName: "Actionables",
+        worktreeName: "Default",
+      },
+      relationships: {
+        subtasks: [],
+        blockedBy: [
+          {
+            prerequisite: {
+              id: 536,
+              title: "Completed prerequisite",
+              status: "Done",
+            },
+          },
+        ],
+      },
+    } as unknown as ActionableDetail;
+    const parent = { id: 535, workItemId: 534 };
+    const next = renderCodexSubtaskPrompt(parent, child, templates, "next")!;
+    expect(next).toContain("work item #534. Claim task #537");
+    expect(next).toContain(
+      "Scope: project Dashboard, repository Actionables, worktree Default.",
+    );
+    expect(next).toContain("#536 (Completed prerequisite)");
+    expect(next).toContain(
+      "only #537; do not start another child automatically",
+    );
+    const sequential = renderCodexSubtaskPrompt(
+      parent,
+      child,
+      templates,
+      "sequential",
+    )!;
+    expect(sequential).toContain(
+      "only within parent #535's subtree under original workItemId #534",
+    );
+    expect(sequential).toContain("before every claim");
+    expect(sequential).toContain("verify it is Done before starting the next");
+    expect(sequential).toContain(
+      "Stop for business decisions or required approvals",
+    );
+    expect(sequential).toContain(
+      "do not mark the parent Done merely because its children are terminal",
+    );
+    expect(
+      renderCodexSubtaskPrompt(
+        parent,
+        { ...child, status: "Done" },
+        templates,
+        "next",
+      ),
+    ).toBeNull();
+    expect(
+      renderCodexSubtaskPrompt(
+        { ...parent, workItemId: 1 },
+        child,
+        templates,
+        "next",
+      ),
+    ).toBeNull();
+  });
   it.each([
     ["Inbox", "begin the Researching phase"],
     ["Researching", "resume the Researching phase"],

@@ -48,6 +48,8 @@ import {
   minimumInboxTriageBatchSize,
   noteGroomerModels,
   renderCodexStartPrompt,
+  renderCodexSubtaskPrompt,
+  eligibleCodexSubtasks,
   type CreateActionableRequest,
   type CreateRepositoryResponse,
   type ActionableDetail,
@@ -98,6 +100,7 @@ import {
   fetchAgentIntegrationSettings,
   fetchArchiveImpact,
   fetchCodexWorkspace,
+  fetchCodexSubtasks,
   fetchDashboard,
   fetchHelperAgentSettings,
   fetchScopeOptions,
@@ -1731,6 +1734,196 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
   );
 }
 
+/** Prepare explicitly selected subtask work from freshly checked, read-only state. */
+function SubtaskPromptControls({
+  parent,
+  templates,
+  onNotice,
+}: {
+  parent: ActionableDetail;
+  templates: Pick<
+    HelperAgentSettings,
+    "codexResearchPrompt" | "codexImplementationPrompt"
+  >;
+  onNotice: (notice: string) => void;
+}) {
+  const [mode, setMode] = useState<"next" | "sequential">("next");
+  const [selectedId, setSelectedId] = useState("");
+  const [prepared, setPrepared] = useState<{
+    prompt: string;
+    url: string;
+    taskId: number;
+    version: number;
+  } | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState("");
+  const inventory = useQuery({
+    queryKey: ["codex-subtasks", parent.id, parent.version],
+    queryFn: () => fetchCodexSubtasks(parent.id),
+    staleTime: 0,
+  });
+  const candidates = inventory.data
+    ? eligibleCodexSubtasks(inventory.data)
+    : [];
+  let choice = selectedId;
+  if (!choice && candidates.length === 1) choice = String(candidates[0].id);
+  const prepare = async () => {
+    setPreparing(true);
+    setPrepared(null);
+    setError("");
+    try {
+      const fresh = await inventory.refetch();
+      if (fresh.error) throw fresh.error;
+      const candidate =
+        fresh.data &&
+        eligibleCodexSubtasks(fresh.data).find(
+          (task) => task.id === Number(choice),
+        );
+      if (!candidate)
+        throw new Error(
+          "This task is no longer eligible. Choose from the refreshed subtasks.",
+        );
+      const task = await fetchActionable(candidate.id);
+      if (task.version !== candidate.version)
+        throw new Error(
+          "This task changed. Refresh subtasks and prepare the prompt again.",
+        );
+      const prompt = renderCodexSubtaskPrompt(parent, task, templates, mode);
+      if (!prompt)
+        throw new Error("This task cannot start in its current state.");
+      let path = task.workspacePath;
+      if (task.projectRoot) path = (await fetchCodexWorkspace(task.id)).path;
+      setPrepared({
+        prompt,
+        url: buildCodexNewChatUrl(prompt, path),
+        taskId: task.id,
+        version: task.version,
+      });
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not prepare subtask work.",
+      );
+    } finally {
+      setPreparing(false);
+    }
+  };
+  return (
+    <div
+      className="agent-start-prompt subtask-start-prompt"
+      aria-label="Subtask prompts"
+    >
+      <strong>Work on subtasks</strong>
+      <label>
+        Subtask execution
+        <select
+          value={mode}
+          disabled={preparing}
+          onChange={(event) => {
+            setMode(event.target.value as "next" | "sequential");
+            setPrepared(null);
+          }}
+        >
+          <option value="next">Next task only</option>
+          <option value="sequential">All subtasks, one at a time</option>
+        </select>
+      </label>
+      <label>
+        First subtask
+        <select
+          value={choice}
+          disabled={preparing || inventory.isFetching}
+          onChange={(event) => {
+            setSelectedId(event.target.value);
+            setPrepared(null);
+            setError("");
+          }}
+        >
+          <option value="">Choose an eligible task</option>
+          {candidates.map((task) => (
+            <option key={task.id} value={task.id}>
+              #{task.id} · {task.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      {candidates.length > 1 && (
+        <p>These tasks are equally eligible; no dependency orders them.</p>
+      )}
+      {inventory.isFetching && (
+        <p role="status">Checking subtask eligibility…</p>
+      )}
+      {!inventory.isFetching &&
+        !inventory.isError &&
+        candidates.length === 0 && (
+          <p>
+            No eligible subtasks. Review blockers, claims and unfinished
+            descendants.
+          </p>
+        )}
+      {(error || inventory.isError) && (
+        <p role="alert">
+          {error || "Could not load subtasks. Refresh to try again."}
+        </p>
+      )}
+      <div className="agent-start-actions">
+        <button
+          type="button"
+          className="toolbar-button"
+          disabled={preparing || inventory.isFetching}
+          onClick={() => {
+            setPrepared(null);
+            setError("");
+            void inventory.refetch();
+          }}
+        >
+          Refresh subtasks
+        </button>
+        <button
+          type="button"
+          className="toolbar-button"
+          disabled={
+            !candidates.some((task) => task.id === Number(choice)) ||
+            preparing ||
+            inventory.isFetching
+          }
+          onClick={() => void prepare()}
+        >
+          {preparing ? "Preparing…" : "Prepare subtask prompt"}
+        </button>
+      </div>
+      {prepared &&
+        candidates.some(
+          (task) =>
+            task.id === prepared.taskId && task.version === prepared.version,
+        ) &&
+        !inventory.isFetching && (
+          <div className="agent-start-actions">
+            <a className="toolbar-button" href={prepared.url}>
+              Open subtask work in Codex
+            </a>
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={async () => {
+                if (await copyText(prepared.prompt))
+                  onNotice("Codex subtask prompt copied.");
+                else
+                  window.prompt(
+                    "Copy this Codex subtask prompt:",
+                    prepared.prompt,
+                  );
+              }}
+            >
+              Copy subtask prompt
+            </button>
+          </div>
+        )}
+    </div>
+  );
+}
+
 function AgentClaimPanel({
   selected,
   onNotice,
@@ -1881,6 +2074,17 @@ function AgentClaimPanel({
       {unavailableGuidance && (
         <p className="agent-start-guidance">{unavailableGuidance}</p>
       )}
+      {canRecommendPrompt &&
+        selected.relationships.subtasks.length > 0 &&
+        promptSettingsQuery.data &&
+        !promptSettingsQuery.isError && (
+          <SubtaskPromptControls
+            key={`${selected.id}:${selected.version}`}
+            parent={selected}
+            templates={promptSettingsQuery.data}
+            onNotice={onNotice}
+          />
+        )}
       {canRecommendPrompt && promptSettingsQuery.isPending && (
         <p className="agent-start-guidance" role="status">
           Loading Codex prompt settings…

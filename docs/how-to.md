@@ -219,6 +219,27 @@ confirm the recorded scope and move to `In progress` before editing. Claims
 prevent two Codex tasks from silently working the same item, while leases and
 handoffs make interrupted work visible.
 
+### Choose the next subtask or a sequence
+
+An eligible parent also shows **Work on subtasks**. Leave **Next task only**
+selected to authorize one child, or explicitly choose **All subtasks, one at a
+time**. Pick the first task when several are equally eligible; the list does
+not invent an order between independent tasks. Nested coordination tasks become
+eligible for finalization only after their children are terminal.
+
+**Prepare subtask prompt** refreshes eligibility and the selected task before
+offering **Open subtask work in Codex** and **Copy subtask prompt**. It preserves
+the original root, tracked workspace, validation boundaries and references to
+completed prerequisites. Preparation does not claim or change tasks. If work
+changed, choose from the refreshed list and prepare again. The ordinary parent
+prompt still coordinates and validates its subtree without executing children.
+
+Sequential prompts authorize only the selected parent's subtree, require fresh
+eligibility before each claim and completion/validation before the next task,
+and stop for blockers, business decisions or required approvals. They do not
+authorize separate deployment or live-operation gates, or automatically finish
+the parent's aggregate validation.
+
 ## Customize Codex start prompts
 
 Customize these prompts under **Settings → Codex start prompts**. Research and

@@ -213,7 +213,8 @@ function latestQualifyingValidationId(
   );
 }
 
-function archiveState(
+/** Project the existing direct and inherited archive state without changing it. */
+export function archiveState(
   row: Pick<
     ActionableRow,
     "archivedAt" | "project" | "repository" | "worktree"

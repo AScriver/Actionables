@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ActionableDetail, InspectAgentTaskResponse } from "./index.js";
 
 /** Literal substitutions supported by the two Codex start-prompt templates. */
 export const codexPromptVariables = {
@@ -50,7 +51,7 @@ export const codexPromptTemplateSchema = z
   });
 
 const truncationInstructions =
-  "Before treating the bounded detail as complete, inspect `task.truncation.reconciliationGuidance`. If it is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and claim token at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. On `VERSION_CONFLICT`, discard partial pages and restart from the current compact detail. Do not move the task forward or edit files until every named supported field has been reconciled; if guidance is absent, continue normally because any reported loss is noncritical to scope and planned validation.";
+  "Inspect `task.truncation.reconciliationGuidance`. When present, read `actionables.get_task_context` using the compact version and claim token; start at offset 0, then pass `contentHash` with each `nextOffset` until complete. Native values and labeled text chunks need no JSON reconstruction. Older servers retain `get_task_detail` field paging. On version or claim failure discard partial content and reconcile. Do not advance or edit until critical scope and validation fields are complete.";
 const composedToolInstructions =
   "After every Actionables MCP call in a composed sequence, inspect `isError`; if it is true, stop before reading success fields or issuing dependent mutations, preserve the structured error, and follow its recovery guidance.";
 const readinessInstructions =
@@ -116,4 +117,47 @@ export function renderCodexStartPrompt(
     variablePattern,
     (_, variable: keyof typeof values) => values[variable],
   );
+}
+
+/** Choose eligible leaves or coordination tasks whose complete direct-child inventory is terminal. */
+export function eligibleCodexSubtasks(inventory: InspectAgentTaskResponse) {
+  if (!inventory.task.availableForClaim) return [];
+  return inventory.descendants.filter((task) => {
+    if (
+      !task.availableForClaim ||
+      (task.status === "Ready" && task.readiness.requiredForReady.length > 0)
+    )
+      return false;
+    const children = inventory.descendants.filter(
+      (child) => child.parentId === task.id,
+    );
+    return (
+      children.length === task.childCount &&
+      children.every(
+        (child) => child.status === "Done" || child.status === "Dismissed",
+      )
+    );
+  });
+}
+
+/** Render an explicitly authorized next-child or sequential-subtree prompt without changing tasks. */
+export function renderCodexSubtaskPrompt(
+  parent: { id: number; workItemId: number },
+  task: ActionableDetail,
+  templates: Parameters<typeof renderCodexStartPrompt>[1],
+  mode: "next" | "sequential",
+) {
+  const start = renderCodexStartPrompt(task, templates);
+  if (!start || task.workItemId !== parent.workItemId || task.id === parent.id)
+    return null;
+  const references = task.relationships.blockedBy
+    .filter((edge) => edge.prerequisite.status === "Done")
+    .map((edge) => `#${edge.prerequisite.id} (${edge.prerequisite.title})`);
+  const scope = `Scope: project ${task.scope.projectName}, repository ${task.scope.repositoryName}, worktree ${task.scope.worktreeName}.`;
+  let prompt = `${scope} This selection was eligible when prepared; inspect #${task.id} and recheck eligibility, ownership and version immediately before claiming. ${start}`;
+  if (references.length)
+    prompt += ` Completed prerequisite references: ${references.join("; ")}. Inspect each referenced ID to resolve its root, then read its research and Resolution with actionables.get_task_history; verify conclusions against current code before relying on them.`;
+  if (mode === "next")
+    return `${prompt} Authorization covers only #${task.id}; do not start another child automatically. Preserve every recorded approval and business-decision boundary.`;
+  return `${prompt} The user explicitly authorizes sequential work only within parent #${parent.id}'s subtree under original workItemId #${parent.workItemId}. Start with #${task.id}. Finish and validate one child, save Resolution and qualifying evidence, and verify it is Done before starting the next. Re-read the complete subtree inventory and recorded dependencies before every claim; skip terminal, archived, blocked or live-claimed tasks. Work on eligible leaves first and finalize nested coordination tasks only when their descendants are terminal. If several tasks are equally eligible, choose one within this authorized subtree without inventing a dependency or claiming several at once. Continue between tasks without asking for a restart. When unfinished work has no eligible task, record the unresolved blocker and stop. Stop for business decisions or required approvals; this authorization does not grant deployment, live writes or any other separately gated action. Preserve existing task boundaries. Once all descendants are terminal, report the parent ready for its own aggregate validation; do not mark the parent Done merely because its children are terminal.`;
 }

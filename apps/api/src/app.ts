@@ -84,6 +84,7 @@ import {
 import { registerMcpRoutes } from "./mcp.js";
 import {
   AgentTaskClaimError,
+  inspectAgentTask,
   AgentClaimReleaseConflictError,
   forceReleaseAgentTaskClaim,
 } from "./agent-tasks.js";
@@ -680,6 +681,37 @@ export function buildApp({
           "Actionable not found.",
         );
       return codexWorkspaceResponseSchema.parse(workspace);
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { afterId?: string } }>(
+    "/api/actionables/:id/codex-subtasks",
+    async (request, reply) => {
+      const id = parseRouteId(request, reply, request.params.id);
+      if (id === null) return;
+      const afterId =
+        request.query.afterId === undefined
+          ? undefined
+          : Number(request.query.afterId);
+      if (
+        afterId !== undefined &&
+        (!Number.isSafeInteger(afterId) || afterId < 1)
+      )
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Use a returned positive afterId.",
+        );
+      reply.header("Cache-Control", "no-store");
+      return inspectAgentTask(prisma, {
+        id,
+        includeDescendants: true,
+        includeArchived: true,
+        limit: 100,
+        afterId,
+      });
     },
   );
 

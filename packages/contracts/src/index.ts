@@ -787,6 +787,73 @@ export const agentTaskWorkItemStateSchema = z
   })
   .strict();
 
+export const inspectAgentTaskRequestSchema = z
+  .object({
+    id: z
+      .number()
+      .int()
+      .positive()
+      .describe("Explicit public task ID; may be a child."),
+    includeDescendants: z
+      .boolean()
+      .default(false)
+      .describe("Include only this task's descendants, never its siblings."),
+    includeArchived: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Explicitly include archived tasks and scopes without restoring them.",
+      ),
+    afterId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Continue descendants after nextAfterId with the same inspection options.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(25)
+      .describe("Maximum descendants per page, from 1 through 100."),
+  })
+  .strict()
+  .refine((input) => input.includeDescendants || input.afterId === undefined, {
+    path: ["afterId"],
+    message: "Pagination requires includeDescendants.",
+  });
+
+export const inspectedAgentTaskSchema = agentTaskSummarySchema.extend({
+  archiveState: archiveStateSchema,
+  blockedByIds: z.array(z.number().int().positive()).max(100),
+  manualBlockerExcerpt: z.string().max(300),
+  availableForClaim: z.boolean(),
+  unavailableReasons: z
+    .array(
+      z.enum([
+        "archived",
+        "terminal",
+        "work_item_terminal",
+        "manual_blocker",
+        "dependency",
+        "claimed",
+      ]),
+    )
+    .max(6),
+  permittedTransitions: z.array(statusSchema).max(8),
+});
+
+export const inspectAgentTaskResponseSchema = z
+  .object({
+    task: inspectedAgentTaskSchema,
+    descendants: z.array(inspectedAgentTaskSchema).max(100),
+    nextAfterId: z.number().int().positive().nullable(),
+  })
+  .strict();
+
 export const listAgentTasksRequestSchema = z
   .object({
     agentId: agentIdSchema,
@@ -1557,6 +1624,40 @@ const handoffValidationSchema = recordClaimedAgentTaskValidationRequestSchema
   .omit({ claimToken: true, version: true })
   .describe("Optional actual validation result to record before release.");
 
+export const completeClaimedAgentTaskRequestSchema = z
+  .object({
+    ...claimedAgentMutationFields,
+    idempotencyKey: z
+      .uuid()
+      .describe(
+        "Caller-stable UUID for this completion; reuse only for an identical retry.",
+      ),
+    resolution: markdownField
+      .min(1)
+      .describe(
+        "Completed changes and important decisions; does not replace parent acceptance checks.",
+      ),
+    validation: handoffValidationSchema
+      .optional()
+      .describe(
+        "Optional actual Passed result to save atomically; otherwise existing current qualifying validation is required.",
+      ),
+  })
+  .strict();
+export const agentTaskCompletionReceiptSchema = z
+  .object({
+    id: z.number().int().positive(),
+    workItemId: z.number().int().positive(),
+    version: z.number().int().positive(),
+    status: z.literal("Done"),
+    claimReleased: z.literal(true),
+    resolutionSaved: z.literal(true),
+    qualifyingValidationRecordId: z.string().min(1),
+    recordedValidationId: z.string().min(1).nullable(),
+    replayed: z.boolean(),
+  })
+  .strict();
+
 export const handoffClaimedAgentTaskRequestSchema = z
   .object({
     ...claimedAgentMutationFields,
@@ -1819,6 +1920,82 @@ export const dependencyActionRequestSchema = z
     version: z.number().int().positive(),
     prerequisiteVersion: z.number().int().positive(),
     reason: z.string().trim().max(10_000).optional(),
+  })
+  .strict();
+
+export const createAgentDependencyRequestSchema = z
+  .object({
+    id: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Claimed coordinator task; both endpoints must be in its subtree, including itself.",
+      ),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Original top-level work item containing the coordinator and endpoints.",
+      ),
+    claimToken: releaseAgentTaskClaimRequestSchema.shape.claimToken,
+    version: agentTaskVersionInputSchema.describe(
+      "Current version of the claimed coordinator.",
+    ),
+    dependentId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Task blocked by the prerequisite."),
+    dependentVersion: agentTaskVersionInputSchema.describe(
+      "Current dependent version from inspection or the last relationship receipt.",
+    ),
+    prerequisiteId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Task that must finish first."),
+    prerequisiteVersion: agentTaskVersionInputSchema.describe(
+      "Current prerequisite version from inspection or the last relationship receipt.",
+    ),
+  })
+  .strict();
+export const removeAgentDependencyRequestSchema =
+  createAgentDependencyRequestSchema.extend({
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .max(10_000)
+      .describe("Required explanation for removing this confirmed dependency."),
+  });
+export const agentDependencyReceiptSchema = z
+  .object({
+    id: z.number().int().positive(),
+    version: z.number().int().positive(),
+    relationshipId: z.string().min(1),
+    removed: z.boolean(),
+    dependent: z
+      .object({
+        id: z.number().int().positive(),
+        version: z.number().int().positive(),
+        unresolvedDependencyCount: z.number().int().nonnegative(),
+      })
+      .strict(),
+    prerequisite: z
+      .object({
+        id: z.number().int().positive(),
+        version: z.number().int().positive(),
+        status: statusSchema,
+      })
+      .strict(),
+    claimLease: z
+      .object({
+        renewedAt: z.string().datetime(),
+        leaseExpiresAt: z.string().datetime(),
+      })
+      .strict(),
   })
   .strict();
 
@@ -2838,6 +3015,27 @@ export type RepositoryFolderPickerResponse = z.infer<
 export type ActionableQuery = z.infer<typeof actionableQuerySchema>;
 export type DashboardResponse = z.infer<typeof dashboardResponseSchema>;
 export type AgentTaskSummary = z.infer<typeof agentTaskSummarySchema>;
+export type CompleteClaimedAgentTaskRequest = z.infer<
+  typeof completeClaimedAgentTaskRequestSchema
+>;
+export type AgentTaskCompletionReceipt = z.infer<
+  typeof agentTaskCompletionReceiptSchema
+>;
+export type CreateAgentDependencyRequest = z.infer<
+  typeof createAgentDependencyRequestSchema
+>;
+export type RemoveAgentDependencyRequest = z.infer<
+  typeof removeAgentDependencyRequestSchema
+>;
+export type AgentDependencyReceipt = z.infer<
+  typeof agentDependencyReceiptSchema
+>;
+export type InspectAgentTaskRequest = z.infer<
+  typeof inspectAgentTaskRequestSchema
+>;
+export type InspectAgentTaskResponse = z.infer<
+  typeof inspectAgentTaskResponseSchema
+>;
 export type ListAgentTasksRequest = z.infer<typeof listAgentTasksRequestSchema>;
 export type ListAgentTasksResponse = z.infer<
   typeof listAgentTasksResponseSchema

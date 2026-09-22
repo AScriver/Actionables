@@ -18,12 +18,19 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   actionablesErrorResponseSchema,
   type SearchCompletedTasksResponse,
+  type InspectAgentTaskResponse,
+  type AgentDependencyReceipt,
+  type AgentTaskCompletionReceipt,
 } from "@actionables/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
-import type { TaskHistoryPage } from "../src/mcp.js";
+import type {
+  TaskHistoryPage,
+  TaskContextPage,
+  CompletionView,
+} from "../src/mcp.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const canonicalWorkflowSkillPath = resolve(
@@ -146,6 +153,7 @@ async function historyReadState() {
         activityEvents: true,
         statusHistory: true,
         userSources: true,
+        validationRecords: true,
       },
     }),
     prisma.project.findMany({ orderBy: { id: "asc" } }),
@@ -338,57 +346,73 @@ describe("Actionables MCP", () => {
     const { client, transport } = await connectClient();
     try {
       const canonicalSkill = await readFile(canonicalWorkflowSkillPath, "utf8");
-      expect(client.getInstructions()).toBe(
-        workflowInstructions(canonicalSkill),
-      );
-      expect(client.getInstructions()).toEqual(
+      const instructions = client.getInstructions() ?? "";
+      expect(instructions.length).toBeLessThan(1_500);
+      expect(instructions).toContain("actionables://workflow");
+      const resources = await client.listResources();
+      expect(resources.resources).toEqual([
+        expect.objectContaining({
+          uri: "actionables://workflow",
+          mimeType: "text/markdown",
+        }),
+      ]);
+      const resource = await client.readResource({
+        uri: "actionables://workflow",
+      });
+      const workflow = resource.contents
+        .map((item) => ("text" in item ? item.text : ""))
+        .join("");
+      expect(instructions).not.toContain(workflow);
+
+      expect(workflow).toBe(workflowInstructions(canonicalSkill));
+      expect(workflow).toEqual(
         expect.stringContaining(
           "may remain Researching between turns only while additional investigation is genuinely required",
         ),
       );
-      expect(client.getInstructions()).toEqual(
+      expect(workflow).toEqual(
         expect.stringContaining(
           "Never report research or the overall task complete while a lifecycle-owned Actionable remains Researching",
         ),
       );
-      expect(client.getInstructions()).toContain(
-        "truncation.reconciliationGuidance",
-      );
-      expect(client.getInstructions()).toContain("actionables.get_task_detail");
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain("truncation.reconciliationGuidance");
+      expect(workflow).toContain("actionables.get_task_detail");
+      expect(workflow).toContain(
         "pass `contentHash` with each `nextOffset` until null",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "When guidance is absent, normal flow may continue",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "Treat successful `structuredContent` as authoritative",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "Inspect `hasMore` before treating a bounded list as exhaustive",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "keep that task as the coordination record and create the minimum child task set covering every implementation slice",
       );
-      expect(client.getInstructions()).toContain(
-        "do not flatten nested work into siblings",
-      );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain("do not flatten nested work into siblings");
+      expect(workflow).toContain(
         "Do not split by technical layer, create adjacent cleanup, or duplicate scope",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "do not claim that dependency relationships were created",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "in the current task and every created task. Leave created tasks unclaimed in Inbox",
       );
-      expect(client.getInstructions()).toContain(
+      expect(workflow).toContain(
         "Move a research-complete split task to Ready as the coordination record",
       );
       const tools = (await client.listTools()).tools;
+      for (const tool of tools) {
+        expect(tool.description?.length ?? 0).toBeLessThan(1_500);
+        expect(tool.description).not.toContain(workflow);
+      }
       const names = tools.map((tool) => tool.name).sort();
       expect(names).toEqual(
         [
@@ -396,8 +420,14 @@ describe("Actionables MCP", () => {
           "actionables.bulk_create_tasks",
           "actionables.bulk_prepare_tasks",
           "actionables.list_tasks",
+          "actionables.inspect_task",
+          "actionables.create_dependency",
+          "actionables.remove_dependency",
           "actionables.search_completed_tasks",
           "actionables.get_task_history",
+          "actionables.get_task_context",
+          "actionables.get_completion_view",
+          "actionables.complete_task",
           "actionables.get_task",
           "actionables.get_task_detail",
           "actionables.claim_task",
@@ -415,9 +445,7 @@ describe("Actionables MCP", () => {
         (tool) => tool.name === "actionables.claim_task",
       );
       for (const responsePath of ["task.version", "claim.claimToken"]) {
-        expect(client.getInstructions()).toEqual(
-          expect.stringContaining(responsePath),
-        );
+        expect(workflow).toEqual(expect.stringContaining(responsePath));
         expect(claimTaskTool?.description).toEqual(
           expect.stringContaining(responsePath),
         );
@@ -450,7 +478,7 @@ describe("Actionables MCP", () => {
         "a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag",
       );
       expect(canonicalSkill).toContain(directTaskGuidance);
-      expect(client.getInstructions()).toContain(directTaskGuidance);
+      expect(workflow).toContain(directTaskGuidance);
       expect(createTaskTool?.description).toContain(directTaskGuidance);
       expect(createTaskTool?.description).toContain(
         "the parent must belong to that work item",
@@ -543,22 +571,23 @@ describe("Actionables MCP", () => {
         readOnlyHint: true,
         destructiveHint: false,
       });
+      expect(byName["actionables.inspect_task"]).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
       expect(byName["actionables.search_completed_tasks"]).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
       });
-      expect(client.getInstructions()).toContain(
-        "actionables.search_completed_tasks",
-      );
+      expect(workflow).toContain("actionables.search_completed_tasks");
       expect(byName["actionables.get_task_history"]).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
       });
-      expect(client.getInstructions()).toContain(
-        "actionables.get_task_history",
-      );
+      expect(workflow).toContain("actionables.get_task_history");
       expect(byName["actionables.get_task_detail"]).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false,
@@ -2696,6 +2725,396 @@ describe("Actionables MCP", () => {
           },
         }),
       ).toBe(1);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("inspects explicit nested work and paged mixed states without any writes or claim secrets", async () => {
+    const root = await createTask();
+    const parent = await createTask();
+    const children = [];
+    for (const status of ["Blocked", "Ready", "Done", "Dismissed", "Ready"])
+      children.push(await createTask({ status }));
+    const archived = await createTask({ archivedAt: new Date() });
+    const sibling = await createTask();
+    await prisma.hierarchyRelationship.createMany({
+      data: [
+        { parentId: root.id, childId: parent.id, provenance: "test" },
+        { parentId: root.id, childId: sibling.id, provenance: "test" },
+        ...[...children, archived].map((child) => ({
+          parentId: parent.id,
+          childId: child.id,
+          provenance: "test",
+        })),
+      ],
+    });
+    await prisma.dependencyRelationship.create({
+      data: {
+        dependentId: children[0].id,
+        prerequisiteId: sibling.id,
+        provenance: "test",
+      },
+    });
+    for (const [index, expires] of [
+      [1, Date.now() + 60_000],
+      [4, Date.now() - 60_000],
+    ]) {
+      await prisma.agentTaskClaim.create({
+        data: {
+          actionableId: children[index].id,
+          agentId: "codex:another-thread",
+          claimTokenHash: `secret-${randomUUID()}`,
+          leaseExpiresAt: new Date(expires),
+        },
+      });
+    }
+    const before = await historyReadState();
+    const { client, transport } = await connectClient(bearerToken, null);
+    try {
+      const inspect = async (args: Record<string, unknown>) =>
+        output<InspectAgentTaskResponse>(
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: args,
+          }),
+        );
+      const single = await inspect({ id: children[0].sourceOrdinal });
+      expect(single.task).toMatchObject({
+        workItemId: root.sourceOrdinal,
+        parentId: parent.sourceOrdinal,
+        availableForClaim: false,
+        blockedByIds: [sibling.sourceOrdinal],
+        unavailableReasons: ["manual_blocker", "dependency"],
+      });
+      expect(single.descendants).toEqual([]);
+      const items: InspectAgentTaskResponse["descendants"] = [];
+      let afterId: number | undefined;
+      do {
+        const page = await inspect({
+          id: parent.sourceOrdinal,
+          includeDescendants: true,
+          limit: 2,
+          ...(afterId ? { afterId } : {}),
+        });
+        expect(page.descendants.length).toBeLessThanOrEqual(2);
+        items.push(...page.descendants);
+        afterId = page.nextAfterId ?? undefined;
+      } while (afterId);
+      expect(items.map((item) => item.id)).toEqual(
+        children.map((child) => child.sourceOrdinal),
+      );
+      expect(items[1]).toMatchObject({
+        unavailableReasons: ["claimed"],
+        claim: { agentId: "codex:another-thread" },
+      });
+      expect(items[2].unavailableReasons).toEqual(["terminal"]);
+      expect(items[3].unavailableReasons).toEqual(["terminal"]);
+      expect(items[4]).toMatchObject({
+        availableForClaim: true,
+        claim: { agentId: "codex:another-thread" },
+      });
+      expect(JSON.stringify(items)).not.toContain("secret-");
+      expect(JSON.stringify(items)).not.toContain("claimToken");
+      const withArchive = await inspect({
+        id: parent.sourceOrdinal,
+        includeDescendants: true,
+        includeArchived: true,
+      });
+      const browserInventory = await app.inject({
+        method: "GET",
+        url: `/api/actionables/${parent.sourceOrdinal}/codex-subtasks`,
+      });
+      expect(browserInventory.statusCode).toBe(200);
+      expect(browserInventory.headers["cache-control"]).toBe("no-store");
+      expect(browserInventory.json()).toEqual(withArchive);
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: `/api/actionables/${parent.sourceOrdinal}/codex-subtasks?afterId=bad`,
+          })
+        ).statusCode,
+      ).toBe(422);
+      expect(withArchive.descendants.at(-1)).toMatchObject({
+        id: archived.sourceOrdinal,
+        archiveState: { isArchived: true },
+        unavailableReasons: ["archived"],
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: { id: archived.sourceOrdinal },
+          }),
+        ).code,
+      ).toBe("ARCHIVE_INCLUSION_REQUIRED");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: { id: 99999999 },
+          }),
+        ).code,
+      ).toBe("NOT_FOUND");
+      expect(
+        (
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: { id: parent.sourceOrdinal, afterId: 1 },
+          })
+        ).isError,
+      ).toBe(true);
+      expect(
+        (
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: {
+              id: parent.sourceOrdinal,
+              workItemId: root.sourceOrdinal,
+            },
+          })
+        ).isError,
+      ).toBe(true);
+      expect(
+        (
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: {
+              id: parent.sourceOrdinal,
+              workItemId: root.sourceOrdinal,
+            },
+          })
+        ).isError,
+      ).toBe(true);
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("coordinates a split's dependencies through MCP with scope, ownership, cycle and replay guards", async () => {
+    const root = await createTask();
+    const prerequisite = await createTask({
+      research: ["Verified prerequisite scope"],
+    });
+    const children = [];
+    for (let index = 0; index < 3; index++) children.push(await createTask());
+    const unrelated = await createTask();
+    await prisma.hierarchyRelationship.createMany({
+      data: [prerequisite, ...children].map((child) => ({
+        parentId: root.id,
+        childId: child.id,
+        provenance: "test",
+      })),
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: root.sourceOrdinal,
+            workItemId: root.sourceOrdinal,
+            version: root.version,
+          },
+        }),
+      );
+      let coordinatorVersion = claim.task.version;
+      const versions = new Map(
+        [prerequisite, ...children, unrelated].map((task) => [
+          task.sourceOrdinal,
+          task.version,
+        ]),
+      );
+      const args = (
+        dependentId: number,
+        prerequisiteId = prerequisite.sourceOrdinal,
+      ) => ({
+        id: root.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+        claimToken: claim.claim.claimToken,
+        version: coordinatorVersion,
+        dependentId,
+        dependentVersion: versions.get(dependentId)!,
+        prerequisiteId,
+        prerequisiteVersion: versions.get(prerequisiteId)!,
+      });
+      const apply = async (name: string, input: Record<string, unknown>) => {
+        const receipt = output<AgentDependencyReceipt>(
+          await client.callTool({ name, arguments: input }),
+        );
+        coordinatorVersion = receipt.version;
+        versions.set(receipt.dependent.id, receipt.dependent.version);
+        versions.set(receipt.prerequisite.id, receipt.prerequisite.version);
+        return receipt;
+      };
+      const reject = async (input: Record<string, unknown>, code: string) => {
+        const before = await historyReadState();
+        expect(
+          errorOutput(
+            await client.callTool({
+              name: "actionables.create_dependency",
+              arguments: input,
+            }),
+          ).code,
+        ).toBe(code);
+        expect(await historyReadState()).toEqual(before);
+      };
+      await reject(args(prerequisite.sourceOrdinal), "SELF_DEPENDENCY");
+      await reject(args(unrelated.sourceOrdinal), "INVALID_REQUEST");
+      await reject(
+        {
+          ...args(children[0].sourceOrdinal),
+          claimToken: "invalid-claim-token-at-least-thirty-two-characters",
+        },
+        "INVALID_CLAIM_TOKEN",
+      );
+      const firstArgs = args(children[0].sourceOrdinal);
+      for (const child of children) {
+        const receipt = await apply(
+          "actionables.create_dependency",
+          args(child.sourceOrdinal),
+        );
+        expect(receipt).toMatchObject({
+          removed: false,
+          dependent: { id: child.sourceOrdinal, unresolvedDependencyCount: 1 },
+        });
+        const inspection = output<InspectAgentTaskResponse>(
+          await client.callTool({
+            name: "actionables.inspect_task",
+            arguments: { id: child.sourceOrdinal },
+          }),
+        );
+        expect(inspection.task.blockedByIds).toEqual([
+          prerequisite.sourceOrdinal,
+        ]);
+      }
+      await reject(firstArgs, "VERSION_CONFLICT");
+      await reject(args(children[0].sourceOrdinal), "DUPLICATE_DEPENDENCY");
+      await reject(
+        args(prerequisite.sourceOrdinal, children[0].sourceOrdinal),
+        "DEPENDENCY_CYCLE",
+      );
+      await reject(
+        { ...args(children[0].sourceOrdinal), prerequisiteVersion: 1 },
+        "VERSION_CONFLICT",
+      );
+      await prisma.agentTaskClaim.create({
+        data: {
+          actionableId: children[1].id,
+          agentId: "codex:other-owner",
+          claimTokenHash: randomUUID(),
+          leaseExpiresAt: new Date(Date.now() + 60000),
+        },
+      });
+      await reject(args(children[1].sourceOrdinal), "ALREADY_CLAIMED");
+      await prisma.agentTaskClaim.delete({
+        where: { actionableId: children[1].id },
+      });
+      await prisma.actionable.update({
+        where: { id: children[1].id },
+        data: { archivedAt: new Date() },
+      });
+      await reject(args(children[1].sourceOrdinal), "ARCHIVED");
+      await prisma.actionable.update({
+        where: { id: children[1].id },
+        data: { archivedAt: null },
+      });
+      const available = async () =>
+        output<{ items: Array<{ id: number }> }>(
+          await client.callTool({
+            name: "actionables.list_tasks",
+            arguments: { view: "available", workItemId: root.sourceOrdinal },
+          }),
+        );
+      expect((await available()).items.map((item) => item.id)).toEqual([
+        prerequisite.sourceOrdinal,
+      ]);
+      const removed = await apply("actionables.remove_dependency", {
+        ...args(children[0].sourceOrdinal),
+        reason: "This child no longer consumes the prerequisite output.",
+      });
+      expect(removed).toMatchObject({
+        removed: true,
+        dependent: { unresolvedDependencyCount: 0 },
+      });
+      expect((await available()).items.map((item) => item.id).sort()).toEqual(
+        [prerequisite.sourceOrdinal, children[0].sourceOrdinal].sort(),
+      );
+      expect(
+        await prisma.dependencyRelationship.count({
+          where: { prerequisiteId: prerequisite.id, removedAt: null },
+        }),
+      ).toBe(2);
+      expect(
+        await prisma.activityEvent.count({
+          where: { actionableId: children[0].id, type: "dependency-removed" },
+        }),
+      ).toBe(1);
+      const prerequisiteClaim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: prerequisite.sourceOrdinal,
+            workItemId: root.sourceOrdinal,
+            version: versions.get(prerequisite.sourceOrdinal),
+          },
+        }),
+      );
+      let version = prerequisiteClaim.task.version;
+      for (const [name, input] of [
+        [
+          "actionables.update_task",
+          { resolution: "Prerequisite implementation verified." },
+        ],
+        ["actionables.transition_task", { status: "In progress" }],
+        [
+          "actionables.record_task_validation",
+          {
+            type: "Automated test",
+            outcome: "Passed",
+            notes: "Isolated dependency scenario",
+            evidence: "MCP integration test",
+          },
+        ],
+        ["actionables.transition_task", { status: "Done" }],
+      ] as const) {
+        const result = output<{ version: number }>(
+          await client.callTool({
+            name,
+            arguments: {
+              id: prerequisite.sourceOrdinal,
+              claimToken: prerequisiteClaim.claim.claimToken,
+              version,
+              ...input,
+            },
+          }),
+        );
+        version = result.version;
+      }
+      expect((await available()).items.map((item) => item.id).sort()).toEqual(
+        children.map((child) => child.sourceOrdinal).sort(),
+      );
+      expect(
+        await prisma.activityEvent.count({
+          where: { actionableId: root.id, type: "agent-updated" },
+        }),
+      ).toBe(4);
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: `/api/actionables/${root.sourceOrdinal}`,
+          })
+        ).statusCode,
+      ).toBe(200);
     } finally {
       await transport.close();
     }
@@ -5037,6 +5456,730 @@ describe("Actionables MCP", () => {
         }
         expect(await historyReadState()).toEqual(before);
       }
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("completes atomically and replays a lost acknowledgement without duplicate evidence or activity", async () => {
+    const task = await createTask({
+      research: ["Verified implementation scope"],
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      const started = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            status: "In progress",
+          },
+        }),
+      );
+      const args = {
+        ...credentials,
+        version: started.version,
+        idempotencyKey: randomUUID(),
+        resolution: "Completed and verified the requested outcome.",
+        validation: {
+          type: "Automated test",
+          outcome: "Passed",
+          notes: "Isolated completion scenario",
+          evidence: "Focused behavior passed.",
+        },
+      };
+      const first = output<AgentTaskCompletionReceipt>(
+        await client.callTool({
+          name: "actionables.complete_task",
+          arguments: args,
+        }),
+      );
+      expect(first).toMatchObject({
+        id: task.sourceOrdinal,
+        status: "Done",
+        claimReleased: true,
+        resolutionSaved: true,
+        replayed: false,
+        qualifyingValidationRecordId: first.recordedValidationId,
+      });
+      expect(
+        await prisma.agentTaskClaim.findUnique({
+          where: { actionableId: task.id },
+        }),
+      ).toBeNull();
+      const saved = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: { validationRecords: true, activityEvents: true },
+      });
+      expect(saved.resolution).toBe(args.resolution);
+      expect(saved.validationRecords).toHaveLength(1);
+      expect(saved.validationRecords[0]).toMatchObject({
+        origin: `agent:${agentId}`,
+        outcome: "Passed",
+      });
+      expect(
+        saved.activityEvents.filter(
+          (event) => event.type === "completion-validated",
+        ),
+      ).toHaveLength(1);
+      expect(JSON.stringify(saved.activityEvents)).not.toContain(
+        credentials.claimToken,
+      );
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: `/api/actionables/${task.sourceOrdinal}`,
+          })
+        ).statusCode,
+      ).toBe(200);
+      const beforeRetry = await historyReadState();
+      const retry = output<AgentTaskCompletionReceipt>(
+        await client.callTool({
+          name: "actionables.complete_task",
+          arguments: args,
+        }),
+      );
+      expect(retry).toEqual({ ...first, replayed: true });
+      expect(await historyReadState()).toEqual(beforeRetry);
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.complete_task",
+            arguments: { ...args, resolution: "Changed retry content" },
+          }),
+        ).code,
+      ).toBe("IDEMPOTENCY_CONFLICT");
+      const other = await connectClient(
+        bearerToken,
+        "different-completion-thread",
+      );
+      try {
+        expect(
+          errorOutput(
+            await other.client.callTool({
+              name: "actionables.complete_task",
+              arguments: args,
+            }),
+          ).code,
+        ).toBe("IDEMPOTENCY_CONFLICT");
+      } finally {
+        await other.transport.close();
+      }
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "Ready", version: { increment: 1 } },
+      });
+      const reopened = await historyReadState();
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.complete_task",
+            arguments: args,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(reopened);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("rolls back rejected or interrupted completions and keeps expired claims unchanged", async () => {
+    const task = await createTask({
+      research: ["Verified completion rollback"],
+    });
+    const child = await createTask();
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      let args = {
+        ...credentials,
+        version: claimed.task.version,
+        idempotencyKey: randomUUID(),
+        resolution: "Must be atomic",
+        validation: {
+          type: "Command",
+          outcome: "Passed",
+          evidence: "Focused isolated completion checks",
+        },
+      };
+      const reject = async (input: Record<string, unknown>, code: string) => {
+        const before = await historyReadState();
+        expect(
+          errorOutput(
+            await client.callTool({
+              name: "actionables.complete_task",
+              arguments: input,
+            }),
+          ).code,
+        ).toBe(code);
+        expect(await historyReadState()).toEqual(before);
+      };
+      await reject(args, "INVALID_STATUS_TRANSITION");
+      const started = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.transition_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            status: "In progress",
+          },
+        }),
+      );
+      args = { ...args, version: started.version };
+      await reject({ ...args, validation: undefined }, "VALIDATION_REQUIRED");
+      await reject(
+        { ...args, validation: { ...args.validation, outcome: "Failed" } },
+        "VALIDATION_REQUIRED",
+      );
+      await reject(
+        { ...args, validation: { ...args.validation, evidence: "" } },
+        "VALIDATION_EVIDENCE_REQUIRED",
+      );
+      await reject({ ...args, version: 1 }, "VERSION_CONFLICT");
+      await reject(
+        {
+          ...args,
+          claimToken: "invalid-claim-token-at-least-thirty-two-characters",
+        },
+        "INVALID_CLAIM_TOKEN",
+      );
+      const beforeBlank = await historyReadState();
+      expect(
+        (
+          await client.callTool({
+            name: "actionables.complete_task",
+            arguments: { ...args, resolution: " " },
+          })
+        ).isError,
+      ).toBe(true);
+      expect(await historyReadState()).toEqual(beforeBlank);
+      const edge = await prisma.hierarchyRelationship.create({
+        data: { parentId: task.id, childId: child.id, provenance: "test" },
+      });
+      await reject(args, "INCOMPLETE_SUBTASKS");
+      await prisma.hierarchyRelationship.update({
+        where: { id: edge.id },
+        data: { detachedAt: new Date() },
+      });
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { archivedAt: new Date() },
+      });
+      await reject(args, "ARCHIVED");
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { archivedAt: null, status: "Done" },
+      });
+      await reject(args, "TERMINAL");
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "In progress" },
+      });
+      await prisma.$executeRawUnsafe(
+        "CREATE TRIGGER test_atomic_completion_failure BEFORE DELETE ON AgentTaskClaim BEGIN SELECT RAISE(ABORT, 'simulated release failure'); END",
+      );
+      try {
+        await reject(args, "INTERNAL_ERROR");
+      } finally {
+        await prisma.$executeRawUnsafe(
+          "DROP TRIGGER test_atomic_completion_failure",
+        );
+      }
+      const claim = await prisma.agentTaskClaim.findUniqueOrThrow({
+        where: { actionableId: task.id },
+      });
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: task.id },
+        data: { leaseExpiresAt: new Date(0) },
+      });
+      await reject(args, "CLAIM_EXPIRED");
+      const beforeView = await historyReadState();
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_completion_view",
+            arguments: { ...credentials, version: args.version },
+          }),
+        ).code,
+      ).toBe("CLAIM_EXPIRED");
+      expect(await historyReadState()).toEqual(beforeView);
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: task.id },
+        data: { leaseExpiresAt: claim.leaseExpiresAt },
+      });
+      expect(
+        output<AgentTaskCompletionReceipt>(
+          await client.callTool({
+            name: "actionables.complete_task",
+            arguments: args,
+          }),
+        ).status,
+      ).toBe("Done");
+      expect(
+        await prisma.validationRecord.count({
+          where: { actionableId: task.id },
+        }),
+      ).toBe(1);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("pages descendant completion evidence while retaining the parent's own acceptance requirements", async () => {
+    const parent = await createTask({
+      research: ["Parent aggregate acceptance researched"],
+    });
+    const child = await createTask({
+      title: `Child ${"\u0001".repeat(230)}`,
+      research: ["Child implementation researched"],
+    });
+    const childPlan = "Verify child behavior. ".repeat(300).trim();
+    await prisma.actionable.update({
+      where: { id: child.id },
+      data: { validationJson: json([childPlan]) },
+    });
+    await prisma.hierarchyRelationship.create({
+      data: { parentId: parent.id, childId: child.id, provenance: "test" },
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const begin = async (task: typeof parent) => {
+        const claim = output<{
+          task: { version: number };
+          claim: { claimToken: string };
+        }>(
+          await client.callTool({
+            name: "actionables.claim_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              workItemId: parent.sourceOrdinal,
+              version: task.version,
+            },
+          }),
+        );
+        const credentials = {
+          id: task.sourceOrdinal,
+          claimToken: claim.claim.claimToken,
+        };
+        const started = output<{ version: number }>(
+          await client.callTool({
+            name: "actionables.transition_task",
+            arguments: {
+              ...credentials,
+              version: claim.task.version,
+              status: "In progress",
+            },
+          }),
+        );
+        return { ...credentials, version: started.version };
+      };
+      const parentCredentials = await begin(parent);
+      const childCredentials = await begin(child);
+      const resolution = "Verified child 🛠️ evidence\r\n".repeat(900);
+      const notes = "Actual child validation ".repeat(650);
+      output<AgentTaskCompletionReceipt>(
+        await client.callTool({
+          name: "actionables.complete_task",
+          arguments: {
+            ...childCredentials,
+            idempotencyKey: randomUUID(),
+            resolution,
+            validation: { type: "Automated test", outcome: "Passed", notes },
+          },
+        }),
+      );
+      const before = await historyReadState();
+      const first = output<CompletionView>(
+        await client.callTool({
+          name: "actionables.get_completion_view",
+          arguments: parentCredentials,
+        }),
+      );
+      expect(first.progress).toMatchObject({ total: 1, completed: 1, open: 0 });
+      expect(first.outstandingRequirements).toEqual([
+        "Save a Resolution describing completed changes and decisions.",
+        "Record current Passed validation after the latest move into In progress.",
+      ]);
+      expect(first.acceptanceGuidance).toContain(
+        "do not prove parent acceptance",
+      );
+      expect(first.complete).toBe(false);
+      const items = [...first.items];
+      let offset = first.nextOffset;
+      while (offset !== null) {
+        const page = output<CompletionView>(
+          await client.callTool({
+            name: "actionables.get_completion_view",
+            arguments: {
+              ...parentCredentials,
+              offset,
+              contentHash: first.contentHash,
+            },
+          }),
+        );
+        expect(JSON.stringify(page.items).length).toBeLessThanOrEqual(8000);
+        expect(page.items.length).toBeLessThanOrEqual(40);
+        expect(page.nextOffset === null || page.nextOffset > offset).toBe(true);
+        items.push(...page.items);
+        offset = page.nextOffset;
+      }
+      const text = (field: string, property?: string) =>
+        items
+          .filter(
+            (item) =>
+              item.task.id === child.sourceOrdinal &&
+              item.field === field &&
+              item.kind === "text" &&
+              item.property === property,
+          )
+          .map((item) => (item.kind === "text" ? item.text : ""))
+          .join("");
+      expect(text("resolution")).toBe(resolution.trim());
+      expect(text("validationRecords", "notes")).toBe(notes.trim());
+      expect(text("plannedValidation")).toBe(childPlan);
+      expect(
+        items.some(
+          (item) =>
+            item.task.id === parent.sourceOrdinal &&
+            item.field === "plannedValidation",
+        ),
+      ).toBe(true);
+      expect(
+        items
+          .filter((item) => item.task.id === child.sourceOrdinal)
+          .every((item) => item.task.qualifyingValidationCount === 1),
+      ).toBe(true);
+      expect(await historyReadState()).toEqual(before);
+      const missingOwnValidation = await client.callTool({
+        name: "actionables.complete_task",
+        arguments: {
+          ...parentCredentials,
+          idempotencyKey: randomUUID(),
+          resolution:
+            "Children finished; parent still needs aggregate evidence.",
+        },
+      });
+      expect(errorOutput(missingOwnValidation).code).toBe(
+        "VALIDATION_REQUIRED",
+      );
+      expect(await historyReadState()).toEqual(before);
+      await prisma.actionable.update({
+        where: { id: child.id },
+        data: {
+          resolution: "Changed child conclusion",
+          version: { increment: 1 },
+        },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_completion_view",
+            arguments: {
+              ...parentCredentials,
+              offset: first.nextOffset!,
+              contentHash: first.contentHash,
+            },
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      await prisma.actionable.update({
+        where: { id: child.id },
+        data: { archivedAt: new Date(), version: { increment: 1 } },
+      });
+      const excluded = output<CompletionView>(
+        await client.callTool({
+          name: "actionables.get_completion_view",
+          arguments: parentCredentials,
+        }),
+      );
+      expect(excluded.excludedArchivedDescendants).toBe(1);
+      expect(
+        excluded.items.every((item) => item.task.id === parent.sourceOrdinal),
+      ).toBe(true);
+      const included = output<CompletionView>(
+        await client.callTool({
+          name: "actionables.get_completion_view",
+          arguments: { ...parentCredentials, includeArchived: true },
+        }),
+      );
+      expect(included.excludedArchivedDescendants).toBe(0);
+      expect(
+        included.items.some(
+          (item) =>
+            item.task.id === child.sourceOrdinal && item.task.isArchived,
+        ),
+      ).toBe(true);
+      const validated = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.record_task_validation",
+          arguments: {
+            ...parentCredentials,
+            type: "Manual test",
+            outcome: "Passed",
+            evidence: "Parent aggregate acceptance actually checked.",
+          },
+        }),
+      );
+      expect(
+        output<AgentTaskCompletionReceipt>(
+          await client.callTool({
+            name: "actionables.complete_task",
+            arguments: {
+              ...parentCredentials,
+              version: validated.version,
+              idempotencyKey: randomUUID(),
+              resolution:
+                "Parent acceptance verified independently of child results.",
+            },
+          }),
+        ).recordedValidationId,
+      ).toBeNull();
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("reads bounded native active context together and invalidates stale content or ownership", async () => {
+    const task = await createTask({ research: ["Observed current behavior"] });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      let args = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+      };
+      const read = async (extra: Record<string, unknown> = {}) =>
+        output<TaskContextPage>(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: { ...args, ...extra },
+          }),
+        );
+      const small = await read();
+      expect(small).toMatchObject({
+        complete: true,
+        nextOffset: null,
+        fieldCounts: {
+          parent: 0,
+          research: 1,
+          plannedValidation: 1,
+          description: 1,
+          subtasks: 0,
+        },
+      });
+      expect(
+        small.items.find((item) => item.field === "description"),
+      ).toMatchObject({ kind: "value", value: "Initial description" });
+      const longText = 'quoted \\" line\r\n🛠️漢字 '.repeat(1000);
+      const child = await createTask();
+      await prisma.hierarchyRelationship.create({
+        data: { parentId: task.id, childId: child.id, provenance: "test" },
+      });
+      const updated = await prisma.actionable.update({
+        where: { id: task.id },
+        data: {
+          version: { increment: 1 },
+          description: longText,
+          researchJson: json(["", longText, "last note"]),
+          validationJson: json(["", longText]),
+          filesJson: json([{ path: longText, lines: "1-2" }]),
+        },
+      });
+      args = { ...args, version: updated.version };
+      const before = await historyReadState();
+      const items: TaskContextPage["items"] = [];
+      let offset = 0;
+      let contentHash: string | undefined;
+      let pages = 0;
+      do {
+        const page = await read({
+          offset,
+          ...(contentHash ? { contentHash } : {}),
+        });
+        expect(page.items.length).toBeLessThanOrEqual(40);
+        expect(JSON.stringify(page.items).length).toBeLessThanOrEqual(8000);
+        expect(page.remainingItems).toBe(
+          page.totalItems - offset - page.items.length,
+        );
+        items.push(...page.items);
+        pages++;
+        contentHash = page.contentHash;
+        if (page.complete) {
+          expect(page.nextOffset).toBeNull();
+          break;
+        }
+        offset = page.nextOffset!;
+        expect(pages).toBeLessThan(100);
+      } while (true);
+      expect(pages).toBeGreaterThan(1);
+      for (const [field, index, property] of [
+        ["description", 0, undefined],
+        ["research", 1, undefined],
+        ["plannedValidation", 1, undefined],
+        ["files", 0, "path"],
+      ] as const) {
+        const chunks = items.filter(
+          (item) =>
+            item.field === field &&
+            item.index === index &&
+            item.kind === "text" &&
+            item.property === property,
+        );
+        let length = 0;
+        const text = chunks
+          .map((item) => {
+            if (item.kind !== "text") throw new Error("Expected text chunk");
+            expect(item.offset).toBe(length);
+            expect(item.totalLength).toBe(longText.length);
+            expect(item.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);
+            length += item.text.length;
+            return item.text;
+          })
+          .join("");
+        expect(text).toBe(longText);
+      }
+      expect(items.filter((item) => item.field === "subtasks")).toEqual([
+        {
+          field: "subtasks",
+          index: 0,
+          kind: "value",
+          value: {
+            id: child.sourceOrdinal,
+            title: child.title,
+            status: child.status,
+          },
+        },
+      ]);
+      expect(
+        items.find((item) => item.field === "research" && item.index === 0),
+      ).toMatchObject({ kind: "value", value: "" });
+      expect(await historyReadState()).toEqual(before);
+      const first = await read();
+      const nextArgs = {
+        ...args,
+        offset: first.nextOffset!,
+        contentHash: first.contentHash,
+      };
+      expect(
+        (
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: { ...args, offset: 1 },
+          })
+        ).isError,
+      ).toBe(true);
+      await prisma.actionable.update({
+        where: { id: child.id },
+        data: { title: "Changed child title" },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: nextArgs,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { version: { increment: 1 } },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: args,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: {
+              ...args,
+              claimToken: "invalid-token-with-sufficient-length",
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_CLAIM_TOKEN");
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "Done" },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: args,
+          }),
+        ).code,
+      ).toBe("TERMINAL");
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "Ready" },
+      });
+      await prisma.agentTaskClaim.update({
+        where: { actionableId: task.id },
+        data: { leaseExpiresAt: new Date(0) },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: args,
+          }),
+        ).code,
+      ).toBe("CLAIM_EXPIRED");
     } finally {
       await transport.close();
     }

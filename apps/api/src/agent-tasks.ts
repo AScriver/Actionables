@@ -5,6 +5,16 @@ import { basename, dirname } from "node:path";
 import { promisify } from "node:util";
 import {
   actionablesErrorPayload,
+  completeClaimedAgentTaskRequestSchema,
+  agentTaskCompletionReceiptSchema,
+  type CompleteClaimedAgentTaskRequest,
+  type AgentTaskCompletionReceipt,
+  agentDependencyReceiptSchema,
+  createAgentDependencyRequestSchema,
+  removeAgentDependencyRequestSchema,
+  type AgentDependencyReceipt,
+  type CreateAgentDependencyRequest,
+  type RemoveAgentDependencyRequest,
   agentTaskSummaryChildIdsLimit,
   agentTaskSummarySchema,
   bulkAgentTaskFailureSchema,
@@ -20,6 +30,8 @@ import {
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
   handoffClaimedAgentTaskRequestSchema,
+  inspectAgentTaskRequestSchema,
+  inspectAgentTaskResponseSchema,
   listAgentTasksRequestSchema,
   listAgentTasksResponseSchema,
   recoverAgentTaskClaimRequestSchema,
@@ -48,6 +60,8 @@ import {
   type CreateAgentTaskRequest,
   type DismissAgentTaskRequest,
   type HandoffClaimedAgentTaskRequest,
+  type InspectAgentTaskRequest,
+  type InspectAgentTaskResponse,
   type ListAgentTasksRequest,
   type ListAgentTasksResponse,
   type RecoverAgentTaskClaimRequest,
@@ -67,11 +81,13 @@ import type { Prisma } from "./generated/prisma/client.js";
 import {
   lifecycleReadiness,
   parsePersistedStatus,
+  permittedTransitions,
 } from "./actionable-transitions.js";
 import { getAgentCoordinationSettings } from "./helper-agent-settings.js";
 import { isWithinCheckout, projectWorkspacePath } from "./project-workspace.js";
 import {
   createActionable,
+  archiveState,
   DomainValidationError,
   getActionable,
   normalizedLocalPath,
@@ -80,7 +96,11 @@ import {
   updateActionable,
   VersionConflictError,
 } from "./repository.js";
-import { createSubtask } from "./relationships.js";
+import {
+  createSubtask,
+  createDependency,
+  removeDependency,
+} from "./relationships.js";
 import { getHierarchyRoot, getHierarchyTasks } from "./hierarchy.js";
 
 const execFileAsync = promisify(execFile);
@@ -122,7 +142,7 @@ const agentTaskInclude = {
     where: { removedAt: null },
     include: {
       prerequisite: {
-        select: { status: true },
+        select: { status: true, sourceOrdinal: true },
       },
     },
   },
@@ -516,9 +536,13 @@ async function runClaimedMutation<T, U = T>(
     claim: NonNullable<AgentTaskMutationRow["agentTaskClaim"]>,
   ) => Promise<T>,
   projectResponse?: (value: T) => U,
+  replay?: (tx: TransactionClient) => Promise<U | undefined>,
 ): Promise<T | U> {
   return withClaimLock(String(sourceOrdinal), async () => {
     const result = await prisma.$transaction(async (tx) => {
+      const replayed = await replay?.(tx);
+      if (replayed !== undefined)
+        return { expired: false as const, value: replayed };
       const row = await findMutationTask(tx, sourceOrdinal);
       const claim = requireValidClaim(row, credentials.claimToken, now);
       if (claim === "expired") {
@@ -680,6 +704,257 @@ async function releaseClaimAfterTerminalTransition(
       occurredAt: now,
     },
   });
+}
+
+/** Inspect an explicit task and optional subtree without acquiring or cleaning up claims. */
+export async function inspectAgentTask(
+  prisma: AppPrismaClient,
+  input: InspectAgentTaskRequest,
+  now = new Date(),
+): Promise<InspectAgentTaskResponse> {
+  const request = parseInput(inspectAgentTaskRequestSchema, input);
+  return prisma.$transaction(async (tx) => {
+    const row = await findTask(tx, request.id);
+    if (!row)
+      throw new AgentTaskClaimError(
+        "NOT_FOUND",
+        "The Actionable was not found.",
+      );
+    const root = await getHierarchyRoot(tx, row.id);
+    const workItem = await requireWorkItem(tx, root.sourceOrdinal, {
+      allowTerminal: true,
+      includeArchived: true,
+    });
+    if (!request.includeArchived && (isArchived(workItem) || isArchived(row))) {
+      throw new AgentTaskClaimError(
+        "ARCHIVE_INCLUSION_REQUIRED",
+        "Explicitly include archived tasks to inspect this Actionable.",
+        { includeArchived: ["Set includeArchived to true."] },
+      );
+    }
+    const project = async (task: AgentTaskRow) => {
+      const summary = await toAgentTaskSummary(tx, task);
+      const unavailableReasons: InspectAgentTaskResponse["task"]["unavailableReasons"] =
+        [];
+      if (isArchived(task) || isArchived(workItem))
+        unavailableReasons.push("archived");
+      if (terminalStatuses.includes(task.status))
+        unavailableReasons.push("terminal");
+      if (task.id !== workItem.id && terminalStatuses.includes(workItem.status))
+        unavailableReasons.push("work_item_terminal");
+      if (task.status === "Blocked") unavailableReasons.push("manual_blocker");
+      if (summary.unresolvedDependencyCount)
+        unavailableReasons.push("dependency");
+      if (task.agentTaskClaim && task.agentTaskClaim.leaseExpiresAt > now)
+        unavailableReasons.push("claimed");
+      return {
+        ...summary,
+        archiveState: archiveState(task),
+        blockedByIds: task.dependenciesAsDependent
+          .filter(
+            (edge) => !edge.waivedAt && edge.prerequisite.status !== "Done",
+          )
+          .map((edge) => edge.prerequisite.sourceOrdinal)
+          .sort((a, b) => a - b)
+          .slice(0, 100),
+        manualBlockerExcerpt: truncateExcerpt(task.manualBlockerMd ?? "", 300),
+        availableForClaim: unavailableReasons.length === 0,
+        unavailableReasons,
+        permittedTransitions: permittedTransitions(
+          summary.status,
+          summary.readiness,
+        ),
+      };
+    };
+    const descendants = request.includeDescendants
+      ? await tx.actionable.findMany({
+          where: {
+            id: {
+              in: (await getHierarchyTasks(tx, row.id))
+                .filter((task) => task.id !== row.id)
+                .map((task) => task.id),
+            },
+            sourceOrdinal: { gt: request.afterId ?? 0 },
+            ...(request.includeArchived
+              ? {}
+              : {
+                  archivedAt: null,
+                  project: { archivedAt: null },
+                  repository: { archivedAt: null },
+                  worktree: { archivedAt: null },
+                }),
+          },
+          include: agentTaskInclude,
+          orderBy: { sourceOrdinal: "asc" },
+          take: request.limit + 1,
+        })
+      : [];
+    return inspectAgentTaskResponseSchema.parse({
+      task: await project(row),
+      descendants: await Promise.all(
+        descendants.slice(0, request.limit).map(project),
+      ),
+      nextAfterId:
+        descendants.length > request.limit
+          ? descendants[request.limit - 1].sourceOrdinal
+          : null,
+    });
+  });
+}
+
+/** Apply an explicit subtree dependency change through the existing relationship operations. */
+export async function manageClaimedAgentDependency(
+  prisma: AppPrismaClient,
+  input: CreateAgentDependencyRequest | RemoveAgentDependencyRequest,
+  action: "create" | "remove",
+  now = new Date(),
+): Promise<AgentDependencyReceipt> {
+  const request =
+    action === "create"
+      ? parseInput(createAgentDependencyRequestSchema, input)
+      : parseInput(removeAgentDependencyRequestSchema, input);
+  return runClaimedMutation(
+    prisma,
+    request.id,
+    request,
+    now,
+    async (tx, coordinator, claim) => {
+      const workItem = await requireWorkItem(tx, request.workItemId);
+      await requireTaskInWorkItem(tx, coordinator, workItem);
+      const subtree = new Set(
+        (await getHierarchyTasks(tx, coordinator.id)).map((task) => task.id),
+      );
+      const dependent = await findTask(tx, request.dependentId);
+      const prerequisite = await findTask(tx, request.prerequisiteId);
+      for (const endpoint of [dependent, prerequisite]) {
+        if (!endpoint || !subtree.has(endpoint.id))
+          throw new AgentTaskClaimError(
+            "INVALID_REQUEST",
+            "Both dependency endpoints must belong to the claimed coordinator's subtree.",
+          );
+        await requireTaskInWorkItem(tx, endpoint, workItem);
+        if (isArchived(endpoint))
+          throw new AgentTaskClaimError(
+            "ARCHIVED",
+            "Archived dependency endpoints cannot be changed by an agent.",
+          );
+        if (
+          endpoint.agentTaskClaim &&
+          endpoint.agentTaskClaim.leaseExpiresAt > now &&
+          endpoint.agentTaskClaim.agentId !== claim.agentId
+        )
+          throw new AgentTaskClaimError(
+            "ALREADY_CLAIMED",
+            "A dependency endpoint is owned by another agent.",
+          );
+      }
+      let relationship = await tx.dependencyRelationship.findFirst({
+        where: {
+          dependentId: dependent!.id,
+          prerequisiteId: prerequisite!.id,
+          removedAt: null,
+        },
+      });
+      if (action === "create") {
+        await createDependency(
+          prisma,
+          request.dependentId,
+          {
+            version: request.dependentVersion,
+            prerequisiteId: request.prerequisiteId,
+            prerequisiteVersion: request.prerequisiteVersion,
+          },
+          tx,
+        );
+        relationship = await tx.dependencyRelationship.findFirstOrThrow({
+          where: {
+            dependentId: dependent!.id,
+            prerequisiteId: prerequisite!.id,
+            removedAt: null,
+          },
+        });
+      } else {
+        if (!relationship)
+          throw new DomainValidationError(
+            "DEPENDENCY_NOT_FOUND",
+            {
+              prerequisiteId: [
+                "No active dependency exists between these endpoints.",
+              ],
+            },
+            "The dependency relationship does not exist.",
+          );
+        await removeDependency(
+          prisma,
+          request.dependentId,
+          relationship.id,
+          {
+            version: request.dependentVersion,
+            prerequisiteVersion: request.prerequisiteVersion,
+            reason:
+              "reason" in request && typeof request.reason === "string"
+                ? request.reason
+                : undefined,
+          },
+          tx,
+        );
+        relationship = await tx.dependencyRelationship.findUniqueOrThrow({
+          where: { id: relationship.id },
+        });
+      }
+      if (
+        coordinator.id !== dependent!.id &&
+        coordinator.id !== prerequisite!.id
+      )
+        await tx.actionable.update({
+          where: { id: coordinator.id },
+          data: { version: { increment: 1 } },
+        });
+      await tx.activityEvent.create({
+        data: {
+          actionableId: coordinator.id,
+          type: "agent-updated",
+          summary: `Dependency ${action === "create" ? "created" : "removed"} by ${claim.agentId}`,
+          metadataJson: {
+            origin: agentOrigin(claim.agentId),
+            operation: "dependency",
+            dependencyRelationshipId: relationship!.id,
+            dependentOrdinal: request.dependentId,
+            prerequisiteOrdinal: request.prerequisiteId,
+          },
+          occurredAt: now,
+        },
+      });
+      await renewClaimAfterMutation(tx, coordinator, now);
+      const savedCoordinator = await findTask(tx, request.id);
+      const savedDependent = await toAgentTaskSummary(
+        tx,
+        (await findTask(tx, request.dependentId))!,
+      );
+      const savedPrerequisite = await findTask(tx, request.prerequisiteId);
+      return agentDependencyReceiptSchema.parse({
+        id: request.id,
+        version: savedCoordinator!.version,
+        relationshipId: relationship!.id,
+        removed: Boolean(relationship!.removedAt),
+        dependent: {
+          id: request.dependentId,
+          version: savedDependent.version,
+          unresolvedDependencyCount: savedDependent.unresolvedDependencyCount,
+        },
+        prerequisite: {
+          id: request.prerequisiteId,
+          version: savedPrerequisite!.version,
+          status: savedPrerequisite!.status,
+        },
+        claimLease: {
+          renewedAt: savedCoordinator!.agentTaskClaim!.renewedAt.toISOString(),
+          leaseExpiresAt:
+            savedCoordinator!.agentTaskClaim!.leaseExpiresAt.toISOString(),
+        },
+      });
+    },
+  );
 }
 
 export async function listAgentTasks(
@@ -2600,6 +2875,216 @@ export function recordClaimedAgentTaskValidationWithProjection<T>(
     now,
     projectResponse,
   ) as Promise<T>;
+}
+
+/** Read parent and descendant completion evidence in one snapshot without claim cleanup. */
+export async function getClaimedCompletionSnapshot(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  credentials: ClaimedMutationCredentials,
+  now = new Date(),
+) {
+  return prisma.$transaction(async (tx) => {
+    const row = await findTask(tx, sourceOrdinal);
+    const claim = requireValidClaim(row, credentials.claimToken, now);
+    if (claim === "expired")
+      throw new AgentTaskClaimError(
+        "CLAIM_EXPIRED",
+        "The claim expired; reacquire it before reading completion evidence.",
+      );
+    if (isArchived(row!))
+      throw new AgentTaskClaimError(
+        "ARCHIVED",
+        "Archived tasks cannot be completed by an agent.",
+      );
+    if (terminalStatuses.includes(row!.status))
+      throw new AgentTaskClaimError(
+        "TERMINAL",
+        "Use terminal history for completed tasks.",
+      );
+    if (row!.version !== credentials.version)
+      throw new AgentTaskClaimError(
+        "VERSION_CONFLICT",
+        "The task changed after it was read.",
+        undefined,
+        row!.version,
+      );
+    const task = (await getActionable(tx, sourceOrdinal))!;
+    const descendants: ActionableDetail[] = [];
+    for (const child of await getHierarchyTasks(tx, row!.id)) {
+      if (child.id !== row!.id)
+        descendants.push((await getActionable(tx, child.sourceOrdinal))!);
+    }
+    return { task, descendants };
+  });
+}
+
+/** Save evidence, enforce the existing Done rules and release ownership as one retryable transaction. */
+export async function completeClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: CompleteClaimedAgentTaskRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+): Promise<AgentTaskCompletionReceipt> {
+  const request = parseInput(completeClaimedAgentTaskRequestSchema, input);
+  const activityId = `agent-completion-${hashToken(request.idempotencyKey)}`;
+  const fingerprint = hashToken(
+    JSON.stringify({
+      id: sourceOrdinal,
+      ...request,
+      threadId: caller.threadId,
+    }),
+  );
+  return runClaimedMutation(
+    prisma,
+    sourceOrdinal,
+    request,
+    now,
+    async (tx, row, claim) => {
+      if (request.validation && request.validation.outcome !== "Passed")
+        throw new DomainValidationError(
+          "VALIDATION_REQUIRED",
+          {
+            validation: [
+              "Completion requires actual Passed validation. Record Failed or Partial evidence separately and keep the task open.",
+            ],
+          },
+          "The supplied validation does not qualify for completion.",
+        );
+      const update = parseInput(updateActionableRequestSchema, {
+        version: request.version,
+        title: row.title,
+        priority: row.priority,
+        effort: row.effort,
+        evidenceState: row.evidenceState,
+        projectId: row.projectId,
+        repositoryId: row.repositoryId,
+        worktreeId: row.worktreeId,
+        status: row.status,
+        finding: row.finding,
+        description: row.description,
+        resolution: request.resolution,
+        research: persistedStringArray(row.researchJson),
+        validation: persistedStringArray(row.validationJson),
+        tags: persistedStringArray(row.tagsJson),
+        userSources: row.userSources.map(({ type, locator, label }) => ({
+          type,
+          locator,
+          ...(label ? { label } : {}),
+        })),
+      });
+      let saved = (await updateActionable(prisma, sourceOrdinal, update, tx))!;
+      let recordedValidationId: string | null = null;
+      if (request.validation) {
+        const recorded = await recordValidationWithRecord(
+          prisma,
+          sourceOrdinal,
+          {
+            ...request.validation,
+            version: saved.version,
+            origin: agentOrigin(claim.agentId),
+          },
+          tx,
+        );
+        saved = recorded.task!;
+        recordedValidationId = recorded.validationRecordId;
+      }
+      saved = (await transitionActionable(
+        prisma,
+        sourceOrdinal,
+        {
+          version: saved.version,
+          status: "Done",
+          origin: agentOrigin(claim.agentId),
+        },
+        tx,
+      ))!;
+      await releaseClaimAfterTerminalTransition(
+        tx,
+        row,
+        claim.agentId,
+        "Done",
+        now,
+      );
+      const receipt = agentTaskCompletionReceiptSchema.parse({
+        id: saved.id,
+        workItemId: saved.workItemId,
+        version: saved.version,
+        status: saved.status,
+        claimReleased: true,
+        resolutionSaved: true,
+        qualifyingValidationRecordId:
+          saved.completionEligibility.qualifyingValidationRecordId,
+        recordedValidationId,
+        replayed: false,
+      });
+      await tx.activityEvent.create({
+        data: {
+          id: activityId,
+          actionableId: row.id,
+          type: "agent-updated",
+          summary: `Completed atomically by ${claim.agentId}`,
+          metadataJson: {
+            origin: agentOrigin(claim.agentId),
+            operation: "completion",
+            fingerprint,
+            receipt,
+          },
+          occurredAt: now,
+        },
+      });
+      return receipt;
+    },
+    undefined,
+    async (tx) => {
+      const activity = await tx.activityEvent.findUnique({
+        where: { id: activityId },
+      });
+      if (!activity) {
+        // An unsuccessful completion must not even clean up an expired lease.
+        const row = await findTask(tx, sourceOrdinal);
+        if (requireValidClaim(row, request.claimToken, now) === "expired")
+          throw new AgentTaskClaimError(
+            "CLAIM_EXPIRED",
+            "The claim expired; reacquire it before completing this task.",
+          );
+        return undefined;
+      }
+      const metadata = activity.metadataJson as Record<
+        string,
+        Prisma.JsonValue
+      >;
+      const parsed = agentTaskCompletionReceiptSchema.safeParse(
+        metadata.receipt,
+      );
+      if (
+        activity.type !== "agent-updated" ||
+        metadata.operation !== "completion" ||
+        metadata.fingerprint !== fingerprint ||
+        !parsed.success
+      )
+        throw new AgentTaskClaimError(
+          "IDEMPOTENCY_CONFLICT",
+          "This completion UUID belongs to a different request. Inspect current state before choosing a new operation.",
+        );
+      const current = await findTask(tx, sourceOrdinal);
+      if (
+        !current ||
+        current.version !== parsed.data.version ||
+        current.status !== "Done" ||
+        current.agentTaskClaim !== null ||
+        isArchived(current)
+      )
+        throw new AgentTaskClaimError(
+          "VERSION_CONFLICT",
+          "The task changed after this completion. Inspect its current state; the historical receipt cannot be replayed.",
+          undefined,
+          current?.version,
+        );
+      return { ...parsed.data, replayed: true };
+    },
+  );
 }
 
 async function handoffClaimedAgentTaskResult<T = never>(

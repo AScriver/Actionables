@@ -66,20 +66,86 @@ start templates are also preserved. Review any custom instructions for obsolete
 direct-child-only guidance; keep the original root as `workItemId` and the
 immediate parent as `parentId`.
 
+## Explicit task inspection
+
+`actionables.inspect_task` accepts one public `id`, including a nested child,
+without a claim or thread identity. It returns the original `workItemId`,
+immediate parent, status, readiness, archive state, non-secret ownership and
+availability reasons. `permittedTransitions` describes lifecycle options; all
+normal ownership, dependency and validation checks still apply to mutations.
+
+Set `includeDescendants: true` only for an explicitly authorized parent inventory.
+It includes blocked, claimed and terminal descendants, never siblings. Set
+`limit` (1–100), then pass `nextAfterId` as `afterId` with unchanged options until
+null. Each page reflects current state. Archive inclusion is explicit through
+`includeArchived: true`. Unresolved prerequisite IDs are capped at 100; compare
+`unresolvedDependencyCount`. Reads never clean up expired claims or change records.
+
+## Completion evidence and atomic completion
+
+`actionables.get_completion_view` combines the claimed task's outstanding
+machine requirements and planned checks with descendant status, Resolution and
+qualifying validation. Pages contain task-labeled native values or text chunks,
+at most 40 items and 8,000 serialized item characters. Keep version, claim token,
+contentHash and archive option across nextOffset pages. Related evidence changes
+invalidate partial results. Archived descendant evidence needs includeArchived;
+unfinished archived work still contributes to parent blockers. This read makes
+no changes, including expired-claim cleanup. Child results do not prove the
+parent's own acceptance criteria or live checks.
+
+`actionables.complete_task` saves Resolution, optional actual Passed validation,
+the normal Done transition and claim release in one transaction. Existing
+qualifying evidence may be used when validation is omitted. Failed/Partial
+results belong in separate validation records while the task stays open. Any
+rejected completion rolls back its proposed changes. Lifecycle, current
+validation, descendant, archive, ownership and version guards remain in force.
+
+Supply one stable UUID per intended completion. Identical authorized retries
+return a persisted receipt without duplicate evidence or activity, even after
+claim release, only while the final task state remains unchanged. Changed input
+or later state requires reconciliation. Internal completion failures may allow
+one identical retry through retryMode; keep its key and arguments unchanged.
+No plaintext claim credential is stored in the completion receipt or audit.
+Individual update, validation, transition and handoff tools remain supported.
+
+## Dependency coordination
+
+`actionables.create_dependency` and `actionables.remove_dependency` reuse the
+dashboard's dependency operations. Supply a claimed coordinator's `id`, original
+`workItemId`, `claimToken` and `version`, plus explicit `dependentId`,
+`dependentVersion`, `prerequisiteId` and `prerequisiteVersion`. Both endpoints
+must be in that coordinator's subtree, including itself. Removal also requires
+`reason`. These operations preserve cycle and endpoint version checks, reject
+archived endpoints and another agent's live ownership, and write existing
+endpoint audits plus coordinator provenance in the same transaction.
+
+The receipt reports the persisted edge ID/removal state, endpoint versions,
+dependent blocker count and renewed coordinator lease. Use the returned versions
+for the next mutation. On uncertain delivery inspect both endpoints first;
+stale/duplicate retries cannot create another edge. Use real prerequisite edges
+for authorized splits; keep preferred ordering between independent tasks as prose.
+
 ## Agent workflow
 
 Codex supplies its technical thread ID in MCP request metadata. Actionables
 derives claim ownership and creator provenance from that host metadata; agents
 do not supply or invent an `agentId`.
 
-The server instructions direct agents to use this sequence:
+Initialization sends concise coordination safeguards, because some hosts repeat
+server instructions beside every tool. The full canonical workflow is available
+once from the installed skill or the `actionables://workflow` MCP resource
+(`resources/list` then `resources/read`). Discover tool names first and inspect
+only the needed schemas; avoid dumping all descriptions. Resource reads require
+the same authenticated MCP connection and do not read or mutate task state.
+
+The full workflow directs agents to use this sequence:
 
 1. List `mine`.
 2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. Reuse a UUID only for an exact retry.
 3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy the structured `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Retain `correlationId` when diagnostics are needed. `retryable` and `nextAction` remain only for legacy compatibility. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
-6. Start from the compact task detail returned by claim or terminal inspection. Before treating it as complete, inspect `task.truncation.reconciliationGuidance`. When guidance is present, reconcile every supported implementation-critical field it names with `actionables.get_task_detail`: use the compact task version and the same read authorization (`claimToken` for active claimed work or `workItemId` for terminal inspection) at offset 0, then pass `contentHash` with each `nextOffset` until null, concatenate `json` in order, and JSON-parse the complete value. If any page returns `VERSION_CONFLICT`, discard the partial value and restart from the current compact detail. If a terminal page returns `TERMINAL_READ_INVALIDATED`, discard partial pages and stop terminal inspection; continued access requires the normal authorized list and claim flow before reading the active task with `claimToken`. Do not move the task forward or edit files until every named supported field is reconciled. When guidance is absent, any reported loss is noncritical to scope and planned validation and the normal flow may continue.
+6. Start from compact detail and inspect `task.truncation.reconciliationGuidance`. For claimed active work, prefer `actionables.get_task_context` with its exact version and claimToken. Follow nextOffset with the first contentHash until complete. Native values and labeled text chunks cover scope, research, planned validation, references and relationships together; fieldCounts identifies empty fields. No JSON-fragment assembly is needed. Terminal lifecycle detail and older servers retain `get_task_detail` with their existing field-by-field JSON contract. Discard partial results on version or authorization failures and reconcile before continuing. Do not advance or edit until critical fields are complete; absent guidance, normal flow may continue.
 7. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
 8. For a newly claimed Inbox task, transition to `Researching` before investigation.
 9. Before transitioning to `Ready` or advancing Ready to `In progress`, inspect the latest `readiness.requiredForReady` and `permittedTransitions`. Ready requires non-empty finding, description, Research, and planned validation. Supply each named missing field and do not make the transition until `requiredForReady` is empty and the target is permitted.
@@ -402,7 +468,13 @@ The endpoint exposes exactly these tools:
 - `actionables.bulk_prepare_tasks`
 - `actionables.list_tasks`
 - `actionables.search_completed_tasks`
+- `actionables.inspect_task`
+- `actionables.create_dependency`
+- `actionables.remove_dependency`
 - `actionables.get_task_history`
+- `actionables.get_task_context`
+- `actionables.get_completion_view`
+- `actionables.complete_task`
 - `actionables.get_task`
 - `actionables.get_task_detail`
 - `actionables.claim_task`
@@ -415,7 +487,21 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-Active list results are limited to 100 tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Completed history search is separately limited to 100 matches and uses `nextCursor`. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes the named implementation-critical fields and Resolution as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or a subtask at any depth, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+Active lists cap results at 100, report `hasMore`, and identify scoped terminal
+work items even when empty. Explicit inspection and completed search have their
+own bounded continuation cursors. Compact detail reports truncation and omitted
+counts. Critical lost scope or validation content must be reconciled before
+advancing or editing; prefer native `get_task_context` pages for claimed work
+and `get_completion_view` for consolidated completion evidence. Exact-field
+`get_task_detail` remains compatible with its version/hash-bound 8,000-character
+JSON pages. Successful reads never return claim credentials or renew claims.
+
+Handled errors preserve the same machine-readable code, correlation ID, retry
+mode, recovery, field errors and current version in structured content and JSON
+text. The endpoint supports task creation at any depth, scoped dependency
+creation/removal, atomic completion and the workflow resource. It does not
+otherwise edit hierarchy, expose MCP prompts, use experimental MCP Tasks, or
+support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.

@@ -1,5 +1,6 @@
 import {
   actionableDetailResponseSchema,
+  inspectAgentTaskResponseSchema,
   codexWorkspaceResponseSchema,
   actionablesListResponseSchema,
   agentIntegrationInstallResponseSchema,
@@ -126,6 +127,29 @@ export async function fetchCodexWorkspace(
   return codexWorkspaceResponseSchema.parse(
     await requestJson(`/api/actionables/${id}/codex-workspace`),
   );
+}
+
+/** Read the complete explicit subtree for prompt selection, including unavailable task states. */
+export async function fetchCodexSubtasks(id: number) {
+  const first = inspectAgentTaskResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/codex-subtasks`),
+  );
+  const descendants = [...first.descendants];
+  let afterId = first.nextAfterId;
+  while (afterId !== null) {
+    const page = inspectAgentTaskResponseSchema.parse(
+      await requestJson(
+        `/api/actionables/${id}/codex-subtasks?afterId=${afterId}`,
+      ),
+    );
+    if (page.task.version !== first.task.version)
+      throw new Error(
+        "The parent changed. Refresh subtasks before preparing a prompt.",
+      );
+    descendants.push(...page.descendants);
+    afterId = page.nextAfterId;
+  }
+  return { ...first, descendants, nextAfterId: null };
 }
 
 export async function fetchScopeOptions(): Promise<ScopeOptionsResponse> {

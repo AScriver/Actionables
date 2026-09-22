@@ -1,6 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   actionableDetailSchema,
+  completeClaimedAgentTaskRequestSchema,
+  agentTaskCompletionReceiptSchema,
+  agentDependencyReceiptSchema,
+  createAgentDependencyRequestSchema,
+  removeAgentDependencyRequestSchema,
   actionableReadinessSchema,
   actionablesErrorPayload,
   agentTaskClaimCredentialSchema,
@@ -15,6 +20,8 @@ import {
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
   handoffClaimedAgentTaskRequestSchema,
+  inspectAgentTaskRequestSchema,
+  inspectAgentTaskResponseSchema,
   listAgentTasksResponseSchema,
   recoverAgentTaskClaimRequestSchema,
   recordClaimedAgentTaskValidationRequestSchema,
@@ -54,9 +61,13 @@ import {
   createAgentTask,
   dismissAgentTaskWithProjection,
   getClaimedAgentTask,
+  getClaimedCompletionSnapshot,
+  completeClaimedAgentTask,
   getScopedTerminalAgentTask,
   handoffClaimedAgentTaskWithProjection,
+  inspectAgentTask,
   listAgentTasks,
+  manageClaimedAgentDependency,
   recoverAgentTaskClaimWithProjection,
   recordClaimedAgentTaskValidationWithProjection,
   releaseAgentTaskClaimWithProjection,
@@ -245,6 +256,29 @@ const getTaskHistorySchema = z
       });
     }
   });
+const getTaskContextSchema = z
+  .object({
+    id: idSchema,
+    claimToken: releaseAgentTaskClaimRequestSchema.shape.claimToken,
+    version: getTaskDetailSchema.shape.version,
+    offset: getTaskDetailSchema.shape.offset.describe(
+      "Content item offset: start at 0, then use nextOffset until null.",
+    ),
+    contentHash: getTaskDetailSchema.shape.contentHash,
+  })
+  .strict()
+  .refine((input) => input.offset === 0 || Boolean(input.contentHash), {
+    path: ["contentHash"],
+    message: "A returned contentHash is required after the first page.",
+  });
+const getCompletionViewSchema = getTaskContextSchema.safeExtend({
+  includeArchived: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Explicitly include archived descendant evidence; the claimed parent must remain active.",
+    ),
+});
 const claimTaskSchema = z
   .object({
     id: idSchema,
@@ -509,11 +543,18 @@ const taskDetailPageSchema = z
   .strict();
 
 const historyFieldSchema = z.enum([
+  "finding",
+  "description",
   "research",
+  "plannedValidation",
   "resolution",
   "userSources",
   "files",
   "sourceThread",
+  "parent",
+  "subtasks",
+  "blockedBy",
+  "validationRecords",
 ]);
 const historyPropertySchema = z.enum([
   "type",
@@ -522,6 +563,17 @@ const historyPropertySchema = z.enum([
   "path",
   "lines",
   "symbol",
+  "id",
+  "title",
+  "status",
+  "outcome",
+  "notes",
+  "evidence",
+  "origin",
+  "recordedAt",
+  "supersedesId",
+  "supersededById",
+  "qualifiesForCompletion",
 ]);
 const historyItemIdentity = {
   field: historyFieldSchema,
@@ -542,6 +594,10 @@ const historyItemSchema = z.discriminatedUnion("kind", [
           })
           .strict(),
         actionableDetailSchema.shape.files.element,
+        actionableDetailSchema.shape.validationRecords.element,
+        z
+          .object({ id: idSchema, title: z.string(), status: statusSchema })
+          .strict(),
       ]),
     })
     .strict(),
@@ -582,25 +638,64 @@ const taskHistoryPageSchema = z
   .strict();
 /** Bounded terminal history returned to MCP agents. */
 export type TaskHistoryPage = z.infer<typeof taskHistoryPageSchema>;
+const taskContextPageSchema = taskHistoryPageSchema.extend({
+  status: statusSchema,
+  fieldCounts: z.record(historyFieldSchema, z.number().int().nonnegative()),
+});
+/** Bounded active context; values share the terminal history chunk contract. */
+export type TaskContextPage = z.infer<typeof taskContextPageSchema>;
+const completionTaskReferenceSchema = z
+  .object({
+    id: idSchema,
+    workItemId: idSchema,
+    version: z.number().int().positive(),
+    title: z.string().max(240),
+    status: statusSchema,
+    isArchived: z.boolean(),
+    plannedValidationCount: z.number().int().nonnegative(),
+    qualifyingValidationCount: z.number().int().nonnegative(),
+  })
+  .strict();
+const completionItemSchema = z.discriminatedUnion("kind", [
+  historyItemSchema.options[0].extend({ task: completionTaskReferenceSchema }),
+  historyItemSchema.options[1].extend({ task: completionTaskReferenceSchema }),
+]);
+const completionViewSchema = taskContextPageSchema
+  .omit({ fieldCounts: true, items: true })
+  .extend({
+    progress: actionableDetailSchema.shape.directTaskProgress,
+    outstandingRequirements: z.array(z.string().max(300)).max(4),
+    acceptanceGuidance: z.string().max(500),
+    unresolvedDependencyCount: z.number().int().nonnegative(),
+    excludedArchivedDescendants: z.number().int().nonnegative(),
+    items: z.array(completionItemSchema).max(40),
+  });
+/** Parent requirements and native, task-labeled descendant completion evidence. */
+export type CompletionView = z.infer<typeof completionViewSchema>;
 type HistoryItem = TaskHistoryPage["items"][number];
-type HistoryValues = Record<
-  z.infer<typeof historyFieldSchema>,
-  Array<z.infer<(typeof historyItemSchema.options)[0]>["value"]>
+type HistoryValues = Partial<
+  Record<
+    z.infer<typeof historyFieldSchema>,
+    Array<z.infer<(typeof historyItemSchema.options)[0]>["value"]>
+  >
 >;
 
 /** Keeps whole values when they fit; large values become independently readable text. */
-function* taskHistoryItems(values: HistoryValues): Generator<HistoryItem> {
+function* taskHistoryItems(
+  values: HistoryValues,
+  itemBudget = taskDetailPageCharacters - 2,
+): Generator<HistoryItem> {
   for (const field of historyFieldSchema.options) {
-    for (const [index, value] of values[field].entries()) {
+    for (const [index, value] of (values[field] ?? []).entries()) {
       const item = { field, index, kind: "value" as const, value };
-      if (JSON.stringify(item).length <= taskDetailPageCharacters - 2) {
+      if (JSON.stringify(item).length <= itemBudget) {
         yield item;
         continue;
       }
       const parts: Array<[string | undefined, string]> =
         typeof value === "string"
           ? [[undefined, value]]
-          : Object.entries(value);
+          : Object.entries(value).map(([key, value]) => [key, String(value)]);
       for (const [property, text] of parts) {
         let offset = 0;
         do {
@@ -636,11 +731,50 @@ function* taskHistoryItems(values: HistoryValues): Generator<HistoryItem> {
   }
 }
 
-/** Projects one terminal snapshot without invoking claim reads or changing lifecycle state. */
+/** Bound any native content stream by both serialized size and item count. */
+function readableItemsPage<T>(stream: Iterable<T>, offset: number) {
+  const items: T[] = [];
+  let totalItems = 0;
+  let size = 2;
+  let pageFull = false;
+  for (const item of stream) {
+    const ordinal = totalItems++;
+    if (ordinal < offset || pageFull) continue;
+    const length = JSON.stringify(item).length + (items.length ? 1 : 0);
+    if (items.length === 40 || size + length > taskDetailPageCharacters) {
+      pageFull = true;
+      continue;
+    }
+    items.push(item);
+    size += length;
+  }
+  if (offset >= totalItems)
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "The requested content offset is outside the content.",
+      { offset: ["Start at 0, then use only a returned nextOffset."] },
+    );
+  const remainingItems = totalItems - offset - items.length;
+  return {
+    items,
+    offset,
+    totalItems,
+    remainingItems,
+    complete: remainingItems === 0,
+    nextOffset: remainingItems ? offset + items.length : null,
+  };
+}
+
+/** Projects bounded native content using the same chunk contract for active and terminal tasks. */
 function taskHistoryPage(
   task: ActionableDetail,
-  input: z.infer<typeof getTaskHistorySchema>,
+  input: Pick<
+    z.infer<typeof getTaskHistorySchema>,
+    "version" | "offset" | "contentHash"
+  >,
+  activeContext = false,
 ) {
+  if (task.version !== input.version) throw new VersionConflictError(task);
   const values: HistoryValues = {
     research: task.research,
     resolution: [task.resolution],
@@ -651,6 +785,23 @@ function taskHistoryPage(
     })),
     files: task.files,
     sourceThread: [task.sourceThread],
+    ...(activeContext
+      ? {
+          finding: [task.finding],
+          description: [task.description],
+          plannedValidation: task.validation,
+          validationRecords: task.validationRecords,
+          parent: task.relationships.parent
+            ? [taskReference(task.relationships.parent.parent)]
+            : [],
+          subtasks: task.relationships.subtasks.map(({ child }) =>
+            taskReference(child),
+          ),
+          blockedBy: task.relationships.blockedBy.map(({ prerequisite }) =>
+            taskReference(prerequisite),
+          ),
+        }
+      : {}),
   };
   const metadata = {
     id: task.id,
@@ -659,11 +810,18 @@ function taskHistoryPage(
     status: task.status,
     archiveState: task.archiveState,
     updatedAt: task.updatedAt,
-    fieldCounts: {
-      research: task.research.length,
-      userSources: task.userSources.length,
-      files: task.files.length,
-    },
+    fieldCounts: activeContext
+      ? Object.fromEntries(
+          historyFieldSchema.options.map((field) => [
+            field,
+            values[field]?.length ?? 0,
+          ]),
+        )
+      : {
+          research: task.research.length,
+          userSources: task.userSources.length,
+          files: task.files.length,
+        },
   };
   const contentHash = createHash("sha256")
     .update(JSON.stringify({ metadata, values }))
@@ -676,38 +834,108 @@ function taskHistoryPage(
       task.version,
     );
   }
-  const items: HistoryItem[] = [];
-  let totalItems = 0;
-  let size = 2;
-  let pageFull = false;
-  for (const item of taskHistoryItems(values)) {
-    const ordinal = totalItems++;
-    if (ordinal < input.offset || pageFull) continue;
-    const length = JSON.stringify(item).length + (items.length ? 1 : 0);
-    if (items.length === 40 || size + length > taskDetailPageCharacters) {
-      pageFull = true;
-      continue;
-    }
-    items.push(item);
-    size += length;
-  }
-  if (input.offset >= totalItems) {
-    throw new AgentTaskClaimError(
-      "INVALID_REQUEST",
-      "The requested history offset is outside the content.",
-      { offset: ["Start at 0, then use only a returned nextOffset."] },
-    );
-  }
-  const remainingItems = totalItems - input.offset - items.length;
-  return taskHistoryPageSchema.parse({
+  return (activeContext ? taskContextPageSchema : taskHistoryPageSchema).parse({
     ...metadata,
     contentHash,
-    items,
-    offset: input.offset,
-    totalItems,
-    remainingItems,
-    complete: remainingItems === 0,
-    nextOffset: remainingItems ? input.offset + items.length : null,
+    ...readableItemsPage(taskHistoryItems(values), input.offset),
+  });
+}
+
+/** Keep descendant evidence distinct from the parent's own acceptance requirements. */
+function completionView(
+  snapshot: Awaited<ReturnType<typeof getClaimedCompletionSnapshot>>,
+  input: z.infer<typeof getCompletionViewSchema>,
+) {
+  const task = snapshot.task;
+  const outstandingRequirements: string[] = [];
+  if (task.status !== "In progress")
+    outstandingRequirements.push(
+      "Move this task through its required lifecycle to In progress before completion.",
+    );
+  if (task.directTaskProgress?.open)
+    outstandingRequirements.push(
+      `Complete or dismiss ${task.directTaskProgress.open} unfinished descendants, including archived work.`,
+    );
+  if (!task.resolution.trim())
+    outstandingRequirements.push(
+      "Save a Resolution describing completed changes and decisions.",
+    );
+  if (!task.completionEligibility.qualifyingValidationRecordId)
+    outstandingRequirements.push(
+      "Record current Passed validation after the latest move into In progress.",
+    );
+  const nodes = [
+    task,
+    ...snapshot.descendants.filter(
+      (child) => input.includeArchived || !child.archiveState.isArchived,
+    ),
+  ].map((node) => ({
+    task: {
+      id: node.id,
+      workItemId: node.workItemId,
+      version: node.version,
+      title: truncate(node.title, 240),
+      status: node.status,
+      isArchived: node.archiveState.isArchived,
+      plannedValidationCount: node.validation.length,
+      qualifyingValidationCount: node.validationRecords.filter(
+        (record) => record.qualifiesForCompletion,
+      ).length,
+    },
+    values: {
+      resolution: [node.resolution],
+      plannedValidation: node.validation,
+      validationRecords: node.validationRecords.filter(
+        (record) => record.qualifiesForCompletion,
+      ),
+    } satisfies HistoryValues,
+  }));
+  const metadata = {
+    id: task.id,
+    workItemId: task.workItemId,
+    version: task.version,
+    status: task.status,
+    archiveState: task.archiveState,
+    updatedAt: task.updatedAt,
+    progress: task.directTaskProgress,
+    outstandingRequirements,
+    unresolvedDependencyCount: task.unresolvedDependencyCount,
+    excludedArchivedDescendants: snapshot.descendants.filter(
+      (child) => child.archiveState.isArchived && !input.includeArchived,
+    ).length,
+    acceptanceGuidance:
+      "Review this parent's plannedValidation and record actual aggregate evidence. Child Resolution and qualifying results do not prove parent acceptance, deployment or other live checks. complete_task enforces the existing Done rules atomically; no completion override is supplied.",
+  };
+  const contentHash = createHash("sha256")
+    .update(
+      JSON.stringify({
+        metadata,
+        nodes,
+        includeArchived: input.includeArchived,
+      }),
+    )
+    .digest("hex");
+  if (input.contentHash && input.contentHash !== contentHash)
+    throw new AgentTaskClaimError(
+      "VERSION_CONFLICT",
+      "Parent or descendant completion evidence changed; discard partial pages and read again.",
+      undefined,
+      task.version,
+    );
+  function* items() {
+    for (const node of nodes) {
+      const identitySize = JSON.stringify({ task: node.task }).length - 1;
+      for (const item of taskHistoryItems(
+        node.values,
+        taskDetailPageCharacters - 2 - identitySize,
+      ))
+        yield { ...item, task: node.task };
+    }
+  }
+  return completionViewSchema.parse({
+    ...metadata,
+    contentHash,
+    ...readableItemsPage(items(), input.offset),
   });
 }
 
@@ -715,7 +943,11 @@ function truncate(value: string, max: number) {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
-function taskReference(item: { id: number; title: string; status: string }) {
+function taskReference(item: {
+  id: number;
+  title: string;
+  status: ActionableDetail["status"];
+}) {
   return { id: item.id, title: item.title, status: item.status };
 }
 
@@ -938,7 +1170,7 @@ function compactTask(
       ...(requiresReconciliation
         ? {
             reconciliationGuidance:
-              "Critical detail was truncated. Page supported truncatedFields (finding, description, resolution, research, plannedValidation, files, userSources, parent, subtasks, blockedBy) with actionables.get_task_detail, the compact version and the same authorization and includeArchived. Pass contentHash with each nextOffset until null; join json and JSON-parse it. On VERSION_CONFLICT, discard pages and restart. On TERMINAL_READ_INVALIDATED, discard pages and stop terminal inspection. Do not move the task forward or edit files until reconciliation is complete.",
+              "Critical detail was truncated. For claimed active work, read actionables.get_task_context with this version and claimToken; follow nextOffset with contentHash until complete. It returns readable values for all supported fields together. For terminal detail or older servers, use actionables.get_task_detail with the same authorization/version and includeArchived; join json pages and parse the value. On VERSION_CONFLICT or authorization failure, discard partial content and reconcile. Do not move the task forward or edit files until reconciliation is complete.",
           }
         : {}),
     },
@@ -1160,8 +1392,32 @@ function createActionablesMcpServer(
   const server = new McpServer(
     { name: "actionables", version: "0.1.0" },
     {
-      instructions: bundledActionablesWorkflowInstructions(),
+      instructions:
+        "Read the full Actionables workflow once from actionables://workflow or the installed actionables-workflow skill. Discover tool names first, then inspect only the schemas needed for the current operation. " +
+        "Stay within user-authorized scope. List mine, then list available with the explicitly identified top-level workItemId; never discover unrelated work. Create tasks only when authorized, using stable idempotency keys. " +
+        "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
+        "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +
+        "structuredContent is authoritative. Check isError before dependent calls and follow retryMode/recovery; reconcile uncertain mutation delivery instead of blindly replaying. Use handoff to save unfinished work before releasing ownership.",
     },
+  );
+  server.registerResource(
+    "actionables-workflow",
+    "actionables://workflow",
+    {
+      title: "Actionables workflow",
+      description:
+        "Full task coordination workflow; read once per work session.",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: bundledActionablesWorkflowInstructions(),
+        },
+      ],
+    }),
   );
   const readOnly = {
     readOnlyHint: true,
@@ -1293,6 +1549,51 @@ function createActionablesMcpServer(
       }),
   );
   server.registerTool(
+    "actionables.inspect_task",
+    {
+      title: "Inspect an explicit Actionable",
+      description:
+        "Read an explicitly named task without a claim; resolves its original workItemId and immediate parent. Optionally page only its descendants, including blocked, claimed and terminal tasks. Archived inclusion is explicit. Continue with nextAfterId as afterId and unchanged options until null; pages reflect current state. Availability reasons and bounded blocker IDs explain exclusion from available work; compare unresolvedDependencyCount for omitted IDs. Lifecycle permittedTransitions still require ownership and all normal mutation checks. Never claims, expires, renews, restores or changes records, and never authorizes siblings.",
+      inputSchema: inspectAgentTaskRequestSchema,
+      outputSchema: inspectAgentTaskResponseSchema,
+      annotations: readOnly,
+    },
+    (input) =>
+      runReadTool("actionables.inspect_task", () =>
+        inspectAgentTask(prisma, input),
+      ),
+  );
+  server.registerTool(
+    "actionables.create_dependency",
+    {
+      title: "Record an Actionable prerequisite",
+      description:
+        "Create a confirmed blocking dependency using a claimed coordinator and explicit endpoint IDs/versions in that coordinator's subtree. Supply original workItemId and the coordinator's id, claimToken and version. Both endpoint versions change; use the persisted receipt for subsequent changes. Rejects cycles, duplicates, archived endpoints, other-agent ownership and scope/version conflicts. Creates normal relationship audits plus coordinator provenance. Preferred execution order alone is not a dependency. On uncertain delivery inspect both endpoints before retrying; stale or duplicate retries never create another edge.",
+      inputSchema: createAgentDependencyRequestSchema,
+      outputSchema: agentDependencyReceiptSchema,
+      annotations: mutation,
+    },
+    (input) =>
+      runMutationTool("actionables.create_dependency", () =>
+        manageClaimedAgentDependency(prisma, input, "create"),
+      ),
+  );
+  server.registerTool(
+    "actionables.remove_dependency",
+    {
+      title: "Remove an Actionable prerequisite",
+      description:
+        "Remove the existing dependency between explicit dependent/prerequisite IDs under a claimed coordinator, with a required reason and current coordinator/endpoint versions. Uses the same scope, ownership and archive guards as create_dependency; no waiver or restoration is implied. The receipt verifies persisted removal and remaining blocker count. Both endpoint versions change. On uncertain delivery inspect state before retrying; a repeated removal cannot mutate an unrelated edge.",
+      inputSchema: removeAgentDependencyRequestSchema,
+      outputSchema: agentDependencyReceiptSchema,
+      annotations: { ...mutation, destructiveHint: true },
+    },
+    (input) =>
+      runMutationTool("actionables.remove_dependency", () =>
+        manageClaimedAgentDependency(prisma, input, "remove"),
+      ),
+  );
+  server.registerTool(
     "actionables.search_completed_tasks",
     {
       title: "Search completed Actionables",
@@ -1305,6 +1606,70 @@ function createActionablesMcpServer(
     (input) =>
       runReadTool("actionables.search_completed_tasks", () =>
         searchCompletedTasks(prisma, input),
+      ),
+  );
+  server.registerTool(
+    "actionables.get_task_context",
+    {
+      title: "Read complete active Actionable context",
+      description:
+        "Read finding, description, research, plannedValidation, Resolution, validationRecords, files, userSources, sourceThread, parent, subtasks and blockedBy together using a valid claimToken and exact task version. Native values and labeled plain-text chunks use the get_task_history format: at most 40 items and 8,000 serialized item characters per page. fieldCounts includes empty fields; complete, remainingItems and nextOffset make continuation explicit. Start at offset 0, then keep the same version and contentHash with every nextOffset until null. No JSON-fragment reconstruction is needed. Every page revalidates the claim; stale versions, changed relationship content and invalid claims stop retrieval. Discard partial context on failure and reconcile. Existing claim-expiry cleanup applies; a successful read never renews or changes the task.",
+      inputSchema: getTaskContextSchema,
+      outputSchema: taskContextPageSchema,
+      annotations: readOnly,
+    },
+    ({ id, claimToken, ...input }) =>
+      runMutationTool("actionables.get_task_context", async () =>
+        taskHistoryPage(
+          await getClaimedAgentTask(prisma, id, { claimToken }),
+          input,
+          true,
+        ),
+      ),
+  );
+  server.registerTool(
+    "actionables.get_completion_view",
+    {
+      title: "Review parent and descendant completion evidence",
+      description:
+        "Read a claimed task's own completion requirements, planned checks, descendant status, Resolution and qualifying validation together. Native values/text chunks are labeled with task metadata and use the context/history format, capped at 40 items and 8,000 serialized item characters. Start at offset 0; follow nextOffset with the same claimToken, version, contentHash and includeArchived until complete. Archived descendant evidence requires explicit opt-in; unfinished archived descendants still count as blockers. Changed evidence invalidates paging. This read never cleans up or renews claims. Child evidence does not prove parent acceptance: review the parent's own planned validation and perform required aggregate/live checks.",
+      inputSchema: getCompletionViewSchema,
+      outputSchema: completionViewSchema,
+      annotations: readOnly,
+    },
+    (input) =>
+      runReadTool("actionables.get_completion_view", async () =>
+        completionView(
+          await getClaimedCompletionSnapshot(prisma, input.id, input),
+          input,
+        ),
+      ),
+  );
+  server.registerTool(
+    "actionables.complete_task",
+    {
+      title: "Complete an Actionable atomically",
+      description:
+        "Save Resolution, optionally record actual Passed validation, enforce existing Done rules and release the claim in one transaction. Requires a valid claim and exact version, In progress lifecycle, terminal descendants and current qualifying validation; omitted validation uses existing qualifying evidence. Failed/Partial results must be recorded separately while work remains open. Rejection leaves the attempted completion unchanged. Use one caller-stable UUID and identical arguments for an uncertain/exact retry: a saved secret-free receipt prevents duplicate evidence/activity, and replay succeeds only while completed task state is unchanged. Child completion does not waive parent acceptance or approvals. Returns persisted terminal state and validation IDs.",
+      inputSchema: completeClaimedAgentTaskRequestSchema.extend({
+        id: idSchema,
+      }),
+      outputSchema: agentTaskCompletionReceiptSchema,
+      annotations: { ...mutation, idempotentHint: true },
+    },
+    ({ id, ...input }, extra) =>
+      runTool(
+        {
+          ...requestContext,
+          toolName: "actionables.complete_task",
+          internalRetryMode: "same_request",
+        },
+        async () => {
+          await assertDatabaseSchemaReady(prisma);
+          return completeClaimedAgentTask(prisma, id, input, {
+            threadId: requestThreadId(extra),
+          });
+        },
       ),
   );
   server.registerTool(

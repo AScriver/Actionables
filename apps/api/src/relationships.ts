@@ -592,76 +592,83 @@ export async function detachParent(
   });
 }
 
+/** Create a versioned dependency, optionally inside an existing coordination transaction. */
 export async function createDependency(
   prisma: AppPrismaClient,
   dependentOrdinal: number,
   input: CreateDependencyRequest,
+  existingTransaction?: Transaction,
 ) {
-  return runMutation(prisma, dependentOrdinal, async (tx) => {
-    if (dependentOrdinal === input.prerequisiteId) {
-      throw new DomainValidationError(
-        "SELF_DEPENDENCY",
-        { prerequisiteId: ["An actionable cannot depend on itself."] },
-        "Self-dependencies are not allowed.",
+  return runMutation(
+    prisma,
+    dependentOrdinal,
+    async (tx) => {
+      if (dependentOrdinal === input.prerequisiteId) {
+        throw new DomainValidationError(
+          "SELF_DEPENDENCY",
+          { prerequisiteId: ["An actionable cannot depend on itself."] },
+          "Self-dependencies are not allowed.",
+        );
+      }
+      const dependent = await requireActionable(
+        tx,
+        dependentOrdinal,
+        "dependent",
       );
-    }
-    const dependent = await requireActionable(
-      tx,
-      dependentOrdinal,
-      "dependent",
-    );
-    const prerequisite = await requireActionable(
-      tx,
-      input.prerequisiteId,
-      "prerequisiteId",
-    );
-    requireVersion(dependent, input.version);
-    requireVersion(prerequisite, input.prerequisiteVersion);
-    const duplicate = await tx.dependencyRelationship.findFirst({
-      where: {
-        dependentId: dependent.id,
-        prerequisiteId: prerequisite.id,
-        removedAt: null,
-      },
-    });
-    if (duplicate) {
-      throw new DomainValidationError(
-        "DUPLICATE_DEPENDENCY",
-        { prerequisiteId: ["That active dependency already exists."] },
-        "The dependency already exists.",
+      const prerequisite = await requireActionable(
+        tx,
+        input.prerequisiteId,
+        "prerequisiteId",
       );
-    }
-    await assertNoDependencyCycle(tx, dependent.id, prerequisite.id);
-    const relationship = await tx.dependencyRelationship.create({
-      data: { dependentId: dependent.id, prerequisiteId: prerequisite.id },
-    });
-    await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
-    await bump(
-      tx,
-      prerequisite.id,
-      prerequisite.sourceOrdinal,
-      prerequisite.version,
-    );
-    const context = {
-      dependencyRelationshipId: relationship.id,
-      dependentOrdinal: String(dependent.sourceOrdinal),
-      prerequisiteOrdinal: String(prerequisite.sourceOrdinal),
-    };
-    await activity(
-      tx,
-      dependent.id,
-      "dependency-added",
-      `Blocked by ${prerequisite.sourceOrdinal}`,
-      context,
-    );
-    await activity(
-      tx,
-      prerequisite.id,
-      "dependency-added",
-      `Now blocks ${dependent.sourceOrdinal}`,
-      context,
-    );
-  });
+      requireVersion(dependent, input.version);
+      requireVersion(prerequisite, input.prerequisiteVersion);
+      const duplicate = await tx.dependencyRelationship.findFirst({
+        where: {
+          dependentId: dependent.id,
+          prerequisiteId: prerequisite.id,
+          removedAt: null,
+        },
+      });
+      if (duplicate) {
+        throw new DomainValidationError(
+          "DUPLICATE_DEPENDENCY",
+          { prerequisiteId: ["That active dependency already exists."] },
+          "The dependency already exists.",
+        );
+      }
+      await assertNoDependencyCycle(tx, dependent.id, prerequisite.id);
+      const relationship = await tx.dependencyRelationship.create({
+        data: { dependentId: dependent.id, prerequisiteId: prerequisite.id },
+      });
+      await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
+      await bump(
+        tx,
+        prerequisite.id,
+        prerequisite.sourceOrdinal,
+        prerequisite.version,
+      );
+      const context = {
+        dependencyRelationshipId: relationship.id,
+        dependentOrdinal: String(dependent.sourceOrdinal),
+        prerequisiteOrdinal: String(prerequisite.sourceOrdinal),
+      };
+      await activity(
+        tx,
+        dependent.id,
+        "dependency-added",
+        `Blocked by ${prerequisite.sourceOrdinal}`,
+        context,
+      );
+      await activity(
+        tx,
+        prerequisite.id,
+        "dependency-added",
+        `Now blocks ${dependent.sourceOrdinal}`,
+        context,
+      );
+    },
+    existingTransaction,
+  );
 }
 
 async function mutateDependency(
@@ -670,111 +677,129 @@ async function mutateDependency(
   relationshipId: string,
   input: DependencyActionRequest,
   action: "remove" | "waive" | "restore",
+  existingTransaction?: Transaction,
 ) {
-  return runMutation(prisma, dependentOrdinal, async (tx) => {
-    const dependent = await requireActionable(
-      tx,
-      dependentOrdinal,
-      "dependent",
-    );
-    requireVersion(dependent, input.version);
-    const relationship = await tx.dependencyRelationship.findUnique({
-      where: { id: relationshipId },
-      include: { prerequisite: true },
-    });
-    if (!relationship || relationship.dependentId !== dependent.id) {
-      throw new DomainValidationError(
-        "DEPENDENCY_NOT_FOUND",
-        { relationship: ["Choose a dependency owned by this actionable."] },
-        "The dependency relationship does not exist.",
+  return runMutation(
+    prisma,
+    dependentOrdinal,
+    async (tx) => {
+      const dependent = await requireActionable(
+        tx,
+        dependentOrdinal,
+        "dependent",
       );
-    }
-    requireVersion(relationship.prerequisite, input.prerequisiteVersion);
-    const reason = input.reason?.trim() ?? "";
-    if ((action === "waive" || action === "remove") && !reason) {
-      throw new DomainValidationError(
-        "REASON_REQUIRED",
-        { reason: [`Enter a reason to ${action} this dependency.`] },
-        "A relationship change reason is required.",
+      requireVersion(dependent, input.version);
+      const relationship = await tx.dependencyRelationship.findUnique({
+        where: { id: relationshipId },
+        include: { prerequisite: true },
+      });
+      if (!relationship || relationship.dependentId !== dependent.id) {
+        throw new DomainValidationError(
+          "DEPENDENCY_NOT_FOUND",
+          { relationship: ["Choose a dependency owned by this actionable."] },
+          "The dependency relationship does not exist.",
+        );
+      }
+      requireVersion(relationship.prerequisite, input.prerequisiteVersion);
+      const reason = input.reason?.trim() ?? "";
+      if ((action === "waive" || action === "remove") && !reason) {
+        throw new DomainValidationError(
+          "REASON_REQUIRED",
+          { reason: [`Enter a reason to ${action} this dependency.`] },
+          "A relationship change reason is required.",
+        );
+      }
+      if (action === "remove" && relationship.removedAt) {
+        throw new DomainValidationError(
+          "DEPENDENCY_REMOVED",
+          { relationship: ["This dependency is already removed."] },
+          "The dependency is already removed.",
+        );
+      }
+      if (
+        action === "waive" &&
+        (relationship.removedAt || relationship.waivedAt)
+      ) {
+        throw new DomainValidationError(
+          "DEPENDENCY_NOT_ACTIVE",
+          {
+            relationship: [
+              "Only an unresolved active dependency can be waived.",
+            ],
+          },
+          "The dependency cannot be waived.",
+        );
+      }
+      if (action === "restore") {
+        await assertNoDependencyCycle(
+          tx,
+          dependent.id,
+          relationship.prerequisiteId,
+        );
+      }
+      await tx.dependencyRelationship.update({
+        where: { id: relationship.id },
+        data:
+          action === "remove"
+            ? { removedAt: new Date() }
+            : action === "waive"
+              ? { waivedAt: new Date(), waiverReason: reason }
+              : { removedAt: null, waivedAt: null, waiverReason: null },
+      });
+      await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
+      await bump(
+        tx,
+        relationship.prerequisite.id,
+        relationship.prerequisite.sourceOrdinal,
+        relationship.prerequisite.version,
       );
-    }
-    if (action === "remove" && relationship.removedAt) {
-      throw new DomainValidationError(
-        "DEPENDENCY_REMOVED",
-        { relationship: ["This dependency is already removed."] },
-        "The dependency is already removed.",
-      );
-    }
-    if (
-      action === "waive" &&
-      (relationship.removedAt || relationship.waivedAt)
-    ) {
-      throw new DomainValidationError(
-        "DEPENDENCY_NOT_ACTIVE",
-        {
-          relationship: ["Only an unresolved active dependency can be waived."],
-        },
-        "The dependency cannot be waived.",
-      );
-    }
-    if (action === "restore") {
-      await assertNoDependencyCycle(
+      const context = {
+        dependencyRelationshipId: relationship.id,
+        dependentOrdinal: String(dependent.sourceOrdinal),
+        prerequisiteOrdinal: String(relationship.prerequisite.sourceOrdinal),
+        reason,
+      };
+      const type =
+        action === "remove"
+          ? "dependency-removed"
+          : action === "waive"
+            ? "dependency-waived"
+            : "dependency-restored";
+      await activity(
         tx,
         dependent.id,
-        relationship.prerequisiteId,
+        type,
+        `${action === "remove" ? "Removed" : action === "waive" ? "Waived" : "Restored"} dependency on ${relationship.prerequisite.sourceOrdinal}`,
+        context,
       );
-    }
-    await tx.dependencyRelationship.update({
-      where: { id: relationship.id },
-      data:
-        action === "remove"
-          ? { removedAt: new Date() }
-          : action === "waive"
-            ? { waivedAt: new Date(), waiverReason: reason }
-            : { removedAt: null, waivedAt: null, waiverReason: null },
-    });
-    await bump(tx, dependent.id, dependent.sourceOrdinal, dependent.version);
-    await bump(
-      tx,
-      relationship.prerequisite.id,
-      relationship.prerequisite.sourceOrdinal,
-      relationship.prerequisite.version,
-    );
-    const context = {
-      dependencyRelationshipId: relationship.id,
-      dependentOrdinal: String(dependent.sourceOrdinal),
-      prerequisiteOrdinal: String(relationship.prerequisite.sourceOrdinal),
-      reason,
-    };
-    const type =
-      action === "remove"
-        ? "dependency-removed"
-        : action === "waive"
-          ? "dependency-waived"
-          : "dependency-restored";
-    await activity(
-      tx,
-      dependent.id,
-      type,
-      `${action === "remove" ? "Removed" : action === "waive" ? "Waived" : "Restored"} dependency on ${relationship.prerequisite.sourceOrdinal}`,
-      context,
-    );
-    await activity(
-      tx,
-      relationship.prerequisite.id,
-      type,
-      `Dependency from ${dependent.sourceOrdinal} was ${action === "restore" ? "restored" : `${action}d`}`,
-      context,
-    );
-  });
+      await activity(
+        tx,
+        relationship.prerequisite.id,
+        type,
+        `Dependency from ${dependent.sourceOrdinal} was ${action === "restore" ? "restored" : `${action}d`}`,
+        context,
+      );
+    },
+    existingTransaction,
+  );
 }
 
+/** Remove an existing edge with its normal audit and version checks. */
 export const removeDependency = (
   prisma: AppPrismaClient,
   ordinal: number,
   relationshipId: string,
   input: DependencyActionRequest,
-) => mutateDependency(prisma, ordinal, relationshipId, input, "remove");
+  existingTransaction?: Transaction,
+) =>
+  mutateDependency(
+    prisma,
+    ordinal,
+    relationshipId,
+    input,
+    "remove",
+    existingTransaction,
+  );
 
 export const waiveDependency = (
   prisma: AppPrismaClient,
