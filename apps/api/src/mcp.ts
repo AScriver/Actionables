@@ -218,6 +218,33 @@ const getTaskDetailSchema = z
       });
     }
   });
+const getTaskHistorySchema = z
+  .object({
+    id: idSchema,
+    workItemId: idSchema.describe(
+      "Top-level Actionable ID authorizing this Done or Dismissed history read.",
+    ),
+    includeArchived: taskReadCredentialFields.includeArchived.describe(
+      "Explicitly include archived terminal history on every page; never restores records.",
+    ),
+    version: getTaskDetailSchema.shape.version.describe(
+      "Exact task version from search_completed_tasks or get_task; keep it unchanged across pages.",
+    ),
+    offset: getTaskDetailSchema.shape.offset.describe(
+      "History item offset: start at 0, then use each returned nextOffset until null.",
+    ),
+    contentHash: getTaskDetailSchema.shape.contentHash,
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.offset > 0 && !input.contentHash) {
+      context.addIssue({
+        code: "custom",
+        path: ["contentHash"],
+        message: "A returned contentHash is required after the first page.",
+      });
+    }
+  });
 const claimTaskSchema = z
   .object({
     id: idSchema,
@@ -480,6 +507,209 @@ const taskDetailPageSchema = z
     nextOffset: z.number().int().positive().nullable(),
   })
   .strict();
+
+const historyFieldSchema = z.enum([
+  "research",
+  "resolution",
+  "userSources",
+  "files",
+  "sourceThread",
+]);
+const historyPropertySchema = z.enum([
+  "type",
+  "locator",
+  "label",
+  "path",
+  "lines",
+  "symbol",
+]);
+const historyItemIdentity = {
+  field: historyFieldSchema,
+  index: z.number().int().nonnegative(),
+};
+const historyItemSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...historyItemIdentity,
+      kind: z.literal("value"),
+      value: z.union([
+        z.string(),
+        z
+          .object({
+            type: z.string(),
+            locator: z.string(),
+            label: z.string().optional(),
+          })
+          .strict(),
+        actionableDetailSchema.shape.files.element,
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      ...historyItemIdentity,
+      kind: z.literal("text"),
+      property: historyPropertySchema.optional(),
+      offset: z.number().int().nonnegative(),
+      totalLength: z.number().int().nonnegative(),
+      text: z.string().max(1_000),
+    })
+    .strict(),
+]);
+const taskHistoryPageSchema = z
+  .object({
+    id: idSchema,
+    workItemId: idSchema,
+    version: z.number().int().positive(),
+    status: z.enum(["Done", "Dismissed"]),
+    archiveState: actionableDetailSchema.shape.archiveState,
+    updatedAt: z.string().datetime(),
+    contentHash: taskDetailPageSchema.shape.contentHash,
+    fieldCounts: z
+      .object({
+        research: z.number().int().nonnegative(),
+        userSources: z.number().int().nonnegative(),
+        files: z.number().int().nonnegative(),
+      })
+      .strict(),
+    items: z.array(historyItemSchema).max(40),
+    offset: z.number().int().nonnegative(),
+    totalItems: z.number().int().nonnegative(),
+    remainingItems: z.number().int().nonnegative(),
+    complete: z.boolean(),
+    nextOffset: z.number().int().positive().nullable(),
+  })
+  .strict();
+/** Bounded terminal history returned to MCP agents. */
+export type TaskHistoryPage = z.infer<typeof taskHistoryPageSchema>;
+type HistoryItem = TaskHistoryPage["items"][number];
+type HistoryValues = Record<
+  z.infer<typeof historyFieldSchema>,
+  Array<z.infer<(typeof historyItemSchema.options)[0]>["value"]>
+>;
+
+/** Keeps whole values when they fit; large values become independently readable text. */
+function* taskHistoryItems(values: HistoryValues): Generator<HistoryItem> {
+  for (const field of historyFieldSchema.options) {
+    for (const [index, value] of values[field].entries()) {
+      const item = { field, index, kind: "value" as const, value };
+      if (JSON.stringify(item).length <= taskDetailPageCharacters - 2) {
+        yield item;
+        continue;
+      }
+      const parts: Array<[string | undefined, string]> =
+        typeof value === "string"
+          ? [[undefined, value]]
+          : Object.entries(value);
+      for (const [property, text] of parts) {
+        let offset = 0;
+        do {
+          let end = Math.min(offset + 1_000, text.length);
+          if (end < text.length) {
+            const boundary = Math.max(
+              text.lastIndexOf("\n", end - 1),
+              text.lastIndexOf(" ", end - 1),
+            );
+            if (boundary >= offset + 500) end = boundary + 1;
+            // Preserve UTF-16 pairs and CRLF when no nearby word boundary fits.
+            if (
+              /[\uD800-\uDBFF]/u.test(text[end - 1]!) ||
+              (text[end - 1] === "\r" && text[end] === "\n")
+            )
+              end -= 1;
+          }
+          yield {
+            field,
+            index,
+            kind: "text",
+            ...(property === undefined
+              ? {}
+              : { property: historyPropertySchema.parse(property) }),
+            offset,
+            totalLength: text.length,
+            text: text.slice(offset, end),
+          };
+          offset = end;
+        } while (offset < text.length);
+      }
+    }
+  }
+}
+
+/** Projects one terminal snapshot without invoking claim reads or changing lifecycle state. */
+function taskHistoryPage(
+  task: ActionableDetail,
+  input: z.infer<typeof getTaskHistorySchema>,
+) {
+  const values: HistoryValues = {
+    research: task.research,
+    resolution: [task.resolution],
+    userSources: task.userSources.map(({ type, locator, label }) => ({
+      type,
+      locator,
+      ...(label === undefined ? {} : { label }),
+    })),
+    files: task.files,
+    sourceThread: [task.sourceThread],
+  };
+  const metadata = {
+    id: task.id,
+    workItemId: task.workItemId,
+    version: task.version,
+    status: task.status,
+    archiveState: task.archiveState,
+    updatedAt: task.updatedAt,
+    fieldCounts: {
+      research: task.research.length,
+      userSources: task.userSources.length,
+      files: task.files.length,
+    },
+  };
+  const contentHash = createHash("sha256")
+    .update(JSON.stringify({ metadata, values }))
+    .digest("hex");
+  if (input.contentHash && input.contentHash !== contentHash) {
+    throw new AgentTaskClaimError(
+      "VERSION_CONFLICT",
+      "The task history changed while it was being paged.",
+      undefined,
+      task.version,
+    );
+  }
+  const items: HistoryItem[] = [];
+  let totalItems = 0;
+  let size = 2;
+  let pageFull = false;
+  for (const item of taskHistoryItems(values)) {
+    const ordinal = totalItems++;
+    if (ordinal < input.offset || pageFull) continue;
+    const length = JSON.stringify(item).length + (items.length ? 1 : 0);
+    if (items.length === 40 || size + length > taskDetailPageCharacters) {
+      pageFull = true;
+      continue;
+    }
+    items.push(item);
+    size += length;
+  }
+  if (input.offset >= totalItems) {
+    throw new AgentTaskClaimError(
+      "INVALID_REQUEST",
+      "The requested history offset is outside the content.",
+      { offset: ["Start at 0, then use only a returned nextOffset."] },
+    );
+  }
+  const remainingItems = totalItems - input.offset - items.length;
+  return taskHistoryPageSchema.parse({
+    ...metadata,
+    contentHash,
+    items,
+    offset: input.offset,
+    totalItems,
+    remainingItems,
+    complete: remainingItems === 0,
+    nextOffset: remainingItems ? input.offset + items.length : null,
+  });
+}
 
 function truncate(value: string, max: number) {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
@@ -1067,7 +1297,7 @@ function createActionablesMcpServer(
     {
       title: "Search completed Actionables",
       description:
-        "Search Done tasks across work items within an explicit projectId or repositoryId and a nonempty keyword query. Returns bounded field-labeled matches, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Continue with nextCursor and unchanged search inputs until null. Archived history is excluded unless includeArchived is true. Read results with get_task and get_task_detail using their id and workItemId and the same includeArchived option. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
+        "Search Done tasks across work items within an explicit projectId or repositoryId and a nonempty keyword query. Returns bounded field-labeled matches, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Continue with nextCursor and unchanged search inputs until null. Archived history is excluded unless includeArchived is true. Read research, Resolution and sources together with get_task_history using the result's id, workItemId, version and the same includeArchived option. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
       inputSchema: searchCompletedTasksRequestSchema,
       outputSchema: searchCompletedTasksResponseSchema,
       annotations: readOnly,
@@ -1075,6 +1305,30 @@ function createActionablesMcpServer(
     (input) =>
       runReadTool("actionables.search_completed_tasks", () =>
         searchCompletedTasks(prisma, input),
+      ),
+  );
+  server.registerTool(
+    "actionables.get_task_history",
+    {
+      title: "Read completed Actionable history",
+      description:
+        "Read research, Resolution, userSources, files and sourceThread together for a Done or Dismissed task using id, top-level workItemId and version from search_completed_tasks or get_task. No claim or thread metadata is required. Returns whole native values when they fit and labeled plain-text chunks for oversized values, never serialized JSON fragments. Items identify field and zero-based index; text chunks add property for split references, offset and totalLength in UTF-16 units. Pages cap items at 40 and their serialized size at 8,000 characters. fieldCounts identifies empty collections; complete, remainingItems and nextOffset identify remaining content. Start at offset 0, then pass each nextOffset with the same version, contentHash and includeArchived until null. On VERSION_CONFLICT discard partial history and restart with a fresh version; on TERMINAL_READ_INVALIDATED discard it and stop terminal inspection. Never claims, renews, reopens, restores or changes records.",
+      inputSchema: getTaskHistorySchema,
+      outputSchema: taskHistoryPageSchema,
+      annotations: readOnly,
+    },
+    (input) =>
+      runReadTool("actionables.get_task_history", async () =>
+        taskHistoryPage(
+          await getScopedTerminalAgentTask(
+            prisma,
+            input.id,
+            input.workItemId,
+            input.version,
+            input.includeArchived,
+          ),
+          input,
+        ),
       ),
   );
   server.registerTool(

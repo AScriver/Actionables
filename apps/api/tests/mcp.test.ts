@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
+import type { TaskHistoryPage } from "../src/mcp.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const canonicalWorkflowSkillPath = resolve(
@@ -144,6 +145,7 @@ async function historyReadState() {
         agentTaskClaim: true,
         activityEvents: true,
         statusHistory: true,
+        userSources: true,
       },
     }),
     prisma.project.findMany({ orderBy: { id: "asc" } }),
@@ -395,6 +397,7 @@ describe("Actionables MCP", () => {
           "actionables.bulk_prepare_tasks",
           "actionables.list_tasks",
           "actionables.search_completed_tasks",
+          "actionables.get_task_history",
           "actionables.get_task",
           "actionables.get_task_detail",
           "actionables.claim_task",
@@ -547,6 +550,14 @@ describe("Actionables MCP", () => {
       });
       expect(client.getInstructions()).toContain(
         "actionables.search_completed_tasks",
+      );
+      expect(byName["actionables.get_task_history"]).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
+      expect(client.getInstructions()).toContain(
+        "actionables.get_task_history",
       );
       expect(byName["actionables.get_task_detail"]).toMatchObject({
         readOnlyHint: true,
@@ -4160,6 +4171,354 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("returns focused history with exact research, Resolution and sources together without writes", async () => {
+    const research = [
+      "A verified note.\nIncluding its evidence.",
+      "",
+      "A second note.",
+    ];
+    const resolution = "Kept the existing reader and its safeguards.";
+    const source = {
+      type: "URL",
+      locator: "https://example.test/evidence",
+      label: "Source",
+    };
+    const files = [
+      { path: "apps/api/src/mcp.ts", lines: "12-18", symbol: "reader" },
+    ];
+    const task = await createTask({ status: "Done", research, resolution });
+    await prisma.actionable.update({
+      where: { id: task.id },
+      data: {
+        sourceThread: "original-source-thread",
+        filesJson: json(files),
+        userSources: { create: source },
+      },
+    });
+    // An expired claim must not trigger the active reader's expiry writes.
+    await prisma.agentTaskClaim.create({
+      data: {
+        actionableId: task.id,
+        agentId,
+        claimTokenHash: randomUUID(),
+        leaseExpiresAt: new Date(0),
+      },
+    });
+    const empty = await createTask({ status: "Dismissed" });
+    await prisma.actionable.update({
+      where: { id: empty.id },
+      data: { filesJson: json([]) },
+    });
+    const before = await historyReadState();
+    const { client, transport } = await connectClient(bearerToken, null);
+    try {
+      const args = {
+        id: task.sourceOrdinal,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+      };
+      const page = output<TaskHistoryPage>(
+        await client.callTool({
+          name: "actionables.get_task_history",
+          arguments: args,
+        }),
+      );
+      expect(page).toMatchObject({
+        ...args,
+        status: "Done",
+        offset: 0,
+        totalItems: 7,
+        remainingItems: 0,
+        nextOffset: null,
+        complete: true,
+        fieldCounts: { research: 3, userSources: 1, files: 1 },
+        archiveState: { isArchived: false },
+      });
+      expect(page.items).toEqual([
+        ...research.map((value, index) => ({
+          field: "research",
+          index,
+          kind: "value",
+          value,
+        })),
+        { field: "resolution", index: 0, kind: "value", value: resolution },
+        { field: "userSources", index: 0, kind: "value", value: source },
+        { field: "files", index: 0, kind: "value", value: files[0] },
+        {
+          field: "sourceThread",
+          index: 0,
+          kind: "value",
+          value: "original-source-thread",
+        },
+      ]);
+      expect(JSON.stringify(page).length).toBeLessThan(2_000);
+      for (const field of [
+        "claim",
+        "claimToken",
+        "readiness",
+        "permittedTransitions",
+        "validationRecords",
+        "finding",
+        "description",
+      ])
+        expect(page).not.toHaveProperty(field);
+      expect(
+        output(
+          await client.callTool({
+            name: "actionables.get_task_history",
+            arguments: args,
+          }),
+        ),
+      ).toEqual(page);
+      const emptyPage = output<TaskHistoryPage>(
+        await client.callTool({
+          name: "actionables.get_task_history",
+          arguments: {
+            id: empty.sourceOrdinal,
+            workItemId: empty.sourceOrdinal,
+            version: empty.version,
+          },
+        }),
+      );
+      expect(emptyPage).toMatchObject({
+        status: "Dismissed",
+        fieldCounts: { research: 0, userSources: 0, files: 0 },
+        complete: true,
+        nextOffset: null,
+        remainingItems: 0,
+        items: [
+          { field: "resolution", index: 0, kind: "value", value: "" },
+          { field: "sourceThread", index: 0, kind: "value", value: "" },
+        ],
+      });
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("pages focused history as bounded whole values and readable exact text chunks", async () => {
+    const research = [
+      "x".repeat(999) + "😀" + "r".repeat(8_000),
+      '"\\\u0000'.repeat(2_500),
+      ...Array.from({ length: 45 }, (_, i) => `note ${i}`),
+    ];
+    const resolution =
+      "x".repeat(999) + "\r\n" + "A readable line with spaces.\n".repeat(400);
+    const locator = "https://example.test/" + "long-path/".repeat(1_000);
+    const path = "directory/".repeat(900) + "reader.ts";
+    const sourceThread = "source-thread-".repeat(800);
+    const task = await createTask({ status: "Done", research, resolution });
+    await prisma.actionable.update({
+      where: { id: task.id },
+      data: {
+        sourceThread,
+        filesJson: json([{ path, lines: "7-9" }]),
+        userSources: {
+          create: { type: "URL", locator, label: "Exact reference" },
+        },
+      },
+    });
+    const before = await historyReadState();
+    const { client, transport } = await connectClient(bearerToken, null);
+    try {
+      const items: TaskHistoryPage["items"] = [];
+      let contentHash: string | undefined;
+      let offset = 0;
+      let pages = 0;
+      for (; pages < 100; pages += 1) {
+        const args = {
+          id: task.sourceOrdinal,
+          workItemId: task.sourceOrdinal,
+          version: task.version,
+          offset,
+          ...(contentHash ? { contentHash } : {}),
+        };
+        const page = output<TaskHistoryPage>(
+          await client.callTool({
+            name: "actionables.get_task_history",
+            arguments: args,
+          }),
+        );
+        contentHash ??= page.contentHash;
+        expect(page.contentHash).toBe(contentHash);
+        expect(page.offset).toBe(items.length);
+        expect(page.items.length).toBeGreaterThan(0);
+        expect(page.items.length).toBeLessThanOrEqual(40);
+        expect(JSON.stringify(page.items).length).toBeLessThanOrEqual(8_000);
+        expect(JSON.stringify(page).length).toBeLessThan(9_000);
+        expect(page.fieldCounts).toEqual({
+          research: research.length,
+          userSources: 1,
+          files: 1,
+        });
+        expect(page.remainingItems).toBe(
+          page.totalItems - page.offset - page.items.length,
+        );
+        expect(page.complete).toBe(page.nextOffset === null);
+        expect(
+          output(
+            await client.callTool({
+              name: "actionables.get_task_history",
+              arguments: args,
+            }),
+          ),
+        ).toEqual(page);
+        items.push(...page.items);
+        if (page.nextOffset === null) break;
+        expect(page.nextOffset).toBe(items.length);
+        offset = page.nextOffset;
+      }
+      expect(pages).toBeGreaterThan(1);
+      expect(pages).toBeLessThan(100);
+      const textValue = (
+        field: TaskHistoryPage["items"][number]["field"],
+        index: number,
+        property?: string,
+      ) => {
+        const parts = items.filter(
+          (item) => item.field === field && item.index === index,
+        );
+        if (parts[0]?.kind === "value") return parts[0].value;
+        let text = "";
+        for (const item of parts) {
+          if (item.kind !== "text" || item.property !== property) continue;
+          expect(item.offset).toBe(text.length);
+          expect(item.text.length).toBeLessThanOrEqual(1_000);
+          expect(item.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u);
+          expect(item.text).not.toMatch(/\r$/u);
+          text += item.text;
+        }
+        for (const item of parts)
+          if (item.kind === "text" && item.property === property)
+            expect(item.totalLength).toBe(text.length);
+        return text;
+      };
+      expect(research.map((_, index) => textValue("research", index))).toEqual(
+        research,
+      );
+      expect(textValue("resolution", 0)).toBe(resolution);
+      expect(textValue("userSources", 0, "type")).toBe("URL");
+      expect(textValue("userSources", 0, "locator")).toBe(locator);
+      expect(textValue("userSources", 0, "label")).toBe("Exact reference");
+      expect(textValue("files", 0, "path")).toBe(path);
+      expect(textValue("files", 0, "lines")).toBe("7-9");
+      expect(textValue("sourceThread", 0)).toBe(sourceThread);
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("rejects unauthorized, stale, mixed and reopened focused history without writes", async () => {
+    const task = await createTask({
+      status: "Done",
+      research: ["r".repeat(17_000)],
+    });
+    const unrelated = await createTask({ status: "Done" });
+    const active = await createTask();
+    const source = await prisma.userSourceReference.create({
+      data: { actionableId: task.id, type: "Text", locator: "original" },
+    });
+    const { client, transport } = await connectClient(bearerToken, null);
+    const args = {
+      id: task.sourceOrdinal,
+      workItemId: task.sourceOrdinal,
+      version: task.version,
+    };
+    const read = (input: Record<string, unknown>) =>
+      client.callTool({
+        name: "actionables.get_task_history",
+        arguments: input,
+      });
+    try {
+      let before = await historyReadState();
+      const first = output<TaskHistoryPage>(await read(args));
+      const next = {
+        ...args,
+        offset: first.nextOffset,
+        contentHash: first.contentHash,
+      };
+      expect(first.nextOffset).not.toBeNull();
+      expect(
+        validationErrorText(await read({ ...args, workItemId: undefined })),
+      ).toContain("workItemId");
+      expect(
+        validationErrorText(await read({ ...args, version: undefined })),
+      ).toContain("version");
+      expect(
+        validationErrorText(
+          await read({ ...args, claimToken: "must-not-authorize-history" }),
+        ),
+      ).toContain("claimToken");
+      expect(
+        validationErrorText(await read({ ...next, contentHash: undefined })),
+      ).toContain("contentHash");
+      expect(
+        errorOutput(
+          await read({ ...args, workItemId: unrelated.sourceOrdinal }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        errorOutput(
+          await read({
+            ...args,
+            id: active.sourceOrdinal,
+            workItemId: active.sourceOrdinal,
+            includeArchived: true,
+          }),
+        ).code,
+      ).toBe("TERMINAL_READ_INVALIDATED");
+      expect(
+        errorOutput(await read({ ...next, offset: first.totalItems })).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        errorOutput(await read({ ...next, contentHash: "0".repeat(64) })).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(
+        errorOutput(
+          await read({
+            ...next,
+            id: unrelated.sourceOrdinal,
+            workItemId: unrelated.sourceOrdinal,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(before);
+
+      // A reference edit leaves the task version/timestamp alone; the whole projection hash must catch it.
+      await prisma.userSourceReference.update({
+        where: { id: source.id },
+        data: { locator: "changed" },
+      });
+      before = await historyReadState();
+      expect(errorOutput(await read(next)).code).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(before);
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { version: { increment: 1 } },
+      });
+      before = await historyReadState();
+      expect(errorOutput(await read(args)).code).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(before);
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "Ready", version: { increment: 1 } },
+      });
+      before = await historyReadState();
+      expect(
+        errorOutput(await read({ ...next, includeArchived: true })),
+      ).toMatchObject({
+        code: "TERMINAL_READ_INVALIDATED",
+        retryMode: "never",
+        recovery: { action: "stop" },
+      });
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("searches only scoped Done history with matching excerpts and bounded continuation without writes", async () => {
     const historyScope = await createHistoryScope();
     const siblingScope = await createHistoryScope(historyScope.projectId);
@@ -4453,6 +4812,61 @@ describe("Actionables MCP", () => {
           }),
         );
         expect(compact.archiveState).toEqual(found.items[0]!.archiveState);
+        const historyArgs = { ...readArgs, version: compact.version };
+        expect(
+          errorOutput(
+            await client.callTool({
+              name: "actionables.get_task_history",
+              arguments: historyArgs,
+            }),
+          ),
+        ).toMatchObject(archiveReadRecovery);
+        let historyOffset = 0;
+        let historyHash: string | undefined;
+        const historyItems: TaskHistoryPage["items"] = [];
+        for (let pageNumber = 0; pageNumber < 30; pageNumber += 1) {
+          const args = {
+            ...historyArgs,
+            includeArchived: true,
+            offset: historyOffset,
+            ...(historyHash ? { contentHash: historyHash } : {}),
+          };
+          const page = output<TaskHistoryPage>(
+            await client.callTool({
+              name: "actionables.get_task_history",
+              arguments: args,
+            }),
+          );
+          expect(page.archiveState).toEqual(compact.archiveState);
+          expect(
+            errorOutput(
+              await client.callTool({
+                name: "actionables.get_task_history",
+                arguments: { ...args, includeArchived: false },
+              }),
+            ),
+          ).toMatchObject(archiveReadRecovery);
+          historyItems.push(...page.items);
+          if (page.complete) break;
+          historyOffset = page.nextOffset!;
+          historyHash = page.contentHash;
+        }
+        expect(
+          historyItems
+            .filter((item) => item.field === "research")
+            .map((item) => {
+              expect(item.kind).toBe("value");
+              return item.kind === "value" ? item.value : undefined;
+            }),
+        ).toEqual(research);
+        expect(
+          historyItems
+            .filter((item) => item.field === "resolution")
+            .map((item) => {
+              return item.kind === "text" ? item.text : item.value;
+            })
+            .join(""),
+        ).toBe(resolution);
         expect(compact.research).toHaveLength(6);
         expect(compact.resolution.length).toBeLessThanOrEqual(2_500);
         expect(compact.truncation.truncatedFields).toEqual(

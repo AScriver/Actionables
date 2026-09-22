@@ -234,15 +234,55 @@ them. `archiveState` describes the selected task and its project/repository/
 worktree inheritance; an archived work-item root may also require inclusion.
 No restore or lifecycle mutation occurs.
 
-Use each result's `id` and `workItemId` with `actionables.get_task`, then use
-that compact detail's version with `actionables.get_task_detail` for the full
-`research` array and `resolution` string. Both fields support the existing
-8,000-character JSON pages. Retrieve a truncated Resolution even when there
-is no implementation reconciliation guidance. Start at offset 0; carry the
-first `contentHash` with each `nextOffset`, concatenate `json`, and JSON-parse
-only after the last page. A changed version or field hash invalidates partial
-content; a reopened task ends terminal access. These reads preserve statuses,
-claims, lease times, versions, archive state, and activity.
+Use each result's `id`, `workItemId` and `version` with
+`actionables.get_task_history` to read research, Resolution and stored source
+references together. The tool is exclusively an agent MCP capability; it adds
+no dashboard behavior. It also accepts a known Done or Dismissed task's version
+from `get_task`. It requires no claim token or thread metadata.
+
+Each `items` entry identifies a `field` (`research`, `resolution`, `userSources`,
+`files` or `sourceThread`) and zero-based `index`. Research indexes identify
+notes, source/file indexes identify references, and scalar fields use index 0.
+`kind: "value"` returns a complete native string or reference object. For
+example, a small result includes these entries in one read:
+
+```json
+[
+  { "field": "research", "index": 0, "kind": "value", "value": "Verified the shared reader." },
+  { "field": "resolution", "index": 0, "kind": "value", "value": "Reused its terminal safeguards." },
+  { "field": "userSources", "index": 0, "kind": "value", "value": { "type": "File", "locator": "apps/api/src/mcp.ts" } }
+]
+```
+
+An oversized value becomes `kind: "text"` entries with exact plain `text`,
+`offset` and `totalLength` in UTF-16 code units. Split references also identify
+the `property` (such as `locator` or `path`). Chunks contain at most 1,000 code
+units, prefer nearby word/line boundaries, and preserve surrogate pairs and
+CRLF. They are independently readable; concatenate matching field/index/property
+chunks only when a whole value is needed. No serialized JSON fragments need to
+be assembled or parsed. Complete references contain their stored locator and
+optional label, or file path with optional lines/symbol; sourceThread retains
+the original stored thread reference. Removed user sources are excluded by the
+existing detail reader. Raw imported JSON and lifecycle detail are not returned.
+
+Pages contain at most 40 items and 8,000 characters of serialized `items`, plus
+bounded metadata. `fieldCounts` reports note, source and file counts, including
+empty collections; empty scalar values are explicit complete strings.
+`offset` and `nextOffset` count **items**, not characters. `totalItems`,
+`remainingItems` and `complete` make completeness explicit. Start at offset 0;
+repeat with the returned `nextOffset`, same version, first `contentHash` and
+same archive option until `nextOffset` is null. The hash covers the entire
+focused snapshot, so an edit to any returned field/reference rejects mixed
+history even when an external writer omitted a version bump. On
+`VERSION_CONFLICT`, discard partial history and restart with a fresh version
+from search or compact detail. A reopened task returns
+`TERMINAL_READ_INVALIDATED` and ends terminal access. These reads preserve
+statuses, claims, lease times, versions, archive state and activity.
+
+The existing `get_task` and `get_task_detail` contracts remain unchanged for
+lifecycle detail and exact individual fields, including their 8,000-character
+JSON pages. The focused projection reuses the transactional terminal reader;
+pagination bounds responses, not the size of the snapshot loaded on the server.
 
 History search requires no work-item claim and grants no access to active
 backlog discovery. Treat completed research and Resolution as historical
@@ -362,6 +402,7 @@ The endpoint exposes exactly these tools:
 - `actionables.bulk_prepare_tasks`
 - `actionables.list_tasks`
 - `actionables.search_completed_tasks`
+- `actionables.get_task_history`
 - `actionables.get_task`
 - `actionables.get_task_detail`
 - `actionables.claim_task`
