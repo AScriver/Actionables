@@ -13,6 +13,7 @@ import {
   createRepositoryResponseSchema,
   dashboardResponseSchema,
   scopeOptionsResponseSchema,
+  searchCompletedTasksResponseSchema,
   type ActionableExcludeFilterKey,
   type ActionableQuery,
   type ActionableDetail,
@@ -27,6 +28,8 @@ import {
   type UpdateRepositoryProjectRequest,
   type CreateValidationRecordRequest,
   type ScopeOptionsResponse,
+  type SearchCompletedTasksRequest,
+  type SearchCompletedTasksResponse,
   type Status,
   type StatusTransitionRequest,
   type UpdateActionableRequest,
@@ -616,12 +619,24 @@ function filterAllows(
   return !active || (excluded.has(key) ? !matches : matches);
 }
 
+function taskSearchFields(
+  row: Pick<
+    ActionableRow,
+    "title" | "finding" | "description" | "researchJson" | "resolution"
+  >,
+) {
+  return {
+    title: row.title,
+    finding: row.finding,
+    description: row.description,
+    research: stringArray(row.researchJson).join("\n"),
+    resolution: row.resolution,
+  };
+}
+
 function searchText(row: ActionableRow) {
   return [
-    row.title,
-    row.finding,
-    row.description,
-    ...stringArray(row.researchJson),
+    ...Object.values(taskSearchFields(row)),
     ...stringArray(row.tagsJson),
     row.worktree.name,
     row.worktree.localPath ?? "",
@@ -640,6 +655,82 @@ function searchText(row: ActionableRow) {
   ]
     .join("\n")
     .toLocaleLowerCase();
+}
+
+/** Searches completed text within an explicit scope without changing task or claim state. */
+export async function searchCompletedTasks(
+  prisma: AppPrismaClient,
+  query: SearchCompletedTasksRequest,
+): Promise<SearchCompletedTasksResponse> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.actionable.findMany({
+      where: {
+        status: "Done",
+        ...(query.projectId ? { projectId: query.projectId } : {}),
+        ...(query.repositoryId ? { repositoryId: query.repositoryId } : {}),
+        ...(query.cursor ? { sourceOrdinal: { lt: query.cursor } } : {}),
+        ...(!query.includeArchived
+          ? {
+              archivedAt: null,
+              project: { archivedAt: null },
+              repository: { archivedAt: null },
+              worktree: { archivedAt: null },
+            }
+          : {}),
+      },
+      include: { project: true, repository: true, worktree: true },
+      orderBy: { sourceOrdinal: "desc" },
+    });
+    const keyword = query.q.toLocaleLowerCase();
+    const items: SearchCompletedTasksResponse["items"] = [];
+    // ponytail: linear scoped text scan; add indexed search if history volume makes it slow.
+    for (const row of rows) {
+      const match = Object.entries(taskSearchFields(row)).find(([, text]) =>
+        text.toLocaleLowerCase().includes(keyword),
+      );
+      if (!match) continue;
+      const root = await getHierarchyRoot(tx, row.id);
+      if (!query.includeArchived && root.id !== row.id) {
+        const workItem = await tx.actionable.findUniqueOrThrow({
+          where: { id: root.id },
+          select: { archivedAt: true },
+        });
+        if (workItem.archivedAt) continue;
+      }
+      if (items.length === query.limit) {
+        return searchCompletedTasksResponseSchema.parse({
+          items,
+          nextCursor: items.at(-1)!.id,
+        });
+      }
+      const [field, text] = match;
+      const start = Math.max(0, text.toLocaleLowerCase().indexOf(keyword) - 80);
+      const excerpt = `${start > 0 ? "…" : ""}${text.slice(start, start + 398)}${text.length > start + 398 ? "…" : ""}`;
+      items.push({
+        id: row.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+        title: row.title.slice(0, 240),
+        scope: {
+          projectId: row.project.id,
+          projectName: row.project.name,
+          repositoryId: row.repository.id,
+          repositoryName: row.repository.name,
+          worktreeId: row.worktree.id,
+          worktreeName: row.worktree.name,
+        },
+        status: "Done",
+        version: row.version,
+        archiveState: archiveState(row),
+        updatedAt: row.updatedAt.toISOString(),
+        match: {
+          field:
+            field as SearchCompletedTasksResponse["items"][number]["match"]["field"],
+          excerpt,
+        },
+      });
+    }
+    return { items, nextCursor: null };
+  });
 }
 
 function matchesQuery(row: ActionableRow, query: ActionableQuery) {

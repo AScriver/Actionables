@@ -1,6 +1,6 @@
 ---
 name: actionables-workflow
-description: Coordinate Actionables within an explicitly identified feature or bug work item through authorized task creation, planning, research, implementation, debugging, handoff, and validation using the Actionables MCP tools. Use at the start or resumption of substantive tracked work, when the user explicitly asks to create tasks, when reporting meaningful progress or blockers, and before completing or handing off work. Do not use for simple questions, unrelated work, or arbitrary backlog discovery.
+description: Coordinate Actionables within an explicitly identified feature or bug work item through authorized task creation, planning, research, implementation, debugging, handoff, and validation using the Actionables MCP tools. Also retrieve completed research within an explicit project or repository scope. Use at the start or resumption of substantive tracked work, when the user explicitly asks to create tasks, when reporting meaningful progress or blockers, and before completing or handing off work. Do not use for unrelated work or arbitrary backlog discovery.
 ---
 
 # Actionables Workflow
@@ -30,6 +30,17 @@ authoritative state first; exact create and bulk retries must reuse their stable
 idempotency UUIDs. If the server or required tool remains unavailable, continue
 the user's work and report the tracking limitation. Never claim a merely
 adjacent task.
+
+## Read completed research
+
+- Use `actionables.search_completed_tasks` to find historical evidence across work items only within an explicitly identified `projectId` or `repositoryId`, with a nonempty `q`. When both scope IDs are supplied, both must match. This read capability does not require a current `workItemId` or a claim and never authorizes active backlog discovery.
+- Search matches Done task titles, findings, descriptions, research, and Resolution using case-insensitive keyword or phrase matching. Results identify the matching field and excerpt, task and root work-item IDs, scope, version, archive state, and `updatedAt` (last modification, not completion date).
+- Results are bounded and ordered by descending task ID. Repeat the same search inputs with the returned `nextCursor` as `cursor` until null. Pages reflect current records rather than a frozen search snapshot; restart the search to include history completed or changed during paging.
+- Archived tasks, archived work-item roots, and tasks under archived projects, repositories, or worktrees are excluded by default. Set `includeArchived: true` explicitly on the search and every subsequent terminal read to include them without restoring anything.
+- An excluded archived terminal read returns `ARCHIVE_INCLUSION_REQUIRED` with `after_input_change` recovery. If archived history is intended, retry the read with `includeArchived: true` and the same root and paging arguments. Otherwise keep the record excluded. This recovery requires no state change; active-work and claim archive guards remain in force.
+- Read a result with `actionables.get_task` using its `id` and returned top-level `workItemId`. Retrieve full `research` and `resolution` with `actionables.get_task_detail` when truncated, even when no implementation reconciliation guidance is present. Use the compact version, start at offset 0, then pass `contentHash` with each `nextOffset` until null; join the `json` pages and JSON-parse the result. Preserve the same archive option on every read.
+- On `VERSION_CONFLICT`, discard partial fields and restart from fresh compact detail. On `TERMINAL_READ_INVALIDATED`, discard partial fields and stop terminal inspection. Active tasks still require the normal authorized list and claim workflow; `includeArchived` never grants access through a claim token.
+- Searches and terminal reads never claim, renew, reopen, edit, restore, or create lifecycle ownership. Treat their research and Resolution as historical evidence; verify relevant claims against current code before relying on them. An implementation in source or tests does not prove the installed runtime supports it.
 
 ## Create authorized tasks
 

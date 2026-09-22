@@ -20,6 +20,8 @@ import {
   recordClaimedAgentTaskValidationRequestSchema,
   releaseAgentTaskClaimRequestSchema,
   renewAgentTaskClaimRequestSchema,
+  searchCompletedTasksRequestSchema,
+  searchCompletedTasksResponseSchema,
   statusSchema,
   transitionClaimedAgentTaskRequestSchema,
   updateClaimedAgentTaskRequestSchema,
@@ -67,7 +69,11 @@ import {
   permittedTransitions,
 } from "./actionable-transitions.js";
 import { bundledActionablesWorkflowInstructions } from "./agent-integration.js";
-import { DomainValidationError, VersionConflictError } from "./repository.js";
+import {
+  DomainValidationError,
+  searchCompletedTasks,
+  VersionConflictError,
+} from "./repository.js";
 
 const idSchema = z
   .number()
@@ -106,6 +112,12 @@ const listTasksSchema = z
     }
   });
 const taskReadCredentialFields = {
+  includeArchived: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Explicitly include archived terminal history when using workItemId. Unavailable for claimToken reads; never restores records.",
+    ),
   claimToken: releaseAgentTaskClaimRequestSchema.shape.claimToken
     .optional()
     .describe("Valid claim token for exact reads of active claimed work."),
@@ -130,11 +142,20 @@ const taskReadSchema = z
           "Provide exactly one read authorization: claimToken for active claimed work or workItemId for terminal inspection.",
       });
     }
+    if (input.includeArchived && input.workItemId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["includeArchived"],
+        message:
+          "Archive inclusion requires terminal inspection with workItemId.",
+      });
+    }
   });
 const taskDetailFieldSchema = z
   .enum([
     "finding",
     "description",
+    "resolution",
     "research",
     "plannedValidation",
     "files",
@@ -143,7 +164,9 @@ const taskDetailFieldSchema = z
     "subtasks",
     "blockedBy",
   ])
-  .describe("Implementation-critical task field to retrieve exactly.");
+  .describe(
+    "Task field to retrieve exactly, including full research and Resolution.",
+  );
 const taskDetailPageCharacters = 8_000;
 const getTaskDetailSchema = z
   .object({
@@ -184,6 +207,14 @@ const getTaskDetailSchema = z
         code: "custom",
         path: ["contentHash"],
         message: "A returned contentHash is required after the first page.",
+      });
+    }
+    if (input.includeArchived && input.workItemId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["includeArchived"],
+        message:
+          "Archive inclusion requires terminal inspection with workItemId.",
       });
     }
   });
@@ -262,6 +293,7 @@ const compactTaskSchema = z
     priority: z.string().max(40),
     status: z.string().max(40),
     terminal: z.boolean(),
+    archiveState: actionableDetailSchema.shape.archiveState,
     effort: z.string().max(40),
     evidenceState: z.string().max(40),
     version: z.number().int().positive(),
@@ -474,6 +506,8 @@ function taskDetailField(
       return task.finding;
     case "description":
       return task.description;
+    case "resolution":
+      return task.resolution;
     case "research":
       return task.research;
     case "plannedValidation":
@@ -599,6 +633,7 @@ function compactTask(
     priority: task.priority,
     status: task.status,
     terminal: task.status === "Done" || task.status === "Dismissed",
+    archiveState: task.archiveState,
     effort: task.effort,
     evidenceState: task.evidenceState,
     version: task.version,
@@ -673,7 +708,7 @@ function compactTask(
       ...(requiresReconciliation
         ? {
             reconciliationGuidance:
-              "Critical detail was truncated. For each supported truncatedFields entry (finding, description, research, plannedValidation, files, userSources, parent, subtasks, blockedBy), call actionables.get_task_detail with the compact version and the same authorization (claimToken for active work; workItemId for terminal inspection). Page with contentHash until nextOffset is null; join json and JSON-parse it. On VERSION_CONFLICT, discard pages and restart. On TERMINAL_READ_INVALIDATED, discard pages and stop terminal inspection. Do not move the task forward or edit files until reconciliation is complete.",
+              "Critical detail was truncated. Page supported truncatedFields (finding, description, resolution, research, plannedValidation, files, userSources, parent, subtasks, blockedBy) with actionables.get_task_detail, the compact version and the same authorization and includeArchived. Pass contentHash with each nextOffset until null; join json and JSON-parse it. On VERSION_CONFLICT, discard pages and restart. On TERMINAL_READ_INVALIDATED, discard pages and stop terminal inspection. Do not move the task forward or edit files until reconciliation is complete.",
           }
         : {}),
     },
@@ -1028,23 +1063,44 @@ function createActionablesMcpServer(
       }),
   );
   server.registerTool(
+    "actionables.search_completed_tasks",
+    {
+      title: "Search completed Actionables",
+      description:
+        "Search Done tasks across work items within an explicit projectId or repositoryId and a nonempty keyword query. Returns bounded field-labeled matches, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Continue with nextCursor and unchanged search inputs until null. Archived history is excluded unless includeArchived is true. Read results with get_task and get_task_detail using their id and workItemId and the same includeArchived option. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
+      inputSchema: searchCompletedTasksRequestSchema,
+      outputSchema: searchCompletedTasksResponseSchema,
+      annotations: readOnly,
+    },
+    (input) =>
+      runReadTool("actionables.search_completed_tasks", () =>
+        searchCompletedTasks(prisma, input),
+      ),
+  );
+  server.registerTool(
     "actionables.get_task",
     {
       title: "Get Actionable",
       description:
-        "Fetch bounded details using exactly one read authorization: claimToken for active claimed work, or the top-level workItemId for read-only inspection of a Done or Dismissed task in that work item. The response reports terminal state. Use the returned version for a later mutation only after terminal work has been explicitly reopened and claimed.",
+        "Fetch bounded details using exactly one read authorization: claimToken for active claimed work, or the top-level workItemId for read-only inspection of a Done or Dismissed task in that work item. Terminal history includes archived tasks and scopes only with includeArchived true. The response reports terminal and archive state; page truncated research or Resolution with get_task_detail. Use the returned version for a later mutation only after terminal work has been explicitly reopened and claimed.",
       inputSchema: taskReadSchema,
       outputSchema: compactTaskSchema,
       annotations: readOnly,
     },
-    ({ id, claimToken, workItemId }) =>
+    ({ id, claimToken, workItemId, includeArchived }) =>
       (claimToken ? runMutationTool : runReadTool)(
         "actionables.get_task",
         async () =>
           compactTask(
             claimToken
               ? await getClaimedAgentTask(prisma, id, { claimToken })
-              : await getScopedTerminalAgentTask(prisma, id, workItemId!),
+              : await getScopedTerminalAgentTask(
+                  prisma,
+                  id,
+                  workItemId!,
+                  undefined,
+                  includeArchived,
+                ),
           ),
       ),
   );
@@ -1053,12 +1109,12 @@ function createActionablesMcpServer(
     {
       title: "Get exact Actionable detail",
       description:
-        "Fetch one fixed-size page of an exact implementation-critical task field using the compact task's exact version and the same single read authorization: claimToken for active claimed work or top-level workItemId for terminal inspection. Start with offset 0, then pass each nextOffset until null with the first page's contentHash; concatenate json in offset order and JSON-parse the complete value. On VERSION_CONFLICT, discard partial json and restart from current compact detail. On TERMINAL_READ_INVALIDATED, discard partial pages and stop terminal inspection; active work requires the normal authorized list and claim flow. A successful page never returns a claim token, renews a claim, or changes the task version.",
+        "Fetch one fixed-size page of an exact task field, including research and Resolution, using the compact task's exact version and the same single read authorization: claimToken for active claimed work or top-level workItemId for terminal inspection. Keep includeArchived true on every archived history read. Start with offset 0, then pass each nextOffset until null with the first page's contentHash; concatenate json in offset order and JSON-parse the complete value. On VERSION_CONFLICT, discard partial json and restart from current compact detail. On TERMINAL_READ_INVALIDATED, discard partial pages and stop terminal inspection; active work requires the normal authorized list and claim flow. A successful page never returns a claim token, renews a claim, or changes the task version.",
       inputSchema: getTaskDetailSchema,
       outputSchema: taskDetailPageSchema,
       annotations: readOnly,
     },
-    ({ id, claimToken, workItemId, ...input }) =>
+    ({ id, claimToken, workItemId, includeArchived, ...input }) =>
       (claimToken ? runMutationTool : runReadTool)(
         "actionables.get_task_detail",
         async () =>
@@ -1070,6 +1126,7 @@ function createActionablesMcpServer(
                   id,
                   workItemId!,
                   input.version,
+                  includeArchived,
                 ),
             input,
           ),

@@ -827,6 +827,93 @@ export const listAgentTasksResponseSchema = z
   })
   .strict();
 
+export const searchCompletedTasksRequestSchema = z
+  .object({
+    projectId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Explicit project ID to search."),
+    repositoryId: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe(
+        "Explicit repository ID to search; combined with projectId when both are supplied.",
+      ),
+    q: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .describe(
+        "Nonempty case-insensitive keyword or phrase in task text, research, or Resolution.",
+      ),
+    includeArchived: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Include Done tasks archived directly or through their project, repository, or worktree; never restores records.",
+      ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(25)
+      .describe("Maximum matching tasks to return, from 1 through 100."),
+    cursor: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Previous nextCursor; continues below that public task ID. Keep the same scope, query, and archive option.",
+      ),
+  })
+  .strict()
+  .refine((input) => Boolean(input.projectId || input.repositoryId), {
+    path: ["projectId"],
+    message:
+      "Completed history requires an explicit projectId or repositoryId.",
+  });
+
+export const searchCompletedTasksResponseSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            id: z.number().int().positive(),
+            workItemId: z.number().int().positive(),
+            title: z.string().max(240),
+            scope: scopeSchema,
+            status: z.literal("Done"),
+            version: z.number().int().positive(),
+            archiveState: archiveStateSchema,
+            updatedAt: z.string().datetime(),
+            match: z
+              .object({
+                field: z.enum([
+                  "title",
+                  "finding",
+                  "description",
+                  "research",
+                  "resolution",
+                ]),
+                excerpt: z.string().max(400),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .max(100),
+    nextCursor: z.number().int().positive().nullable(),
+  })
+  .strict();
+
 export const agentTaskVersionRecoveryMessage =
   "Use task.version from the preceding successful result, or re-list the task to obtain its current positive integer version.";
 export const agentTaskClaimTokenRecoveryMessage =
@@ -1947,6 +2034,12 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       guidance:
         "Restore the archived Actionable or governing scope before attempting agent work again.",
     },
+    ARCHIVE_INCLUSION_REQUIRED: {
+      retryMode: "after_input_change",
+      action: "modify_request",
+      guidance:
+        "If archived history is intended, repeat this terminal read with includeArchived: true and the same workItemId and paging arguments. Otherwise leave the record excluded.",
+    },
     TERMINAL: {
       retryMode: "after_state_change",
       action: "resolve_state",
@@ -2748,6 +2841,12 @@ export type AgentTaskSummary = z.infer<typeof agentTaskSummarySchema>;
 export type ListAgentTasksRequest = z.infer<typeof listAgentTasksRequestSchema>;
 export type ListAgentTasksResponse = z.infer<
   typeof listAgentTasksResponseSchema
+>;
+export type SearchCompletedTasksRequest = z.infer<
+  typeof searchCompletedTasksRequestSchema
+>;
+export type SearchCompletedTasksResponse = z.infer<
+  typeof searchCompletedTasksResponseSchema
 >;
 export type ClaimAgentTaskRequest = z.infer<typeof claimAgentTaskRequestSchema>;
 export type ClaimAgentTaskResponse = z.infer<

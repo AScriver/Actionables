@@ -191,12 +191,63 @@ mutations use the server's default renewal period.
 `actionables.get_task` and `actionables.get_task_detail` accept exactly one read
 authorization. Active work uses its valid `claimToken`. Read-only inspection of
 a Done or Dismissed task uses the explicit top-level `workItemId`; the server
-validates that the target is the root or one descendant, rejects archived and
-nonterminal targets, and returns `terminal: true` on compact terminal detail.
+validates that the target is the root or one descendant, rejects nonterminal
+targets, and returns `terminal: true` and `archiveState` on compact terminal
+detail. Archived tasks, work-item roots, and parent scopes are excluded unless
+`includeArchived: true` is explicitly supplied on every terminal read. This
+option is unavailable for claim-token reads.
+An excluded archived terminal read returns `ARCHIVE_INCLUSION_REQUIRED` with
+`retryMode: "after_input_change"`, `recovery.action: "modify_request"`, and an
+`includeArchived` field error. If archived history is intended, retry that read
+with `includeArchived: true`; otherwise keep the record excluded. This recovery
+requires no restore or other state change. Active-work, claim, and mutation
+archive failures retain their existing `ARCHIVED` recovery.
 Terminal reads do not recreate or renew claims, change versions, or add activity.
 Paged detail remains version- and content-hash-bound across a later reopen. A
 reopen during paging returns `TERMINAL_READ_INVALIDATED`, not a retry instruction
 that would reuse the now-invalid terminal scope.
+
+### Find completed research
+
+`actionables.search_completed_tasks` searches Done tasks across work items in
+an explicit `projectId` or `repositoryId`. Supply a nonempty `q` (up to 200
+characters); supplying both scope IDs restricts results to their intersection.
+It uses the dashboard's case-insensitive keyword/phrase text matching over
+titles, findings, descriptions, research, and Resolution. Dashboard text search
+also now includes Resolution. Dismissed and active tasks are never history
+search results.
+
+The default `limit` is 25 (maximum 100). Each result includes `id`, `workItemId`,
+title, scope, Done status, version, `archiveState`, `updatedAt`, and a bounded
+`match` containing the matched field and an excerpt around the match.
+`updatedAt` means last modification, not completion date. Results are ordered
+by descending public task ID. Continue with `nextCursor` as `cursor`, keeping
+the scope, query, and archive option unchanged, until `nextCursor` is null.
+Each page reads current records; restart if changes during paging need to be
+included. Search scans the selected completed history using ordinary text
+matching; it has no relevance ranking or separate search index.
+
+By default, directly archived tasks, tasks whose work-item root is archived,
+and tasks under archived projects, repositories, or worktrees are excluded.
+Use `includeArchived: true` on the search and every subsequent read to include
+them. `archiveState` describes the selected task and its project/repository/
+worktree inheritance; an archived work-item root may also require inclusion.
+No restore or lifecycle mutation occurs.
+
+Use each result's `id` and `workItemId` with `actionables.get_task`, then use
+that compact detail's version with `actionables.get_task_detail` for the full
+`research` array and `resolution` string. Both fields support the existing
+8,000-character JSON pages. Retrieve a truncated Resolution even when there
+is no implementation reconciliation guidance. Start at offset 0; carry the
+first `contentHash` with each `nextOffset`, concatenate `json`, and JSON-parse
+only after the last page. A changed version or field hash invalidates partial
+content; a reopened task ends terminal access. These reads preserve statuses,
+claims, lease times, versions, archive state, and activity.
+
+History search requires no work-item claim and grants no access to active
+backlog discovery. Treat completed research and Resolution as historical
+evidence and verify relevant claims against current code. A source change or
+passing test does not establish support in the currently installed runtime.
 
 Terminal inspection never reopens work. Continued work requires explicit user
 authorization and the existing dashboard transition from Done or Dismissed to
@@ -310,6 +361,7 @@ The endpoint exposes exactly these tools:
 - `actionables.bulk_create_tasks`
 - `actionables.bulk_prepare_tasks`
 - `actionables.list_tasks`
+- `actionables.search_completed_tasks`
 - `actionables.get_task`
 - `actionables.get_task_detail`
 - `actionables.claim_task`
@@ -322,7 +374,7 @@ The endpoint exposes exactly these tools:
 - `actionables.handoff_task`
 - `actionables.release_task`
 
-List results are limited to 100 active tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes only the named implementation-critical fields as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or a subtask at any depth, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
+Active list results are limited to 100 tasks, report `hasMore` when another match exists beyond the bound, and identify scoped work-item status even when empty. Completed history search is separately limited to 100 matches and uses `nextCursor`. Detailed results use a deterministic compact budget and report truncated fields plus omitted counts for relationship, source, file, and validation collections. When the exact lost content can affect task scope or planned validation, `truncation.reconciliationGuidance` explicitly stops forward lifecycle movement and implementation until the full record is reconciled; noncritical metadata and history loss leaves that guidance absent. `actionables.get_task_detail` exposes the named implementation-critical fields and Resolution as deterministic 8,000-character JSON pages bound to an exact task version. Its `contentHash` must accompany every continuation offset, so changes to related task values also reject mixed-snapshot paging with `VERSION_CONFLICT`. Callers concatenate the pages and parse the complete value; successful reads do not return a claim token, renew a claim, or change the task version. Handled tool errors return the same machine-readable `code`, `correlationId`, `retryMode`, structured `recovery`, field errors, current version, and legacy compatibility fields in both structured content and JSON text. The endpoint can create a top-level task or a subtask at any depth, but cannot otherwise change hierarchy or dependencies, expose resources or prompts, use experimental MCP Tasks, or support legacy HTTP+SSE.
 
 Tool schemas describe every model-supplied input field. Thread identity is
 host-derived request metadata and is intentionally absent from those schemas.

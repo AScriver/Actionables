@@ -179,6 +179,7 @@ export class AgentTaskClaimError extends Error {
       | "INVALID_REQUEST"
       | "NOT_FOUND"
       | "ARCHIVED"
+      | "ARCHIVE_INCLUSION_REQUIRED"
       | "TERMINAL"
       | "TERMINAL_READ_INVALIDATED"
       | "VERSION_CONFLICT"
@@ -374,7 +375,7 @@ async function findMutationTask(
 async function requireWorkItem(
   prisma: AppPrismaClient | TransactionClient,
   sourceOrdinal: number,
-  options: { allowTerminal?: boolean } = {},
+  options: { allowTerminal?: boolean; includeArchived?: boolean } = {},
 ) {
   const row = await findTask(prisma, sourceOrdinal);
   if (!row) {
@@ -393,7 +394,7 @@ async function requireWorkItem(
       },
     );
   }
-  if (isArchived(row)) {
+  if (!options.includeArchived && isArchived(row)) {
     throw new AgentTaskClaimError(
       "ARCHIVED",
       "The feature or bug work item is archived.",
@@ -2079,22 +2080,37 @@ export async function getClaimedAgentTask(
   return result.task;
 }
 
+/** Reads terminal history with archive opt-in and no lifecycle or claim changes. */
 export async function getScopedTerminalAgentTask(
   prisma: AppPrismaClient,
   sourceOrdinal: number,
   workItemSourceOrdinal: number,
   expectedVersion?: number,
+  includeArchived = false,
 ): Promise<ActionableDetail> {
   return prisma.$transaction(async (tx) => {
     const workItem = await requireWorkItem(tx, workItemSourceOrdinal, {
       allowTerminal: true,
+      // Archive recovery depends on the target's status; check both records below.
+      includeArchived: true,
     });
     const row = await findTask(tx, sourceOrdinal);
     if (!row) {
       throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
     }
     await requireTaskInWorkItem(tx, row, workItem);
-    if (isArchived(row)) {
+    if (!includeArchived && (isArchived(workItem) || isArchived(row))) {
+      if (terminalStatuses.includes(row.status)) {
+        throw new AgentTaskClaimError(
+          "ARCHIVE_INCLUSION_REQUIRED",
+          "This terminal history is excluded because the task or its governing scope is archived.",
+          {
+            includeArchived: [
+              "Set includeArchived: true only when archived terminal history is intended.",
+            ],
+          },
+        );
+      }
       throw new AgentTaskClaimError(
         "ARCHIVED",
         "Archived Actionables cannot be inspected by an agent.",

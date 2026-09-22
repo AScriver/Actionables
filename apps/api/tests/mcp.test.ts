@@ -15,7 +15,10 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { actionablesErrorResponseSchema } from "@actionables/contracts";
+import {
+  actionablesErrorResponseSchema,
+  type SearchCompletedTasksResponse,
+} from "@actionables/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
@@ -55,7 +58,17 @@ let address: string;
 let scope: { projectId: string; repositoryId: string; worktreeId: string };
 let nextOrdinal = 1;
 
-async function createTask(overrides: { status?: string; title?: string } = {}) {
+async function createTask(
+  overrides: {
+    status?: string;
+    title?: string;
+    finding?: string;
+    research?: string[];
+    resolution?: string;
+    archivedAt?: Date;
+    scope?: typeof scope;
+  } = {},
+) {
   const highest = await prisma.actionable.aggregate({
     _max: { sourceOrdinal: true },
   });
@@ -72,9 +85,11 @@ async function createTask(overrides: { status?: string; title?: string } = {}) {
       effort: "S",
       evidenceState: "Confirmed",
       updatedLabel: "fixture",
-      finding: "Initial finding",
+      finding: overrides.finding ?? "Initial finding",
       description: "Initial description",
-      researchJson: json([]),
+      researchJson: json(overrides.research ?? []),
+      resolution: overrides.resolution ?? "",
+      archivedAt: overrides.archivedAt,
       validationJson: json(["Run the MCP integration test."]),
       filesJson: json([{ path: "apps/api/src/mcp.ts" }]),
       tagsJson: json(["mcp"]),
@@ -88,6 +103,7 @@ async function createTask(overrides: { status?: string; title?: string } = {}) {
       contentHash: "",
       rawFragmentJson: json({ fixture: true }),
       ...scope,
+      ...overrides.scope,
     },
   });
 }
@@ -97,6 +113,43 @@ function threadMetadata(value: string) {
     threadId: value,
     "x-codex-turn-metadata": { thread_id: value },
   };
+}
+
+async function createHistoryScope(projectId?: string) {
+  const id = randomUUID();
+  projectId ??= (
+    await prisma.project.create({
+      data: { externalKey: id, name: "History project" },
+    })
+  ).id;
+  const repository = await prisma.repository.create({
+    data: { externalKey: id, name: "History repository", projectId },
+  });
+  const worktree = await prisma.worktree.create({
+    data: {
+      externalKey: id,
+      name: "History worktree",
+      projectId,
+      repositoryId: repository.id,
+    },
+  });
+  return { projectId, repositoryId: repository.id, worktreeId: worktree.id };
+}
+
+async function historyReadState() {
+  return Promise.all([
+    prisma.actionable.findMany({
+      orderBy: { id: "asc" },
+      include: {
+        agentTaskClaim: true,
+        activityEvents: true,
+        statusHistory: true,
+      },
+    }),
+    prisma.project.findMany({ orderBy: { id: "asc" } }),
+    prisma.repository.findMany({ orderBy: { id: "asc" } }),
+    prisma.worktree.findMany({ orderBy: { id: "asc" } }),
+  ]);
 }
 
 async function connectClient(
@@ -341,6 +394,7 @@ describe("Actionables MCP", () => {
           "actionables.bulk_create_tasks",
           "actionables.bulk_prepare_tasks",
           "actionables.list_tasks",
+          "actionables.search_completed_tasks",
           "actionables.get_task",
           "actionables.get_task_detail",
           "actionables.claim_task",
@@ -486,6 +540,14 @@ describe("Actionables MCP", () => {
         readOnlyHint: true,
         destructiveHint: false,
       });
+      expect(byName["actionables.search_completed_tasks"]).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
+      expect(client.getInstructions()).toContain(
+        "actionables.search_completed_tasks",
+      );
       expect(byName["actionables.get_task_detail"]).toMatchObject({
         readOnlyHint: true,
         destructiveHint: false,
@@ -3686,6 +3748,7 @@ describe("Actionables MCP", () => {
       const expectedFields = {
         finding,
         description,
+        resolution: "x".repeat(100_000),
         research,
         plannedValidation,
         files,
@@ -4097,6 +4160,639 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("searches only scoped Done history with matching excerpts and bounded continuation without writes", async () => {
+    const historyScope = await createHistoryScope();
+    const siblingScope = await createHistoryScope(historyScope.projectId);
+    const outsideScope = await createHistoryScope();
+    const keyword = "HistoryNeedle";
+    const root = await createTask({ scope: historyScope });
+    const parent = await createTask({ scope: historyScope });
+    await prisma.hierarchyRelationship.create({
+      data: { parentId: root.id, childId: parent.id, provenance: "test" },
+    });
+    const matches = [];
+    for (const fields of [
+      { title: `Earlier ${keyword} decision` },
+      { finding: `Verified ${keyword} behavior` },
+      {
+        research: [`${"prior context ".repeat(80)}${keyword} researched here`],
+      },
+      { resolution: `Resolved ${keyword} in the shared reader` },
+    ]) {
+      matches.push(
+        await createTask({ status: "Done", scope: historyScope, ...fields }),
+      );
+    }
+    await prisma.hierarchyRelationship.create({
+      data: {
+        parentId: parent.id,
+        childId: matches[2]!.id,
+        provenance: "test",
+      },
+    });
+    const sibling = await createTask({
+      status: "Done",
+      title: keyword,
+      scope: siblingScope,
+    });
+    await createTask({ status: "Done", title: keyword, scope: outsideScope });
+    const active = await createTask({
+      status: "In progress",
+      title: keyword,
+      scope: historyScope,
+    });
+    await createTask({
+      status: "Dismissed",
+      title: keyword,
+      scope: historyScope,
+    });
+    await prisma.agentTaskClaim.create({
+      data: {
+        actionableId: active.id,
+        agentId,
+        claimTokenHash: randomUUID(),
+        leaseExpiresAt: new Date("2000-01-01T00:00:00Z"),
+      },
+    });
+    const before = await historyReadState();
+    const { client, transport } = await connectClient(bearerToken, null);
+    const search = async (arguments_: Record<string, unknown>) =>
+      output<SearchCompletedTasksResponse>(
+        await client.callTool({
+          name: "actionables.search_completed_tasks",
+          arguments: arguments_,
+        }),
+      );
+    try {
+      for (const args of [
+        { q: keyword },
+        { projectId: " ", q: keyword },
+        { projectId: historyScope.projectId, q: " " },
+        { projectId: historyScope.projectId },
+        { projectId: historyScope.projectId, q: keyword, limit: 101 },
+        { projectId: historyScope.projectId, q: keyword, cursor: 0 },
+      ]) {
+        expect(
+          validationErrorText(
+            await client.callTool({
+              name: "actionables.search_completed_tasks",
+              arguments: args,
+            }),
+          ),
+        ).toBeTruthy();
+      }
+      const request = {
+        repositoryId: historyScope.repositoryId,
+        q: ` ${keyword.toUpperCase()} `,
+        limit: 2,
+      };
+      const first = await search(request);
+      expect(await search(request)).toEqual(first);
+      expect(first.items.map((item) => item.id)).toEqual([
+        matches[3]!.sourceOrdinal,
+        matches[2]!.sourceOrdinal,
+      ]);
+      expect(first.nextCursor).toBe(matches[2]!.sourceOrdinal);
+      expect(first.items[0]).toMatchObject({
+        id: matches[3]!.sourceOrdinal,
+        workItemId: matches[3]!.sourceOrdinal,
+        title: matches[3]!.title,
+        scope: historyScope,
+        status: "Done",
+        version: matches[3]!.version,
+        updatedAt: matches[3]!.updatedAt.toISOString(),
+        archiveState: { isArchived: false },
+        match: {
+          field: "resolution",
+          excerpt: expect.stringContaining(keyword),
+        },
+      });
+      expect(first.items[1]).toMatchObject({
+        workItemId: root.sourceOrdinal,
+        match: { field: "research", excerpt: expect.stringContaining(keyword) },
+      });
+      expect(
+        first.items.every((item) => item.match.excerpt.length <= 400),
+      ).toBe(true);
+      const second = await search({ ...request, cursor: first.nextCursor });
+      expect(second.items.map((item) => item.id)).toEqual([
+        matches[1]!.sourceOrdinal,
+        matches[0]!.sourceOrdinal,
+      ]);
+      expect(second.items.map((item) => item.match.field)).toEqual([
+        "finding",
+        "title",
+      ]);
+      expect(second.nextCursor).toBeNull();
+      expect(
+        await search({ ...request, cursor: second.items.at(-1)!.id }),
+      ).toEqual({ items: [], nextCursor: null });
+      expect(
+        await search({ ...request, q: "unmatched-history-keyword" }),
+      ).toEqual({ items: [], nextCursor: null });
+      expect(
+        await search({ ...request, projectId: outsideScope.projectId }),
+      ).toEqual({ items: [], nextCursor: null });
+      const projectMatches = await search({
+        projectId: historyScope.projectId,
+        q: keyword.toLowerCase(),
+      });
+      expect(projectMatches.items.map((item) => item.id)).toEqual([
+        sibling.sourceOrdinal,
+        ...matches.map((item) => item.sourceOrdinal).reverse(),
+      ]);
+      const selected = output<{ id: number; workItemId: number }>(
+        await client.callTool({
+          name: "actionables.get_task",
+          arguments: {
+            id: first.items[1]!.id,
+            workItemId: first.items[1]!.workItemId,
+          },
+        }),
+      );
+      expect(selected).toMatchObject({
+        id: matches[2]!.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+      });
+      const dashboard = await app.inject({
+        url: `/api/actionables?${new URLSearchParams({ repository: historyScope.repositoryId, status: "Done", q: "Resolved HistoryNeedle" })}`,
+      });
+      expect(dashboard.statusCode).toBe(200);
+      expect(
+        dashboard.json().items.map((item: { id: number }) => item.id),
+      ).toEqual([matches[3]!.sourceOrdinal]);
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("requires explicit archive inclusion for searching and fully reading direct and inherited history", async () => {
+    const archiveReadRecovery = {
+      code: "ARCHIVE_INCLUSION_REQUIRED",
+      retryMode: "after_input_change",
+      retryable: false,
+      recovery: {
+        action: "modify_request",
+        guidance: expect.stringContaining("includeArchived: true"),
+      },
+      errors: { includeArchived: expect.any(Array) },
+    };
+    const { client, transport } = await connectClient(bearerToken, null);
+    try {
+      for (const kind of [
+        "task",
+        "project",
+        "repository",
+        "worktree",
+        "workItem",
+      ] as const) {
+        const historyScope = await createHistoryScope();
+        const research = Array.from(
+          { length: 9 },
+          (_, index) => `ArchiveNeedle-${index}-${"r".repeat(1_100)}-${index}`,
+        );
+        const resolution = `ArchiveNeedle-${"resolved ".repeat(2_000)}-end`;
+        const task = await createTask({
+          status: "Done",
+          scope: historyScope,
+          research,
+          resolution,
+        });
+        let workItemId = task.sourceOrdinal;
+        const archivedAt = new Date("2026-01-02T03:04:05Z");
+        if (kind === "task") {
+          await prisma.actionable.update({
+            where: { id: task.id },
+            data: { archivedAt },
+          });
+        } else if (kind === "workItem") {
+          const root = await createTask({
+            status: "Done",
+            scope: historyScope,
+            archivedAt,
+          });
+          workItemId = root.sourceOrdinal;
+          await prisma.hierarchyRelationship.create({
+            data: { parentId: root.id, childId: task.id, provenance: "test" },
+          });
+        } else if (kind === "project") {
+          await prisma.project.update({
+            where: { id: historyScope.projectId },
+            data: { archivedAt },
+          });
+        } else if (kind === "repository") {
+          await prisma.repository.update({
+            where: { id: historyScope.repositoryId },
+            data: { archivedAt },
+          });
+        } else {
+          await prisma.worktree.update({
+            where: { id: historyScope.worktreeId },
+            data: { archivedAt },
+          });
+        }
+        await prisma.agentTaskClaim.create({
+          data: {
+            actionableId: task.id,
+            agentId,
+            claimTokenHash: randomUUID(),
+            leaseExpiresAt: new Date("2000-01-01T00:00:00Z"),
+          },
+        });
+        const before = await historyReadState();
+        const searchArgs = {
+          repositoryId: historyScope.repositoryId,
+          q: "archiveneedle",
+        };
+        expect(
+          output(
+            await client.callTool({
+              name: "actionables.search_completed_tasks",
+              arguments: searchArgs,
+            }),
+          ),
+        ).toEqual({ items: [], nextCursor: null });
+        const found = output<SearchCompletedTasksResponse>(
+          await client.callTool({
+            name: "actionables.search_completed_tasks",
+            arguments: { ...searchArgs, includeArchived: true },
+          }),
+        );
+        expect(found.items.map((item) => item.id)).toEqual([
+          task.sourceOrdinal,
+        ]);
+        expect(found.items[0]!.workItemId).toBe(workItemId);
+        expect(found.items[0]!.archiveState).toMatchObject({
+          directlyArchived: kind === "task",
+          inheritedFrom: ["project", "repository", "worktree"].includes(kind)
+            ? [kind]
+            : [],
+        });
+        const readArgs = { id: task.sourceOrdinal, workItemId };
+        const archiveError = errorOutput(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: readArgs,
+          }),
+        );
+        expect(archiveError).toMatchObject(archiveReadRecovery);
+        expect(archiveError.recovery.guidance).not.toMatch(
+          /restore|reopen|claim|renew/i,
+        );
+        const compact = output<{
+          version: number;
+          research: string[];
+          resolution: string;
+          archiveState: unknown;
+          truncation: { truncatedFields: string[] };
+        }>(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: { ...readArgs, includeArchived: true },
+          }),
+        );
+        expect(compact.archiveState).toEqual(found.items[0]!.archiveState);
+        expect(compact.research).toHaveLength(6);
+        expect(compact.resolution.length).toBeLessThanOrEqual(2_500);
+        expect(compact.truncation.truncatedFields).toEqual(
+          expect.arrayContaining(["research", "resolution"]),
+        );
+        for (const [field, expected] of Object.entries({
+          research,
+          resolution,
+        })) {
+          const chunks: string[] = [];
+          let contentHash: string | undefined;
+          let offset = 0;
+          for (let count = 0; count < 10; count += 1) {
+            const args = {
+              ...readArgs,
+              includeArchived: true,
+              version: compact.version,
+              field,
+              offset,
+              ...(contentHash ? { contentHash } : {}),
+            };
+            type Page = {
+              field: string;
+              version: number;
+              offset: number;
+              json: string;
+              totalLength: number;
+              contentHash: string;
+              nextOffset: number | null;
+            };
+            const page = output<Page>(
+              await client.callTool({
+                name: "actionables.get_task_detail",
+                arguments: args,
+              }),
+            );
+            expect(page).toMatchObject({
+              field,
+              version: compact.version,
+              offset,
+              totalLength: JSON.stringify(expected).length,
+            });
+            expect(page.json.length).toBeLessThanOrEqual(8_000);
+            contentHash ??= page.contentHash;
+            expect(page.contentHash).toBe(contentHash);
+            if (offset === 0) {
+              expect(
+                output(
+                  await client.callTool({
+                    name: "actionables.get_task_detail",
+                    arguments: args,
+                  }),
+                ),
+              ).toEqual(page);
+              expect(
+                errorOutput(
+                  await client.callTool({
+                    name: "actionables.get_task_detail",
+                    arguments: { ...args, includeArchived: false },
+                  }),
+                ),
+              ).toMatchObject(archiveReadRecovery);
+            }
+            chunks.push(page.json);
+            if (page.nextOffset === null) break;
+            expect(page.nextOffset).toBe(offset + page.json.length);
+            offset = page.nextOffset;
+          }
+          expect(chunks.length).toBeGreaterThan(1);
+          expect(JSON.parse(chunks.join(""))).toEqual(expected);
+        }
+        expect(await historyReadState()).toEqual(before);
+      }
+    } finally {
+      await transport.close();
+    }
+  }, 30_000);
+
+  it("preserves archive recovery for active work, claims and mutations", async () => {
+    const { client, transport } = await connectClient();
+    try {
+      for (const kind of ["task", "workItem"] as const) {
+        const task = await createTask();
+        const root = kind === "workItem" ? await createTask() : task;
+        if (root.id !== task.id) {
+          await prisma.hierarchyRelationship.create({
+            data: { parentId: root.id, childId: task.id, provenance: "test" },
+          });
+        }
+        const claimed = output<{
+          task: { version: number };
+          claim: { claimToken: string };
+        }>(
+          await client.callTool({
+            name: "actionables.claim_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              workItemId: root.sourceOrdinal,
+              version: task.version,
+            },
+          }),
+        );
+        await prisma.actionable.update({
+          where: { id: root.id },
+          data: { archivedAt: new Date() },
+        });
+        const before = await historyReadState();
+        const scoped = {
+          id: task.sourceOrdinal,
+          workItemId: root.sourceOrdinal,
+        };
+        const calls: Array<{
+          name: string;
+          arguments: Record<string, unknown>;
+        }> = [
+          {
+            name: "actionables.list_tasks",
+            arguments: { view: "available", workItemId: root.sourceOrdinal },
+          },
+          {
+            name: "actionables.claim_task",
+            arguments: { ...scoped, version: claimed.task.version },
+          },
+          { name: "actionables.get_task", arguments: scoped },
+          {
+            name: "actionables.get_task_detail",
+            arguments: {
+              ...scoped,
+              version: claimed.task.version,
+              field: "resolution",
+            },
+          },
+        ];
+        if (kind === "task") {
+          const credentials = {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          };
+          calls.push(
+            { name: "actionables.get_task", arguments: credentials },
+            {
+              name: "actionables.get_task_detail",
+              arguments: {
+                ...credentials,
+                version: claimed.task.version,
+                field: "resolution",
+              },
+            },
+            {
+              name: "actionables.update_task",
+              arguments: {
+                ...credentials,
+                version: claimed.task.version,
+                finding: "Must not be saved",
+              },
+            },
+          );
+        }
+        for (const call of calls) {
+          expect(errorOutput(await client.callTool(call))).toMatchObject({
+            code: "ARCHIVED",
+            retryMode: "after_state_change",
+            recovery: {
+              action: "resolve_state",
+              guidance: expect.stringContaining("Restore"),
+            },
+          });
+        }
+        expect(await historyReadState()).toEqual(before);
+      }
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("rejects stale history pages, mixed content, reopened work and archive access through claims", async () => {
+    const task = await createTask({
+      status: "Done",
+      resolution: "r".repeat(17_000),
+      research: ["r".repeat(10_000)],
+    });
+    const unrelated = await createTask({ status: "Done" });
+    const active = await createTask();
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: active.sourceOrdinal,
+            workItemId: active.sourceOrdinal,
+            version: active.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: active.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      let before = await historyReadState();
+      for (const name of [
+        "actionables.get_task",
+        "actionables.get_task_detail",
+      ]) {
+        const detail =
+          name === "actionables.get_task_detail"
+            ? { version: claimed.task.version, field: "resolution" }
+            : {};
+        expect(
+          validationErrorText(
+            await client.callTool({
+              name,
+              arguments: { ...credentials, ...detail, includeArchived: true },
+            }),
+          ),
+        ).toContain("includeArchived");
+        expect(
+          errorOutput(
+            await client.callTool({
+              name,
+              arguments: {
+                id: active.sourceOrdinal,
+                workItemId: active.sourceOrdinal,
+                includeArchived: true,
+                ...detail,
+              },
+            }),
+          ).code,
+        ).toBe(
+          name === "actionables.get_task_detail"
+            ? "TERMINAL_READ_INVALIDATED"
+            : "INVALID_REQUEST",
+        );
+        expect(
+          errorOutput(
+            await client.callTool({
+              name,
+              arguments: {
+                id: task.sourceOrdinal,
+                workItemId: unrelated.sourceOrdinal,
+                includeArchived: true,
+                ...detail,
+                ...(name === "actionables.get_task_detail"
+                  ? { version: task.version }
+                  : {}),
+              },
+            }),
+          ).code,
+        ).toBe("INVALID_REQUEST");
+      }
+      const firstArgs = {
+        id: task.sourceOrdinal,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+        field: "resolution",
+      };
+      const first = output<{ nextOffset: number; contentHash: string }>(
+        await client.callTool({
+          name: "actionables.get_task_detail",
+          arguments: firstArgs,
+        }),
+      );
+      const nextArgs = {
+        ...firstArgs,
+        offset: first.nextOffset,
+        contentHash: first.contentHash,
+      };
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: { ...nextArgs, field: "research" },
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(
+        validationErrorText(
+          await client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: { ...firstArgs, offset: first.nextOffset },
+          }),
+        ),
+      ).toContain("contentHash");
+      expect(await historyReadState()).toEqual(before);
+
+      // A changed field must invalidate its hash even if an external writer failed to bump the version.
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { resolution: "changed".repeat(3_000) },
+      });
+      before = await historyReadState();
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: nextArgs,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(before);
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { version: { increment: 1 } },
+      });
+      before = await historyReadState();
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: firstArgs,
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(await historyReadState()).toEqual(before);
+      await prisma.actionable.update({
+        where: { id: task.id },
+        data: { status: "Ready", version: { increment: 1 } },
+      });
+      before = await historyReadState();
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_detail",
+            arguments: { ...nextArgs, includeArchived: true },
+          }),
+        ),
+      ).toMatchObject({
+        code: "TERMINAL_READ_INVALIDATED",
+        retryMode: "never",
+        recovery: { action: "stop" },
+      });
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("supports scoped terminal list and exact reads without reopening work", async () => {
     const longFinding = `Terminal inspection ${"x".repeat(8_500)}`;
     const created = await createTask({
@@ -4362,8 +5058,10 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(archivedRead).toMatchObject({
-        code: "ARCHIVED",
-        nextAction: expect.stringContaining("Restore"),
+        code: "ARCHIVE_INCLUSION_REQUIRED",
+        retryMode: "after_input_change",
+        recovery: { action: "modify_request" },
+        nextAction: expect.stringContaining("includeArchived: true"),
       });
       const missingRead = errorOutput(
         await client.callTool({

@@ -123,6 +123,13 @@ function bulkFailureContext() {
 describe("Actionables error recovery contract", () => {
   it.each([
     ["INVALID_REQUEST", "after_input_change", "modify_request", false],
+    [
+      "ARCHIVE_INCLUSION_REQUIRED",
+      "after_input_change",
+      "modify_request",
+      false,
+    ],
+    ["ARCHIVED", "after_state_change", "resolve_state", true],
     ["READY_REQUIREMENTS_NOT_MET", "after_state_change", "resolve_state", true],
     ["VERSION_CONFLICT", "after_state_change", "reconcile_state", true],
   ] as const)(
@@ -431,7 +438,7 @@ describe("agent task claims", () => {
         archived.sourceOrdinal,
         archived.sourceOrdinal,
       ),
-    ).rejects.toMatchObject({ code: "ARCHIVED" });
+    ).rejects.toMatchObject({ code: "ARCHIVE_INCLUSION_REQUIRED" });
     await expect(
       getScopedTerminalAgentTask(prisma, 999_999, done.sourceOrdinal),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
