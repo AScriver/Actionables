@@ -1601,7 +1601,20 @@ function ValidationRecords({
 }
 
 function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
-  const groups = groupActivityByAgentSession(selected.activity);
+  const [showSubtaskActivity, setShowSubtaskActivity] = useState(false);
+  const combinedQuery = useQuery({
+    queryKey: ["actionable", selected.id, "subtask-activity"],
+    queryFn: () => fetchActionable(selected.id, true),
+    enabled: showSubtaskActivity,
+  });
+  let groups = groupActivityByAgentSession(selected.activity);
+  if (showSubtaskActivity && combinedQuery.data && !combinedQuery.isError) {
+    // Interleaved tasks cannot share the single-task agent session grouping.
+    groups = [
+      { kind: "other", id: "combined", events: combinedQuery.data.activity },
+    ];
+    if (combinedQuery.data.activity.length === 0) groups = [];
+  }
 
   const agentSessionId = (agentId: string) => {
     const threadUrl = codexThreadUrlFromAgentId(agentId);
@@ -1629,6 +1642,19 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
         <Activity aria-hidden="true" />
         <div>
           <span className="activity-event-category">{category}</span>
+          {event.actionable && (
+            <div className="activity-source">
+              {event.actionable.id === selected.id ? (
+                <span>
+                  #{event.actionable.id} · {event.actionable.title}
+                </span>
+              ) : (
+                <a href={`/actionables/${event.actionable.id}`}>
+                  #{event.actionable.id} · {event.actionable.title}
+                </a>
+              )}
+            </div>
+          )}
           <strong>{event.summary}</strong>
           {event.context.reason && <Markdown>{event.context.reason}</Markdown>}
           <time dateTime={event.occurredAt}>
@@ -1642,6 +1668,25 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
   return (
     <section className="inspector-section activity-timeline">
       <h3>Activity</h3>
+      <label className="activity-filter">
+        <input
+          type="checkbox"
+          checked={showSubtaskActivity}
+          onChange={(event) => setShowSubtaskActivity(event.target.checked)}
+        />
+        Show subtask activity
+      </label>
+      {showSubtaskActivity && combinedQuery.isPending && (
+        <p role="status">Loading subtask activity…</p>
+      )}
+      {showSubtaskActivity && combinedQuery.isError && (
+        <div role="alert">
+          <p>Could not load subtask activity. Showing parent activity only.</p>
+          <button type="button" onClick={() => void combinedQuery.refetch()}>
+            Retry
+          </button>
+        </div>
+      )}
       {groups.map((group) =>
         group.kind === "session" ? (
           <section className="activity-session" key={group.id}>
@@ -2467,7 +2512,9 @@ function Inspector({
           />
         )}
 
-        {activeTab === "activity" && <ActivityTimeline selected={selected} />}
+        {activeTab === "activity" && (
+          <ActivityTimeline key={selected.id} selected={selected} />
+        )}
       </div>
     </>
   );

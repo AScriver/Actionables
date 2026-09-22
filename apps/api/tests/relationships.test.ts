@@ -4,6 +4,7 @@ import { open, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ActionableDetail } from "@actionables/contracts";
 import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 
@@ -136,6 +137,103 @@ async function move(
 }
 
 describe("hierarchy relationships", () => {
+  it("reads combined activity from attached descendants without changing stored history", async () => {
+    const parent = await create("Activity parent");
+    const child = await create("Activity child");
+    const sibling = await create("Activity archived sibling");
+    const nested = await create("Activity nested child");
+    const detached = await create("Activity detached child");
+    const detachedNested = await create("Activity detached grandchild");
+    const unrelated = await create("Activity unrelated task");
+    for (const [parentTask, childTask, detachedAt] of [
+      [parent, child, null],
+      [parent, sibling, null],
+      [child, nested, null],
+      [parent, detached, new Date()],
+      [detached, detachedNested, null],
+    ] as const) {
+      await prisma.hierarchyRelationship.create({
+        data: {
+          parentId: parentTask.recordId,
+          childId: childTask.recordId,
+          detachedAt,
+        },
+      });
+    }
+    await prisma.actionable.update({
+      where: { id: sibling.recordId },
+      data: { archivedAt: new Date() },
+    });
+    // Equal timestamps must retain the existing event-ID tie breaker.
+    await prisma.activityEvent.createMany({
+      data: [parent, child, sibling, nested].map((task, index) => ({
+        id: `activity-order-${3 - index}`,
+        actionableId: task.recordId,
+        type: "agent-updated",
+        summary: `Distinct activity for ${task.title}`,
+        metadataJson: { reason: task.title },
+        occurredAt: new Date("2026-01-01T12:00:00.000Z"),
+      })),
+    });
+    const tasks: ActionableDetail[] = await Promise.all(
+      [parent, child, sibling, nested].map((task) => get(task.id)),
+    );
+    const expected = tasks
+      .flatMap((task) =>
+        task.activity.map((event) => ({
+          ...event,
+          actionable: { id: task.id, title: task.title },
+        })),
+      )
+      .sort((left, right) => {
+        const time = Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+        if (time) return time;
+        return left.id < right.id ? -1 : 1;
+      });
+    const before = await prisma.activityEvent.findMany({
+      orderBy: { id: "asc" },
+    });
+    for (const includeSubtaskActivity of ["true", "false", "true", "false"]) {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/actionables/${parent.id}?includeSubtaskActivity=${includeSubtaskActivity}`,
+      });
+      expect(response.statusCode).toBe(200);
+      const detail: ActionableDetail = response.json().item;
+      expect(detail.activity).toEqual(
+        includeSubtaskActivity === "true" ? expected : tasks[0].activity,
+      );
+      expect({ ...detail, activity: tasks[0].activity }).toEqual(tasks[0]);
+    }
+    const nestedResponse = await app.inject({
+      method: "GET",
+      url: `/api/actionables/${child.id}?includeSubtaskActivity=true`,
+    });
+    expect(nestedResponse.json().item.activity).toEqual(
+      expected.filter((event) =>
+        [child.id, nested.id].includes(event.actionable.id),
+      ),
+    );
+    expect(await get(parent.id)).toEqual(tasks[0]);
+    expect(
+      await prisma.activityEvent.findMany({ orderBy: { id: "asc" } }),
+    ).toEqual(before);
+
+    await prisma.activityEvent.deleteMany({
+      where: { actionableId: unrelated.recordId },
+    });
+    const empty = await app.inject({
+      method: "GET",
+      url: `/api/actionables/${unrelated.id}?includeSubtaskActivity=true`,
+    });
+    expect(empty.json().item.activity).toEqual([]);
+    const invalid = await app.inject({
+      method: "GET",
+      url: `/api/actionables/${parent.id}?includeSubtaskActivity=yes`,
+    });
+    expect(invalid.statusCode).toBe(422);
+  });
+
   it.each(["direct", "nested"])(
     "rolls up %s tasks using real claim, dependency and validation state",
     async (shape) => {

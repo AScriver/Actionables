@@ -2913,6 +2913,25 @@ button {
   gap: 8px;
 }
 
+.activity-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.activity-filter input {
+  accent-color: var(--accent);
+}
+
+.activity-source {
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
 .activity-timeline article {
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr);
@@ -2956,16 +2975,19 @@ button {
   overflow-wrap: anywhere;
 }
 
-.activity-session-agent a {
+.activity-session-agent a,
+.activity-source a {
   color: var(--accent);
   text-underline-offset: 2px;
 }
 
-.activity-session-agent a:hover {
+.activity-session-agent a:hover,
+.activity-source a:hover {
   color: var(--accent-strong);
 }
 
-.activity-session-agent a:focus-visible {
+.activity-session-agent a:focus-visible,
+.activity-source a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

@@ -110,6 +110,11 @@ test("@a11y activity timeline adds a keyboard stop only when scrolling needs one
   await expect(link).toBeVisible();
   await expect(content).not.toHaveAttribute("tabindex");
   await activityTab.press("Tab");
+  const activityFilter = content.getByRole("checkbox", {
+    name: "Show subtask activity",
+  });
+  await expect(activityFilter).toBeFocused();
+  await activityFilter.press("Tab");
   await expect(link).toBeFocused();
   await link.press("PageDown");
   await expect

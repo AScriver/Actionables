@@ -3,6 +3,7 @@ import {
   actionableQuerySchema,
   actionablesCorrelationIdSchema,
   actionableDetailResponseSchema,
+  actionableDetailQuerySchema,
   codexWorkspaceResponseSchema,
   actionablesListResponseSchema,
   auditActionableRelationshipsRequestSchema,
@@ -629,13 +630,27 @@ export function buildApp({
     return reply.code(201).send(actionableDetailResponseSchema.parse({ item }));
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: Record<string, unknown> }>(
     "/api/actionables/:id",
     async (request, reply) => {
       const id = parseRouteId(request, reply, request.params.id);
       if (id === null) return;
 
-      const item = await getActionable(prisma, id);
+      const query = actionableDetailQuerySchema.safeParse(request.query);
+      if (!query.success)
+        return problem(
+          request,
+          reply,
+          422,
+          "VALIDATION_ERROR",
+          "Check the activity filter.",
+          { errors: fieldErrors(query.error) },
+        );
+      const item = await getActionable(
+        prisma,
+        id,
+        query.data.includeSubtaskActivity === "true",
+      );
       if (!item) {
         return problem(
           request,

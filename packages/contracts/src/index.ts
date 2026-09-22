@@ -223,6 +223,13 @@ export const activityEventSchema = z.object({
   summary: z.string().min(1),
   context: z.record(z.string(), z.string()),
   occurredAt: z.string().datetime(),
+  actionable: z
+    .object({ id: z.number().int().positive(), title: z.string().min(1) })
+    .optional(),
+});
+
+export const actionableDetailQuerySchema = z.object({
+  includeSubtaskActivity: z.enum(["true", "false"]).default("false"),
 });
 
 export const statusProvenanceSchema = z.discriminatedUnion("kind", [

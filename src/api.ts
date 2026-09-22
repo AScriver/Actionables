@@ -94,9 +94,14 @@ export async function fetchActionables(
   );
 }
 
-export async function fetchActionable(id: number): Promise<ActionableDetail> {
+/** Reads a task with optional activity from its attached subtask hierarchy. */
+export async function fetchActionable(
+  id: number,
+  includeSubtaskActivity = false,
+): Promise<ActionableDetail> {
+  const query = includeSubtaskActivity ? "?includeSubtaskActivity=true" : "";
   const response = actionableDetailResponseSchema.parse(
-    await requestJson(`/api/actionables/${id}`),
+    await requestJson(`/api/actionables/${id}${query}`),
   );
   return response.item;
 }

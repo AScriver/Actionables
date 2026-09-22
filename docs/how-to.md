@@ -150,6 +150,14 @@ state survives reloads in the same browser tab. Search, hierarchy filters and
 archive views show matching tasks as a flat list, including deep tasks whose
 ancestors do not match. Use the Relationships links to navigate their parents.
 
+In **Activity**, check **Show subtask activity** to include all attached
+subtasks, including nested and archived subtasks. The combined feed runs from
+oldest to newest and identifies each task by ID and title, with links to the
+subtasks. Uncheck it to return to the parent's own activity and agent sessions.
+The checkbox starts unchecked when opening the tab or selecting another task.
+It only changes the displayed feed; stored activity is unchanged. Detached
+subtasks and unrelated tasks are excluded.
+
 ## Work-item progress
 
 Parents with subtasks show **Work-item progress** in the **Relationships**

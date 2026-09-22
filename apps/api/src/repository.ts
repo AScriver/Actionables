@@ -160,6 +160,16 @@ function stringContext(value: Prisma.JsonValue): Record<string, string> {
   );
 }
 
+function toActivityEvent(event: StoredActionableRow["activityEvents"][number]) {
+  return {
+    id: event.id,
+    type: event.type,
+    summary: event.summary,
+    context: stringContext(event.metadataJson),
+    occurredAt: event.occurredAt.toISOString(),
+  };
+}
+
 function latestInProgressAt(row: Pick<ActionableRow, "statusHistory">) {
   return (
     row.statusHistory.find((entry) => entry.newStatus === "In progress")
@@ -460,13 +470,7 @@ function toDetail(
         )?.id ?? null,
       qualifiesForCompletion: qualifying.has(record.id),
     })),
-    activity: row.activityEvents.map((event) => ({
-      id: event.id,
-      type: event.type,
-      summary: event.summary,
-      context: stringContext(event.metadataJson),
-      occurredAt: event.occurredAt.toISOString(),
-    })),
+    activity: row.activityEvents.map(toActivityEvent),
     completionEligibility: {
       qualifyingValidationRecordId: latestQualifyingValidationId(row),
       policy:
@@ -1283,12 +1287,34 @@ export async function getActionableWorkspace(
   }
 }
 
+/** Reads detail, optionally including activity from all attached descendants. */
 export async function getActionable(
   prisma: AppPrismaClient | TransactionClient,
   sourceOrdinal: number,
+  includeSubtaskActivity = false,
 ): Promise<ActionableDetail | null> {
   const row = await findActionableRow(prisma, sourceOrdinal);
-  return row ? toDetail(row) : null;
+  if (!row) return null;
+  const detail = toDetail(row);
+  if (!includeSubtaskActivity) return detail;
+
+  const sources = new Map(
+    [row, ...row.descendants].map((task) => [
+      task.id,
+      { id: task.sourceOrdinal, title: task.title },
+    ]),
+  );
+  const events = await prisma.activityEvent.findMany({
+    where: { actionableId: { in: [...sources.keys()] } },
+    orderBy: actionableInclude.activityEvents.orderBy,
+  });
+  return actionableDetailSchema.parse({
+    ...detail,
+    activity: events.map((event) => ({
+      ...toActivityEvent(event),
+      actionable: sources.get(event.actionableId),
+    })),
+  });
 }
 
 export async function listInboxTriageCandidates(
