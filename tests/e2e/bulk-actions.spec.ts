@@ -99,14 +99,18 @@ test("row modifiers toggle, replace and extend visible ranges without opening ro
     items.push(await create(page, `${prefix} ${index}`));
   await page.goto(`/?q=${prefix}&sort=title`);
   const selected = page.locator('.finding-row[aria-selected="true"]');
+  const toolbar = page.locator(".bulk-toolbar");
+  await expect(toolbar).toBeHidden();
   await expect(page.getByRole("table").getByRole("checkbox")).toHaveCount(0);
   await row(page, items[0]).locator(".finding-title").click();
   const opened = page.url();
   await expect(selected).toHaveCount(1);
+  await expect(toolbar).toBeHidden();
   await row(page, items[4])
     .locator(".finding-title")
     .click({ modifiers: ["Control"] });
   await expect(selected).toHaveCount(2);
+  await expect(toolbar).toBeVisible();
   await expect(page).toHaveURL(opened);
   await row(page, items[2])
     .locator(".finding-title")
@@ -143,6 +147,7 @@ test("row modifiers toggle, replace and extend visible ranges without opening ro
   ).toEqual([]);
   await row(page, items[1]).locator(".finding-title").click();
   await expect(selected).toHaveCount(1);
+  await expect(toolbar).toBeHidden();
   await expect(page).toHaveURL(new RegExp(`/actionables/${items[1].id}`));
 });
 
@@ -155,13 +160,20 @@ test("keyboard selection toggles, extends ranges, selects shown rows and clears"
     items.push(await create(page, `${prefix} ${index}`));
   await page.goto(`/?q=${prefix}&sort=title`);
   const selected = page.locator('.finding-row[aria-selected="true"]');
+  const toolbar = page.locator(".bulk-toolbar");
   await row(page, items[0]).press("Space");
   await expect(selected).toHaveCount(1);
+  await expect(toolbar).toBeHidden();
+  await expect(page.getByRole("table")).not.toHaveClass(/has-selection/);
   await row(page, items[0]).press("Shift+ArrowDown");
   await expect(selected).toHaveCount(2);
+  await expect(toolbar).toBeVisible();
+  await expect(page.getByRole("table")).toHaveClass(/has-selection/);
   await expect(row(page, items[1])).toBeFocused();
   await row(page, items[1]).press("Shift+ArrowUp");
   await expect(selected).toHaveCount(1);
+  await expect(toolbar).toBeHidden();
+  await expect(page.getByRole("table")).not.toHaveClass(/has-selection/);
   await row(page, items[0]).press("Control+ArrowDown");
   await expect(selected).toHaveCount(1);
   await expect(row(page, items[1])).toBeFocused();
@@ -171,6 +183,7 @@ test("keyboard selection toggles, extends ranges, selects shown rows and clears"
   await expect(selected).toHaveCount(3);
   await row(page, items[1]).press("Escape");
   await expect(selected).toHaveCount(0);
+  await expect(toolbar).toBeHidden();
   await selectAllShown(page);
   await expect(selected).toHaveCount(3);
   await page.getByRole("button", { name: "Clear selection" }).click();
@@ -204,7 +217,8 @@ test("selection and range anchors stay within visible rows and reset with contex
   await row(page, parent)
     .locator(".finding-title")
     .click({ modifiers: ["Control"] });
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(row(page, parent)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".bulk-toolbar")).toBeHidden();
   await expect(page).not.toHaveURL(new RegExp(`/actionables/${parent.id}`));
   await row(page, other).press("Enter");
   await expect(page).toHaveURL(new RegExp(`/actionables/${other.id}`));
@@ -236,12 +250,13 @@ test("selection and range anchors stay within visible rows and reset with contex
   await row(page, other)
     .locator(".finding-title")
     .click({ modifiers: ["Shift"] });
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(row(page, other)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".bulk-toolbar")).toBeHidden();
   await page
     .getByRole("button", { name: `Expand subtasks for ${parent.title}` })
     .click();
   await expect(row(page, child)).toHaveAttribute("aria-selected", "false");
-  await page.getByRole("button", { name: "Clear selection" }).click();
+  await row(page, other).press("Escape");
   await row(page, parent)
     .locator(".finding-title")
     .click({ modifiers: ["Control"] });
@@ -253,7 +268,8 @@ test("selection and range anchors stay within visible rows and reset with contex
   await row(page, other)
     .locator(".finding-title")
     .click({ modifiers: ["Shift"] });
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(row(page, other)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".bulk-toolbar")).toBeHidden();
   await page.getByLabel("Search actionables").fill("");
   await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
   await row(page, parent)
@@ -358,7 +374,8 @@ test("dismissal confirms selected items, preserves unselected descendants and cl
   );
   expect((await detail(page, untouched.id)).status).toBe("Inbox");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(row(page, terminal)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".bulk-toolbar")).toBeHidden();
   await expect(row(page, parent)).toHaveAttribute("aria-selected", "false");
 });
 
@@ -401,6 +418,7 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
 }) => {
   const prefix = `uncertain-${randomUUID()}`;
   const item = await create(page, prefix);
+  await create(page, `${prefix} other`);
   let submissions = 0;
   let release: () => void = () => {};
   const pending = new Promise<void>((resolve) => {
@@ -417,9 +435,7 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
     },
   );
   await page.goto(`/?q=${prefix}`);
-  await row(page, item)
-    .locator(".finding-title")
-    .click({ modifiers: ["Control"] });
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
@@ -427,7 +443,7 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
   await dialog
     .getByLabel("Dismissal reason")
     .fill("Confirm after connection loss.");
-  const confirm = dialog.getByRole("button", { name: "Confirm dismiss 1" });
+  const confirm = dialog.getByRole("button", { name: "Confirm dismiss 2" });
   await confirm.evaluate((button: HTMLButtonElement) => {
     button.click();
     button.click();
@@ -441,7 +457,7 @@ test("lost responses reconcile and duplicate submissions never repeat a write", 
   await expect(dialog).toContainText(
     "Dismissal verified after the response was interrupted.",
   );
-  await expect(dialog.getByRole("status")).toContainText("1 succeeded");
+  await expect(dialog.getByRole("status")).toContainText("2 succeeded");
   expect(submissions).toBe(1);
   expect(
     (await detail(page, item.id)).activity.filter(
@@ -457,6 +473,7 @@ test("unavailable readback stays uncertain until refreshed and never repeats the
   page,
 }) => {
   const item = await create(page, `offline-${randomUUID()}`);
+  await create(page, `${item.title} other`);
   let offline = false;
   let writes = 0;
   await page.route(`**/api/actionables/${item.id}`, async (route) => {
@@ -474,15 +491,13 @@ test("unavailable readback stays uncertain until refreshed and never repeats the
     },
   );
   await page.goto(`/?q=${item.title}&status=all`);
-  await row(page, item)
-    .locator(".finding-title")
-    .click({ modifiers: ["Control"] });
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Dismiss selected", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Dismissal reason").fill("Recover when online.");
-  await dialog.getByRole("button", { name: "Confirm dismiss 1" }).click();
+  await dialog.getByRole("button", { name: "Confirm dismiss 2" }).click();
   await expect(dialog).toContainText(
     "Uncertain — Outcome could not be verified",
   );
@@ -498,7 +513,7 @@ test("unavailable readback stays uncertain until refreshed and never repeats the
   await expect(dialog).toContainText(
     "Dismissal verified from current history.",
   );
-  await expect(dialog.getByRole("status")).toContainText("1 succeeded");
+  await expect(dialog.getByRole("status")).toContainText("2 succeeded");
   expect(writes).toBe(1);
 });
 
@@ -742,27 +757,32 @@ test("archive impact failures and mismatched versions must be reviewed before wr
   page,
 }) => {
   const item = await create(page, `impact-${randomUUID()}`);
+  const other = await create(page, `${item.title} other`);
   let mode = "offline";
   let writes = 0;
-  await page.route(
-    `**/api/archive-impact/actionable/${item.id}`,
-    async (route) => {
-      if (mode === "offline") {
-        await route.abort("failed");
-        return;
-      }
-      if (mode === "mismatch") await transition(page, item.id, "Researching");
-      await route.continue();
-    },
-  );
-  await page.route(`**/api/actionables/${item.id}/archive`, async (route) => {
-    writes++;
-    await route.continue();
-  });
+  for (const target of [item, other]) {
+    await page.route(
+      `**/api/archive-impact/actionable/${target.id}`,
+      async (route) => {
+        if (mode === "offline") {
+          await route.abort("failed");
+          return;
+        }
+        if (mode === "mismatch")
+          await transition(page, target.id, "Researching");
+        await route.continue();
+      },
+    );
+    await page.route(
+      `**/api/actionables/${target.id}/archive`,
+      async (route) => {
+        writes++;
+        await route.continue();
+      },
+    );
+  }
   await page.goto(`/?q=${item.title}`);
-  await row(page, item)
-    .locator(".finding-title")
-    .click({ modifiers: ["Control"] });
+  await selectAllShown(page);
   await page
     .getByRole("button", { name: "Archive selected", exact: true })
     .click();
@@ -779,9 +799,9 @@ test("archive impact failures and mismatched versions must be reviewed before wr
   expect(writes).toBe(0);
   mode = "ready";
   await dialog.getByRole("button", { name: "Review remaining" }).click();
-  await dialog.getByRole("button", { name: "Confirm archive 1" }).click();
-  await expect(dialog.getByRole("status")).toContainText("1 succeeded");
-  expect(writes).toBe(1);
+  await dialog.getByRole("button", { name: "Confirm archive 2" }).click();
+  await expect(dialog.getByRole("status")).toContainText("2 succeeded");
+  expect(writes).toBe(2);
 });
 
 test("bulk priority and effort preserve each item's content, sources, status, scope and claim", async ({
@@ -972,15 +992,16 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   });
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   const unchanged = await detail(page, first.id);
-  await row(page, first)
-    .locator(".finding-title")
-    .click({ modifiers: ["Control"] });
+  for (const item of [first, second])
+    await row(page, item)
+      .locator(".finding-title")
+      .click({ modifiers: ["Control"] });
   await page
     .getByRole("button", { name: "Edit selected", exact: true })
     .click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Field to change").selectOption("add-tags");
-  await dialog.getByLabel("New value").fill("new-tag, NEW TAG, Keep  Tag");
+  await dialog.getByLabel("New value").fill("new-tag, NEW TAG");
   await expect(dialog).toContainText("No change needed.");
   await expect(
     dialog.getByRole("button", { name: "Confirm edit 0" }),
@@ -1055,10 +1076,9 @@ test("@a11y bulk controls remain usable on desktop and mobile", async ({
   page,
 }) => {
   const item = await create(page, `accessible-${randomUUID()}`);
+  await create(page, `${item.title} other`);
   await page.goto(`/?q=${item.title}`);
-  await row(page, item)
-    .locator(".finding-title")
-    .click({ modifiers: ["Control"] });
+  await selectAllShown(page);
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     for (const button of await page.locator(".bulk-toolbar button").all()) {
@@ -1070,7 +1090,7 @@ test("@a11y bulk controls remain usable on desktop and mobile", async ({
       .getByRole("button", { name: "Dismiss selected", exact: true })
       .click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("status")).toContainText("1 eligible");
+    await expect(dialog.getByRole("status")).toContainText("2 eligible");
     expect(
       (await new AxeBuilder({ page }).include(".bulk-dialog").analyze())
         .violations,
@@ -1081,7 +1101,7 @@ test("@a11y bulk controls remain usable on desktop and mobile", async ({
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(
-      dialog.getByRole("button", { name: "Confirm dismiss 1" }),
+      dialog.getByRole("button", { name: "Confirm dismiss 2" }),
     ).toBeFocused();
     await page.screenshot({
       path: `output/playwright/task528-dismiss-${width}.png`,

@@ -7637,12 +7637,12 @@ export default function App() {
             </div>
           )}
           <div
-            className={`findings-table ${selectedRows.length ? "has-selection" : ""}`}
+            className={`findings-table ${selectedRows.length >= 2 ? "has-selection" : ""}`}
             role="table"
             aria-label="Actionable findings"
             aria-describedby="row-selection-help"
           >
-            {selectedRows.length > 0 && (
+            {selectedRows.length >= 2 && (
               <div className="bulk-toolbar" role="row">
                 <div role="cell">
                   <span role="status">{selectedRows.length} selected</span>

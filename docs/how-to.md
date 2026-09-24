@@ -103,8 +103,9 @@ the selection. Selected rows are highlighted; no checkboxes are shown.
 
 With a row focused, **Space** toggles it, **Shift+Up/Down** extends the range,
 **Ctrl/Cmd+A** selects all shown rows, and **Escape** clears selection. **Enter**
-opens a row without changing the selection. The toolbar also offers **Select all
-shown** and **Clear selection**.
+opens a row without changing the selection. The bulk toolbar appears when at
+least two Actionables are selected and offers **Select all shown** and **Clear
+selection**. It hides again when fewer than two remain selected.
 Only visible, loaded rows are selected, including expanded children, never hidden
 descendants or another page. Changing filters, sorting, scope or view clears the
 selection and range anchor; collapsing a branch removes its hidden selections.
