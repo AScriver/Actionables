@@ -897,7 +897,7 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   page,
 }) => {
   const prefix = `tags-${randomUUID()}`;
-  const first = await create(page, `${prefix} first`, ["Keep", "UI"]);
+  const first = await create(page, `${prefix} first`, [" Keep Tag ", "UI"]);
   const second = await create(page, `${prefix} second`, ["Different"]);
   const full = await create(
     page,
@@ -920,9 +920,12 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
     ).toBeDisabled();
     expect((await detail(page, first.id)).version).toBe(first.version);
   }
-  await dialog.getByLabel("New value").fill("UI, New, new");
+  await dialog.getByLabel("New value").fill("UI, New  Tag, new-tag");
   await expect(dialog.getByRole("status")).toContainText(
     "2 eligible · 1 excluded",
+  );
+  await expect(dialog).toContainText(
+    "Tags: keep-tag, ui → keep-tag, ui, new-tag",
   );
   await expect(dialog).toContainText("30");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -936,11 +939,15 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
   });
   await dialog.getByRole("button", { name: "Confirm edit 2" }).click();
   await expect(dialog.getByRole("status")).toContainText("2 succeeded");
-  expect((await detail(page, first.id)).tags).toEqual(["Keep", "UI", "New"]);
+  expect((await detail(page, first.id)).tags).toEqual([
+    "keep-tag",
+    "ui",
+    "new-tag",
+  ]);
   expect((await detail(page, second.id)).tags).toEqual([
-    "Different",
-    "UI",
-    "New",
+    "different",
+    "ui",
+    "new-tag",
   ]);
   expect((await detail(page, full.id)).version).toBe(fullBefore.version);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -950,11 +957,14 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
     .click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Field to change").selectOption("remove-tags");
-  await dialog.getByLabel("New value").fill("uI, tag-0, absent");
+  await dialog.getByLabel("New value").fill("uI, TAG  0, absent");
   await dialog.getByRole("button", { name: "Confirm edit 3" }).click();
   await expect(dialog.getByRole("status")).toContainText("3 succeeded");
-  expect((await detail(page, first.id)).tags).toEqual(["Keep", "New"]);
-  expect((await detail(page, second.id)).tags).toEqual(["Different", "New"]);
+  expect((await detail(page, first.id)).tags).toEqual(["keep-tag", "new-tag"]);
+  expect((await detail(page, second.id)).tags).toEqual([
+    "different",
+    "new-tag",
+  ]);
   expect(await detail(page, full.id)).toMatchObject({
     status: "Dismissed",
     tags: fullBefore.tags.slice(1),
@@ -970,7 +980,7 @@ test("bulk tags preserve unrelated tags, skip no-ops and enforce each resulting 
     .click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Field to change").selectOption("add-tags");
-  await dialog.getByLabel("New value").fill("new, NEW, Keep");
+  await dialog.getByLabel("New value").fill("new-tag, NEW TAG, Keep  Tag");
   await expect(dialog).toContainText("No change needed.");
   await expect(
     dialog.getByRole("button", { name: "Confirm edit 0" }),

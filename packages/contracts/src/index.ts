@@ -619,7 +619,7 @@ export const actionableQuerySchema = z.object({
   priority: prioritySchema.optional(),
   effort: effortSchema.optional(),
   evidence: evidenceStateSchema.optional(),
-  tag: z.string().default(""),
+  tag: z.string().overwrite(normalizeTag).default(""),
   archived: archivedFilterSchema.default("active"),
   parent: parentFilterSchema.default("all"),
   validation: booleanFilterSchema.default("all"),
@@ -1124,7 +1124,17 @@ export const archiveImpactResponseSchema = z.object({
 const titleField = z.string().trim().min(1, "Enter a title.").max(240);
 const markdownField = z.string().trim().max(100_000);
 const notesSchema = z.array(z.string().trim().min(1)).max(200);
-const tagSchema = z.string().trim().min(1, "Provide a nonblank tag.").max(60);
+
+/** Use the same tag spelling for writes, bulk edits, and exact filters. */
+export function normalizeTag(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+const tagSchema = z
+  .string()
+  .overwrite(normalizeTag)
+  .min(1, "Provide a nonblank tag.")
+  .max(60);
 const tagsSchema = z.array(tagSchema).max(30);
 
 export const createActionableRequestSchema = z

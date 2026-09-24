@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   prioritySchema,
   effortSchema,
+  normalizeTag,
   updateActionableRequestSchema,
   type ActionableDetail,
   type ArchiveImpactResponse,
@@ -40,7 +41,7 @@ function prepareEdit(
   let tags = item.tags;
   let change = "";
   if (field === "add-tags" || field === "remove-tags") {
-    const requested = value.split(",").map((tag) => tag.trim());
+    const requested = value.split(",").map(normalizeTag);
     const invalidTags = requested
       .map((tag) => updateActionableRequestSchema.shape.tags.safeParse([tag]))
       .find((result) => !result.success);
@@ -48,18 +49,12 @@ function prepareEdit(
       return {
         exclusion: "Tags must be nonblank and at most 60 characters each.",
       };
-    // Match the list's case-insensitive tag filter while retaining existing spelling.
-    const keys = new Set(requested.map((tag) => tag.toLocaleLowerCase()));
+    const current = item.tags.map(normalizeTag);
+    const keys = new Set(requested);
     if (field === "remove-tags") {
-      tags = item.tags.filter((tag) => !keys.has(tag.toLocaleLowerCase()));
+      tags = current.filter((tag) => !keys.has(tag));
     } else {
-      const present = new Set(item.tags.map((tag) => tag.toLocaleLowerCase()));
-      tags = [...item.tags];
-      for (const tag of requested) {
-        const key = tag.toLocaleLowerCase();
-        if (!present.has(key)) tags.push(tag);
-        present.add(key);
-      }
+      tags = [...new Set([...current, ...requested])];
     }
     change = `Tags: ${item.tags.join(", ") || "none"} → ${tags.join(", ") || "none"}`;
   }
@@ -451,7 +446,8 @@ export function BulkActionsDialog({
             {(field === "add-tags" || field === "remove-tags") && (
               <p id="bulk-tag-help">
                 Separate tags with commas. Maximum 60 characters per tag and 30
-                resulting tags per item. Matching ignores case.
+                resulting tags per item. Tags are trimmed, lowercased, and
+                whitespace becomes hyphens.
               </p>
             )}
           </>

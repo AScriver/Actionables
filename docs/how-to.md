@@ -131,8 +131,10 @@ update uses that item's current detail and version, preserving its other fields,
 sources, workflow, scope, claims and relationships. Metadata edits retain the
 same behavior for terminal and archived items as individual edits.
 
-Separate tags with commas. Tag matching ignores case and retains existing
-spelling; additions do not introduce duplicates and removals preserve unrelated
+Separate tags with commas. Saved tags are trimmed, lowercased, and each run of
+whitespace becomes a hyphen: `  Needs Review  ` becomes `needs-review`. Bulk edits
+and exact tag filters use the same normalization, including when matching older
+tags. Bulk additions do not introduce duplicates and removals preserve unrelated
 tags. Tags must be nonblank and at most 60 characters, with at most 30 resulting
 tags per item. Items needing no change or exceeding a limit are excluded without
 a write. A concurrent edit requires **Review remaining** before retrying so its

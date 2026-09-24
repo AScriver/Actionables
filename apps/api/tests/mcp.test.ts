@@ -1213,7 +1213,7 @@ describe("Actionables MCP", () => {
         description: "Created through the single MCP task operation.",
         effort: "S",
         plannedValidation: ["Verify top-level creation."],
-        tags: ["planning", "backend"],
+        tags: [" Planning ", "Back  End"],
       };
       const topLevel = output<{
         id: number;
@@ -1241,7 +1241,7 @@ describe("Actionables MCP", () => {
         description: topLevelArguments.description,
         effort: "S",
         plannedValidation: topLevelArguments.plannedValidation,
-        tags: topLevelArguments.tags,
+        tags: ["planning", "back-end"],
         parent: null,
         scope,
       });
@@ -1278,7 +1278,7 @@ describe("Actionables MCP", () => {
         description: "Must inherit the parent scope.",
         effort: "M",
         plannedValidation: ["Verify direct hierarchy placement."],
-        tags: ["planning", "frontend"],
+        tags: [" PLANNING ", "Front\tEnd"],
       };
       const child = output<{
         id: number;
@@ -1304,7 +1304,7 @@ describe("Actionables MCP", () => {
         effort: childArguments.effort,
         parent: { id: topLevel.id },
         scope,
-        tags: childArguments.tags,
+        tags: ["planning", "front-end"],
       });
       const childRetry = output<{ id: number; version: number }>(
         await client.callTool({
@@ -1342,7 +1342,7 @@ describe("Actionables MCP", () => {
         priority: topLevelArguments.priority,
         status: "Inbox",
         effort: topLevelArguments.effort,
-        tagsJson: topLevelArguments.tags,
+        tagsJson: ["planning", "back-end"],
         agentTaskClaim: null,
         rawFragmentJson: { creatorThreadId: threadId },
       });
@@ -1354,7 +1354,7 @@ describe("Actionables MCP", () => {
         priority: childArguments.priority,
         status: "Inbox",
         effort: childArguments.effort,
-        tagsJson: childArguments.tags,
+        tagsJson: ["planning", "front-end"],
         agentTaskClaim: null,
       });
     } finally {

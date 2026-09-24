@@ -12,6 +12,7 @@ import {
   archiveImpactResponseSchema,
   createRepositoryResponseSchema,
   dashboardResponseSchema,
+  normalizeTag,
   scopeOptionsResponseSchema,
   searchCompletedTasksResponseSchema,
   type ActionableExcludeFilterKey,
@@ -793,7 +794,7 @@ function matchesQuery(row: ActionableRow, query: ActionableQuery) {
   )
     return false;
   const tagMatches = summary.tags.some(
-    (tag) => tag.toLocaleLowerCase() === query.tag.toLocaleLowerCase(),
+    (tag) => normalizeTag(tag) === normalizeTag(query.tag),
   );
   if (!filterAllows(excluded, "tag", Boolean(query.tag), tagMatches))
     return false;

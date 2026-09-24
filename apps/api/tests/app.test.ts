@@ -1661,7 +1661,7 @@ describe("Actionables API", () => {
       description:
         "Clarify and route the captured task without doing research.",
       validation: ["Review the triaged fields and lifecycle state."],
-      tags: ["triaged", "inbox"],
+      tags: [" TRIAGED ", "\tINBOX\n"],
       changes: ["Clarified the finding and triage metadata."],
     };
     assistantRequests = [];
@@ -1716,7 +1716,7 @@ describe("Actionables API", () => {
         description: proposal.description,
         research: ["Existing research remains unchanged."],
         validation: proposal.validation,
-        tags: proposal.tags,
+        tags: ["triaged", "inbox"],
       });
       expect(triagedFirst.statusHistory).toContainEqual(
         expect.objectContaining({
@@ -2904,6 +2904,60 @@ describe("Actionables API", () => {
     expect(reread.json().item.recordId).toBe(payload.item.recordId);
   });
 
+  it("normalizes saved tags and matches equivalent spellings in exact filters", async () => {
+    const created = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: {
+        ...createBody("Tag normalization"),
+        tags: ["  Needs   Review  ", "\tAPI\tWork\n", "already-normal", "C#"],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const item = created.json().item;
+    const expectedTags = ["needs-review", "api-work", "already-normal", "c#"];
+    expect(item.tags).toEqual(expectedTags);
+    expect(
+      (
+        await prisma!.actionable.findUniqueOrThrow({
+          where: { id: item.recordId },
+        })
+      ).tagsJson,
+    ).toEqual(expectedTags);
+
+    for (const tag of ["needs-review", "  NEEDS   Review "]) {
+      const listed = await app!.inject({
+        method: "GET",
+        url: `/api/actionables?tag=${encodeURIComponent(tag)}`,
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: item.id })]),
+      );
+      const excluded = await app!.inject({
+        method: "GET",
+        url: `/api/actionables?exclude=tag&tag=${encodeURIComponent(tag)}`,
+      });
+      expect(excluded.statusCode).toBe(200);
+      expect(excluded.json().items).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: item.id })]),
+      );
+    }
+
+    // Older records must still match the normalized filter without a backfill.
+    await prisma!.actionable.update({
+      where: { id: item.recordId },
+      data: { tagsJson: [" Legacy   Tag "] },
+    });
+    const legacy = await app!.inject({
+      method: "GET",
+      url: "/api/actionables?tag=legacy-tag",
+    });
+    expect(legacy.json().items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: item.id })]),
+    );
+  });
+
   it("returns field-addressable errors without accepting server-managed fields", async () => {
     const invalid = await app!.inject({
       method: "POST",
@@ -2950,7 +3004,7 @@ describe("Actionables API", () => {
           "Completed the API edit path and preserved the existing lifecycle.",
         research: ["Research note one", "Research note two"],
         validation: ["Run the focused check"],
-        tags: ["api", "triage"],
+        tags: [" API ", "\tTriage\n"],
         userSources: [
           {
             type: "File",
