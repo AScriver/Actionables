@@ -1,10 +1,27 @@
 # Agent task MCP endpoint
 
-Actionables can expose existing tasks to local agents through a loopback MCP
-endpoint. The default is `http://127.0.0.1:4174/mcp`; a valid custom
-`API_PORT` changes the effective endpoint. The endpoint uses stateless
-Streamable HTTP with JSON responses and is disabled until a bearer token is
-configured.
+Actionables exposes task creation, scoped execution, dependency coordination,
+completion, and completed-research retrieval through a loopback MCP endpoint.
+The default is `http://127.0.0.1:4174/mcp`; startup can select a saved or available
+alternative, and an explicit `API_PORT` takes precedence. Use the endpoint
+reported by the running app. It uses stateless Streamable HTTP with JSON
+responses and is disabled until a bearer token is configured.
+
+This reference describes the checked-in implementation in
+[`mcp.ts`](../apps/api/src/mcp.ts) and the shared
+[contracts](../packages/contracts/src/index.ts). The canonical agent procedure
+is the bundled [workflow skill](../resources/agent-integration/actionables-workflow/SKILL.md).
+An installed release or already-open client can have an older tool surface.
+
+- [Enable it](#enable-it)
+- [Explicit task inspection](#explicit-task-inspection)
+- [Completion evidence and atomic completion](#completion-evidence-and-atomic-completion)
+- [Dependency coordination](#dependency-coordination)
+- [Agent workflow](#agent-workflow)
+- [Find completed research](#find-completed-research)
+- [Results and error recovery](#results-and-error-recovery)
+- [Tool inventory](#tool-inventory)
+- [Security boundary](#security-boundary)
 
 ## Enable it
 
@@ -57,9 +74,13 @@ install either or both with explicit consent. See
 [Windows setup](windows-setup.md#optional-codex-instructions-and-workflow-skill)
 for their target paths and conflict-safe behavior.
 
-When updating to nested subtasks, install the updated workflow skill from that
-Settings section. Recognized unmodified older revisions can be upgraded;
-customized skills require manual review. The database migration upgrades only
+When upgrading, review the workflow skill's update status in that Settings
+section. Recognized unmodified older revisions can be upgraded; customized
+skills require manual review. If new tools are absent, verify the installed
+release and refresh the client's MCP discovery or restart Codex before treating
+the source documentation as its live contract.
+
+The nested-subtask database migration upgrades only
 the exact previous built-in relationship-auditor prompt, increments its settings
 version, and preserves custom prompts and other settings. Existing custom Codex
 start templates are also preserved. Review any custom instructions for obsolete
@@ -142,7 +163,7 @@ The full workflow directs agents to use this sequence:
 
 1. List `mine`.
 2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. Reuse a UUID only for an exact retry.
-3. If no owned task matches, obtain the current feature or bug's top-level Actionable ID and list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
+3. Resolve the explicitly identified feature or bug's top-level `workItemId`; `inspect_task` can resolve it from a supplied nested task ID without a claim. If no owned task matches and no work item was supplied, continue the user's work without claiming or listing `available`, and report the missing tracking scope. Otherwise list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
 4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy the structured `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Retain `correlationId` when diagnostics are needed. `retryable` and `nextAction` remain only for legacy compatibility. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
 6. Start from compact detail and inspect `task.truncation.reconciliationGuidance`. For claimed active work, prefer `actionables.get_task_context` with its exact version and claimToken. Follow nextOffset with the first contentHash until complete. Native values and labeled text chunks cover scope, research, planned validation, references and relationships together; fieldCounts identifies empty fields. No JSON-fragment assembly is needed. Terminal lifecycle detail and older servers retain `get_task_detail` with their existing field-by-field JSON contract. Discard partial results on version or authorization failures and reconcile before continuing. Do not advance or edit until critical fields are complete; absent guidance, normal flow may continue.
@@ -152,14 +173,14 @@ The full workflow directs agents to use this sequence:
 10. Keep a task `Researching` between turns only while additional investigation is genuinely required. Before pausing, record the findings so far, the remaining questions, and the next research step; a turn ending by itself does not require a status transition.
 11. Split only when research confirms multiple independently implementable outcomes. For a task at any depth, keep that task as the coordination record and create the minimum child task set covering every implementation slice beneath it, using the original root as workItemId. Keep nested coordination tasks beneath their immediate parent while retaining the original root as workItemId. A single outcome remains one task.
 12. Make every implementation task a narrow, complete, independently verifiable vertical slice. Do not split by technical layer, create adjacent cleanup, or duplicate scope.
-13. Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox. Unless a dedicated relationship tool is available, record dependencies only as task notes and do not claim that dependency relationships were created.
+13. Record the split rationale, dependency notes, and focused validation boundary in the current task and every created task. Leave created tasks unclaimed in Inbox unless further work is authorized. Use `create_dependency` for authorized, confirmed prerequisites within the claimed coordinator's subtree; use notes when a relationship cannot be recorded without broadening scope.
 14. Before reporting research complete, move the task to `Ready` only when `readiness.requiredForReady` is empty and Ready appears in `permittedTransitions`. A split task at any depth remains the coordination record for its children and aggregate validation. The original top-level Actionable remains `workItemId`.
 15. Transition from `Ready` to `In progress` before making implementation changes. Do not edit implementation files while the task is `Inbox`, `Researching`, or `Ready`.
 16. Mutate with the latest version and secret claim token.
-17. Before `Done`, populate Resolution with the completed changes and important implementation decisions, record actual validation, and then transition the task.
+17. Before `Done`, review the task's own acceptance criteria and descendant evidence with `get_completion_view` when needed. Prefer `complete_task` to save Resolution, actual Passed validation, the normal Done transition, and claim release atomically. Existing qualifying validation may be reused. Individual update, validation, and transition tools remain available.
 18. Never claim completion while an owned task remains `Researching`.
 19. Use `actionables.handoff_task` when task content must be saved before release, and `actionables.release_task` only when no task content needs to change.
-20. To clean up an active unclaimed task created by the same Codex thread, call `actionables.dismiss_task` with only its public ID and a required reason. Claimed work uses `actionables.transition_task`.
+20. Only when dismissal is explicitly authorized, call `actionables.dismiss_task` for an active unclaimed task created by the same Codex thread, with its public ID and a required reason. Claimed work uses `actionables.transition_task`.
 
 When implementation uncovers a need for more investigation, `In progress` can return directly to `Researching` with a meaningful reason. The transition is recorded in task activity; do not route through a semantically false Ready state.
 
@@ -314,9 +335,24 @@ example, a small result includes these entries in one read:
 
 ```json
 [
-  { "field": "research", "index": 0, "kind": "value", "value": "Verified the shared reader." },
-  { "field": "resolution", "index": 0, "kind": "value", "value": "Reused its terminal safeguards." },
-  { "field": "userSources", "index": 0, "kind": "value", "value": { "type": "File", "locator": "apps/api/src/mcp.ts" } }
+  {
+    "field": "research",
+    "index": 0,
+    "kind": "value",
+    "value": "Verified the shared reader."
+  },
+  {
+    "field": "resolution",
+    "index": 0,
+    "kind": "value",
+    "value": "Reused its terminal safeguards."
+  },
+  {
+    "field": "userSources",
+    "index": 0,
+    "kind": "value",
+    "value": { "type": "File", "locator": "apps/api/src/mcp.ts" }
+  }
 ]
 ```
 
@@ -386,6 +422,8 @@ prerequisites that remain. Only fetch implementation-critical fields named by
 `reconciliationFields`; a status-only transition therefore does not invalidate
 unchanged research or sources. Create, claim, recovery, and explicit reads keep
 their compact detail responses.
+
+## Results and error recovery
 
 Successful calls expose their authoritative result in `structuredContent`.
 `content.text` is a fixed short compatibility notice and intentionally does not
@@ -461,7 +499,10 @@ This lifecycle authority governs Actionables mutations; it cannot prevent an
 agent or another process from editing files outside the MCP. A hard filesystem
 write gate requires orchestration support and is outside this endpoint.
 
-The endpoint exposes exactly these tools:
+## Tool inventory
+
+The endpoint registers 23 tools. The names below are MCP names; a client may
+display them with its own server prefix.
 
 - `actionables.create_task`
 - `actionables.bulk_create_tasks`

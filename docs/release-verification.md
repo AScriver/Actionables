@@ -1,6 +1,14 @@
-# MVP release-verification report
+# Historical MVP release-verification report
 
-Status: **pass — verified 2026-07-25**
+Recorded result: **pass, verified 2026-07-25**.
+
+This is historical evidence, with later dated maintenance notes. Test counts,
+bundle sizes, product boundaries, and backup claims describe the cited revision,
+not the current checkout. Use [Windows setup and verification](windows-setup.md#release-gate),
+the [support policy](support-policy.md), and the [README](../README.md) for current
+commands and capabilities. The release script still references an ignored local
+living-plan file and does not include frontend Vitest tests; those limitations
+are documented in the current verification guide.
 
 September 7, 2026 scope update: the Data page and public JSON import/export
 routes have been removed. Import/export, portable backup, and Data-screen claims
@@ -98,7 +106,10 @@ The release proof combines the user-facing browser workflow with a public-API fr
 - The restored inventory included projects, repositories, worktrees, imported and manual actionables, user edits, evidence, sources, tags, hierarchy, dependencies and waiver, validation supersession, lifecycle/status history, activity, archive state, import provenance, and stable portable identities.
 - Canonical semantic snapshots of the source export and restored re-export matched. Expected generated export timestamps and database-local identifiers were excluded from that comparison.
 
-The focused API suite contains eight portable-data tests, including the representative full-state semantic equivalence and public-route continuity proofs. Schema version 1 is the only supported portable format. The operational procedure and failure handling are in [backup and restore](backup-restore.md).
+At that revision, the focused API suite contained eight portable-data tests,
+including full-state equivalence and public-route continuity proofs for schema
+version 1. The current [local-data guide](backup-restore.md) documents the removal
+of those public backup/restore operations.
 
 ## Defects found and remediated
 
@@ -124,11 +135,18 @@ than claimed as part of this recorded verification.
 - Automated axe and semantic/keyboard inspection do not establish WCAG certification. No separate screen-reader product session was performed.
 - Concurrency-only stale-write messages and every millisecond-scale pending label were validated by focused API/E2E semantics, not captured in a dedicated axe snapshot. The no-results axe fixture used a filter over seeded data rather than a separate zero-record database.
 - Mobile is a usable companion surface; dense desktop authoring remains the primary workflow.
-- Portable JSON is the supported backup workflow. Automatic backups and raw SQLite copying are unsupported.
+- At this release, portable JSON was the supported backup workflow; that public
+  workflow was removed on September 7. Automatic backups were not included.
 - This task did not produce a tag, hosted release, archive, installer, updater, or binary.
 
-## Scope audit
+## Original release scope audit
 
-Repository, UI, manifest, and dependency review found no authentication/accounts, permissions, collaboration/assignment, notifications, cloud synchronization, hosted deployment, live Codex integration, Git mutation, AI-generated priorities/dependencies, generic project-management expansion, installer, updater, or distribution binary. Repository/worktree records are local metadata; the application does not run Git commands. Codex provenance and source links are stored evidence, not a live integration.
+The original MVP review found no user accounts, collaboration, notifications,
+cloud sync, hosted deployment, live Codex integration, Git commands, AI-generated
+priorities/dependencies, installer, updater, or distribution binary. That scope
+has since changed: the current code includes Codex handoff, authenticated MCP,
+local CLI helpers, and read-only Git metadata discovery. See the current
+[product boundary](support-policy.md#product-boundary); this original audit is
+not evidence that those later features were absent or verified.
 
 T-007 added only release verification, documentation, test determinism, accessibility/keyboard correctness, and local operational hardening. It did not mutate the representative `WWW` repository or add a new MVP feature.

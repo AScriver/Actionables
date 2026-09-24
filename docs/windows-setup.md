@@ -3,13 +3,28 @@
 ## Prerequisites
 
 - Supported 64-bit Windows version and Node runtime listed in [support policy](support-policy.md).
+- pnpm `11.9.0`, as pinned in `package.json`.
 - PowerShell 7.
 - Current Microsoft Edge or Google Chrome.
 - Git for a source checkout.
 
 The repository pins pnpm through `package.json` and the intended Node release line through `.node-version`. Do not install project packages globally.
 
-No `.env` file is required. The default database is `file:./data/actionables.db`; set `DATABASE_URL` only when an isolated database is intentional.
+No `.env` file is required. Set runtime overrides in the PowerShell session or
+process manager that starts Actionables so the API, migrations, and launcher
+receive the same values. The default database is `file:./data/actionables.db`.
+Run source commands from the repository root; relative database and port-state
+paths resolve from the working directory.
+
+| Environment variable                  | Default / purpose                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                        | `file:./data/actionables.db`; SQLite file used by the API and database commands.                                |
+| `WEB_PORT`, `API_PORT`                | Prefer saved ports, then `4173` / `4174`; explicit values take precedence.                                      |
+| `ACTIONABLES_RUNTIME_PORT_STATE_PATH` | `data/runtime-ports.json`; saved port-pair file. Use a separate path for isolated launches.                     |
+| `ACTIONABLES_MCP_TOKEN`               | Unset disables MCP; a non-empty value enables bearer authentication.                                            |
+| `ACTIONABLES_AGENT_HOME`              | Current user's home; root for managed Codex instructions, workflow skill, and MCP configuration reconciliation. |
+| `ACTIONABLES_CODEX_PATH`              | `codex` on `PATH`; optional executable path for local helpers.                                                  |
+| `ACTIONABLES_ASSISTANT_MODEL`         | `gpt-5.6-terra`; helper model unless overridden in Settings.                                                    |
 
 The configurable Codex start prompts add two optional settings columns. When
 upgrading an existing installation, run `pnpm run db:migrate` before starting
@@ -55,8 +70,8 @@ codex --version
 
 Actionables invokes Codex once per helper task with an explicit model, a
 read-only sandbox, an ephemeral session, an isolated temporary working
-directory, and a required JSON output schema. The default model is
-`gpt-5.6-terra`. To select another available lower-tier model, set
+directory, `--ignore-user-config`, and a required JSON output schema. The
+default model is `gpt-5.6-terra`. To select another model available to your CLI, set
 `ACTIONABLES_ASSISTANT_MODEL` before starting the app:
 
 ```powershell
@@ -87,29 +102,36 @@ and prompt for all three helpers. Choosing the environment/default model keeps
 using `ACTIONABLES_ASSISTANT_MODEL` (or the built-in fallback), and choosing the
 selected-model reasoning default leaves Codex's model-specific reasoning level
 unchanged. The shared local Codex timeout applies to each task in a bulk Inbox
-triage run.
+triage run. Its default is 120 seconds, configurable from 30 through 900 seconds;
+Inbox batch size defaults to 5 tasks, configurable from 1 through 50.
 
 ## Clean setup
 
 Run from a normal Windows path; spaces are supported.
 
 ```powershell
-git clone <repository-url> 'C:\Users\<you>\Documents\Actionables Dashboard'
+git clone https://github.com/AScriver/Actionables.git 'C:\Users\<you>\Documents\Actionables Dashboard'
 Set-Location -LiteralPath 'C:\Users\<you>\Documents\Actionables Dashboard'
 node --version
 corepack enable
 corepack prepare pnpm@11.9.0 --activate
 pnpm --version
 pnpm install --frozen-lockfile
-pnpm run db:generate
-pnpm run db:migrate
-pnpm run db:seed
+pnpm run db:setup
 pnpm run db:seed
 ```
 
-The second seed import must report `0 created, 0 updated, 32 unchanged`.
+`db:setup` builds `@actionables/contracts`, generates Prisma, creates the
+database file, applies migrations, and imports the fictional sample seed. The
+following `db:seed` checks repeatability: on a clean database it should report
+`0 created, 0 updated, 32 unchanged`. Run `db:setup` before calling `db:seed`
+directly in a clean checkout; seed code imports the compiled contracts package.
 
-On an existing checkout, `pnpm run db:setup` runs the combined database setup.
+Confirm that `pnpm --version` prints `11.9.0` before installing or running
+scripts. If another pnpm installation shadows Corepack on `PATH`, put the
+Corepack shims first or otherwise make the pinned pnpm resolve consistently.
+Using `corepack pnpm` for the outer command alone is insufficient: scripts such
+as `db:setup` and `verify:release` invoke `pnpm` again through `PATH`.
 Continue with [Development operation](#development-operation) to start the app.
 
 The default database is `data/actionables.db`. To isolate a database for testing or recovery:
@@ -168,26 +190,22 @@ Stop with `Ctrl+C`. A repeat `pnpm run dev` is the supported restart.
 The launcher supervises the API watcher and Vite directly. If either process
 exits unexpectedly, it stops the other and returns a failure code.
 
-### Scheduled development operation
+### Managed or background installations
 
-When the optional `Actionables Dashboard` Windows Scheduled Task is registered,
-its wrapper runs the same `pnpm run dev` command described above. The task is
-the logon host; its wrapper is the only restart owner. An unexpected nonzero
-exit is retried after one minute, up to three times. A run that remains active
-for five minutes resets the consecutive-failure count. Launcher output and
-wrapper start/exit messages are appended to
-`%LOCALAPPDATA%\ActionablesDashboard\dashboard.log`; Task Scheduler's
-Operational event log records the outer task start and exit.
+This repository supplies foreground development and production launchers. It
+does not register a Windows Scheduled Task, install a background service, or
+provide an updater. Restart policies, release directories, and log locations
+belong to the external process manager.
 
-Use Task Scheduler's stop operation for an intentional shutdown. A manually
-stopped task remains stopped, is not treated as a crash, and its cleanup
-watchdog terminates the development process tree. Start it again with:
+The [September 22 deployment baseline](actionables-friction-baseline-2026-09-22.md#verified-installed-state)
+records a Local Apps installation and a disabled, retired `Actionables Dashboard`
+Scheduled Task. That is a dated installation record, not a requirement for every
+machine. Identify the owner of the running process and its configured database
+before updating or restarting it; use that owner's stop/start procedure.
+Editing a source checkout does not update a separately installed release.
 
-```powershell
-Start-ScheduledTask -TaskName 'Actionables Dashboard'
-```
-
-If MCP was enabled after the app started, restart the app so the API reads the new token.
+If MCP was enabled after the app started, restart its owning process so the API
+reads the new token.
 
 ## Production-mode local operation
 
@@ -200,11 +218,12 @@ pnpm run start
 `pnpm run start` also honors valid inherited `WEB_PORT` and `API_PORT` values
 and uses the same saved-pair selection and persistence behavior as development.
 It passes the resulting normalized pair to the API and Vite preview processes.
+It starts existing build output only; it does not build, migrate, or seed.
 
-Verify health:
+Verify health using the URL printed by startup. For the default web port:
 
 ```powershell
-Invoke-RestMethod -Uri 'http://127.0.0.1:4273/api/health'
+Invoke-RestMethod -Uri 'http://127.0.0.1:4173/api/health'
 ```
 
 A ready response is HTTP 200 with `status: ok`, `database: ok`, and
@@ -216,30 +235,65 @@ Stop with `Ctrl+C`; repeat `pnpm run start` to verify a clean restart.
 
 ## Release gate
 
+Run checks from the repository root with an explicit disposable database and
+dedicated ports. The browser tests create and mutate Actionables. Use a fresh
+PowerShell session for these overrides so later normal launches do not inherit
+test settings:
+
 ```powershell
-pnpm run verify:release
+$env:DATABASE_URL = 'file:./data/actionables-e2e.db'
+$env:WEB_PORT = '4273'
+$env:API_PORT = '4274'
+$env:ACTIONABLES_AGENT_HOME = Join-Path $env:TEMP 'actionables-test-profile'
+$env:ACTIONABLES_RUNTIME_PORT_STATE_PATH = Join-Path $env:ACTIONABLES_AGENT_HOME 'runtime-ports.json'
+Remove-Item Env:PLAYWRIGHT_REUSE_EXISTING_SERVER -ErrorAction SilentlyContinue
+pnpm exec playwright install chromium
 ```
 
-This checks formatting, types, API and integration tests, browser end-to-end
-tests, automated accessibility, the production build, migrations, SQLite
-loading, seed idempotence, and the living plan.
+Choose another dedicated pair if 4273/4274 is occupied. Do not stop the installed
+app to free test ports.
 
-Individual diagnostics:
+Run the following checks, stopping to resolve any failure before continuing:
 
 ```powershell
 pnpm run format:check
 pnpm run typecheck
 pnpm test
+pnpm exec vitest run src
 pnpm run test:e2e
 pnpm run test:a11y
 pnpm run build
 pnpm run verify:migrations
-pnpm run verify:living-plan
 ```
 
-The Playwright launcher prepares `data/actionables-e2e.db` before starting the
-API and Vite on the test ports. It shares the application launcher's child
-supervision, so interruption or a child failure closes both test services.
+`pnpm test` runs `apps/api/tests`; the separate Vitest command covers frontend
+tests in `src`. Migration verification uses a temporary database to check fresh
+migrations, native SQLite loading, and seed idempotence.
+
+The existing `pnpm run verify:release` aggregates formatting, types, API tests,
+browser tests, accessibility, build, migrations, and `verify:living-plan`. It
+does **not** include the frontend Vitest command above. Its final plan check
+requires `.agents/plans/COMPLETE.2026-07-24-personal-actionables-dashboard.md`,
+which is ignored by Git and absent from a fresh clone. Run that aggregate only
+when the intended local plan exists; otherwise use the individual checks and
+report the unavailable plan check separately. Do not fabricate a plan to make
+the gate pass. Historical results are in the
+[release report](release-verification.md).
+
+By default, Playwright starts its own server. Its configuration passes
+`file:./data/actionables-e2e.db` to the launcher regardless of the parent
+shell's database override; the launcher deletes that file and its SQLite
+sidecars, migrates it, and seeds it before starting the API and Vite. That file
+must remain disposable. Interruption or a child failure closes both services.
+
+`PLAYWRIGHT_CHANNEL=msedge` or `chrome` selects an installed browser; otherwise
+the suite uses Playwright Chromium. Browser runs use one worker.
+
+Set `PLAYWRIGHT_REUSE_EXISTING_SERVER=1` only after verifying that the running
+server uses an isolated test database and the expected source runtime. The test
+process must also set explicit nondefault `WEB_PORT`, `API_PORT`, and an isolated
+`DATABASE_URL`; configuration rejects unsafe reuse. Setting `DATABASE_URL` in
+the test process cannot change the database of an already running server.
 
 ## Troubleshooting
 
@@ -336,7 +390,9 @@ Use a new explicit `DATABASE_URL` for diagnostic or reset runs, preserving popul
 
 Open the web URL reported by startup in a supported browser and verify
 `/api/health`. On the default pair this is `http://127.0.0.1:4173`; persisted or
-explicit ports use their reported web URL. For Playwright:
+explicit ports use their reported web URL. For Playwright, first apply the
+isolated database, profile, and port settings from the [release gate](#release-gate),
+then run:
 
 ```powershell
 pnpm exec playwright install chromium

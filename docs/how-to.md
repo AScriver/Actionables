@@ -9,6 +9,7 @@ to Codex.
 
 - [Run Actionables and connect Codex](#run-actionables-and-connect-codex)
 - [Navigate the dashboard](#navigate-the-dashboard)
+- [Capture, research, and complete work](#capture-research-and-complete-work)
 - [Select multiple Actionables](#select-multiple-actionables)
 - [Manage repositories and projects](#manage-repositories-and-projects)
 - [Organize subtasks](#organize-subtasks)
@@ -44,6 +45,54 @@ repository setup. Choosing
 preserving other filters; the existing **Done** shortcut still returns to active
 work when you choose **Actionables**. **Settings** is at the bottom of the
 sidebar and remains available in its collapsed navigation rail.
+
+**Dashboard** groups work into lifecycle queues, manual and dependency blockers,
+items awaiting validation, and recently changed work. **Stale-work alerts** show
+expiring claims, blocked work, missing validation, and expired agent sessions.
+These use the selected project/repository/worktree scope; they are dashboard
+indicators, not background notifications.
+
+In **Actionables**, search covers titles, findings, descriptions, Research,
+Resolution, tags, file paths, and symbols. Use the filters to narrow or exclude
+status, priority, effort, evidence, hierarchy, blocking, validation, and other
+criteria. Search, filters, sorting, and the selected item are reflected in the
+URL. Keyboard shortcuts include `/` for search, `j`/`k` for row movement,
+**Enter** to open, `e` to edit, and `c` to create; typing fields and dialogs
+suppress the global shortcuts.
+
+## Capture, research, and complete work
+
+Choose **New actionable**, select its project/repository/worktree, and record
+the finding, intended result, sources, and planned validation. New items start
+in `Inbox`. Edit the item to add Research notes, adjust metadata, or record its
+Resolution. Concurrent saves preserve your draft and offer review/reapply
+instead of silently overwriting the newer saved version.
+
+The normal path is `Inbox` → `Researching` → `Ready` → `In progress` → `Done`.
+Use the lifecycle controls on the selected item; unavailable transitions are
+explained by its current state. `Ready` requires a non-empty finding, intended
+result, Research note, and validation plan. Implementation starts only after
+moving from `Ready` to `In progress`.
+
+The **Validation** tab separates planned checks from recorded results. Add an
+Automated test, Manual test, Command, Review, or Document result with a Passed,
+Failed, or Partial outcome and the relevant evidence. Checking a planned step
+does not create a validation record. Corrections append a replacement and keep
+the earlier result in history.
+
+Before completing work, fill in **Resolution** and record a Passed result after
+the latest move to `In progress`. Superseded results do not qualify. Every
+descendant must be Done or Dismissed before its parent can finish. The dashboard
+also permits an explicit **Completion override reason** when qualifying
+validation is unavailable; that completion is recorded as an override and
+still requires Resolution and terminal descendants. MCP atomic completion
+requires qualifying validation and does not expose this override.
+
+Use `Blocked` with a concrete blocker note or `Dismissed` with a reason when
+appropriate. Dependency blocking is derived from recorded prerequisite
+relationships and is separate from the manual Blocked status. Reopening Done
+or Dismissed work returns it to Ready with a required reason. Returning from
+In progress to Researching also requires a reason.
 
 ## Select multiple Actionables
 
@@ -167,7 +216,8 @@ and unclaimed are subsets of open; an expired claim remains claimed until releas
 Validation ready means a current, unsuperseded Passed record under the existing
 completion policy. List-row fractions count Done or Dismissed descendants out of
 all attached descendants. Immediate child links remain separate from these totals.
-The parent still needs its own Resolution and qualifying validation, and every
+The parent still needs its own Resolution and qualifying validation (or an
+explicit dashboard completion override), and every
 descendant must be Done or Dismissed before parent completion, even beneath a
 terminal intermediate task.
 
@@ -219,6 +269,18 @@ confirm the recorded scope and move to `In progress` before editing. Claims
 prevent two Codex tasks from silently working the same item, while leases and
 handoffs make interrupted work visible.
 
+### Manage claims
+
+The **Agent claim** panel shows the claiming Codex task and lease expiry. Open
+that task to continue existing work. An expired lease no longer permits agent
+work but remains visible until reconciled. **Release stale claim** clears an
+expired claim; **Force release claim** revokes an active one after confirmation.
+Either action invalidates the old claim token and preserves workflow status.
+
+Under **Settings → Agent coordination**, set the default claim lease from 5 to
+120 minutes and an expiry warning window shorter than that lease. Claims
+coordinate agents; they do not lock project files or prevent dashboard edits.
+
 ### Choose the next subtask or a sequence
 
 An eligible parent also shows **Work on subtasks**. Leave **Next task only**
@@ -266,10 +328,6 @@ The defaults retain the existing lifecycle, scope, splitting, validation and
 handoff instructions. Custom templates affect both **Open in Codex** and
 **Copy prompt** without changing workspace selection or claim eligibility.
 Start actions wait for valid saved settings; a loading failure offers a retry.
-
-The dashboard derives its queues and alerts from lifecycle, validation,
-hierarchy, dependency, and claim state, so stalled or blocked work remains
-visible.
 
 ## Optional local Codex helpers
 

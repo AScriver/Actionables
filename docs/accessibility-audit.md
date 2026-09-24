@@ -2,8 +2,13 @@
 
 Audit date: 2026-07-25
 
+This is a dated audit with the focused follow-up results below, not a new audit
+of the current checkout. Run the current
+[browser and accessibility checks](windows-setup.md#release-gate) for changes to
+the application; retain the recorded dates and test counts as historical evidence.
+
 September 7, 2026 update: the Data/import/export screens were removed. References
-to those surfaces below are historical. The current 52-test Edge browser suite
+to those surfaces below are historical. The then-current 52-test Edge browser suite
 passed, including the remaining automated accessibility scenarios, keyboard
 navigation, and mobile/reflow checks. See [removal verification](import-export-removal.md).
 
