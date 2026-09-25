@@ -20,4 +20,5 @@ data/*.db-journal
 data/*.db-shm
 data/*.db-wal
 data/runtime-ports.json
+/data/docs-proof-bin-*/
 !data/.gitkeep
