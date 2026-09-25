@@ -271,6 +271,34 @@ const getTaskContextSchema = z
     path: ["contentHash"],
     message: "A returned contentHash is required after the first page.",
   });
+// Use native tools/call parameters so clients can execute these objects unchanged.
+const historyCallSchema = z
+  .object({
+    name: z.literal("actionables.get_task_history"),
+    arguments: getTaskHistorySchema,
+  })
+  .strict();
+const searchCompletedTasksOutputSchema =
+  searchCompletedTasksResponseSchema.extend({
+    items: z
+      .array(
+        searchCompletedTasksResponseSchema.shape.items.element.extend({
+          historyCall: historyCallSchema,
+        }),
+      )
+      .max(100),
+    nextCall: z
+      .object({
+        name: z.literal("actionables.search_completed_tasks"),
+        arguments: searchCompletedTasksRequestSchema,
+      })
+      .strict()
+      .nullable(),
+  });
+/** Completed search results with executable history and search continuation calls. */
+export type SearchCompletedTasksOutput = z.infer<
+  typeof searchCompletedTasksOutputSchema
+>;
 const getCompletionViewSchema = getTaskContextSchema.safeExtend({
   includeArchived: z
     .boolean()
@@ -636,8 +664,12 @@ const taskHistoryPageSchema = z
     nextOffset: z.number().int().positive().nullable(),
   })
   .strict();
-/** Bounded terminal history returned to MCP agents. */
-export type TaskHistoryPage = z.infer<typeof taskHistoryPageSchema>;
+// Keep terminal-only call metadata out of the shared active/completion schemas.
+const taskHistoryOutputSchema = taskHistoryPageSchema.extend({
+  nextCall: historyCallSchema.nullable(),
+});
+/** Bounded terminal history with its executable continuation, or null when complete. */
+export type TaskHistoryPage = z.infer<typeof taskHistoryOutputSchema>;
 const taskContextPageSchema = taskHistoryPageSchema.extend({
   status: statusSchema,
   fieldCounts: z.record(historyFieldSchema, z.number().int().nonnegative()),
@@ -1598,15 +1630,38 @@ function createActionablesMcpServer(
     {
       title: "Search completed Actionables",
       description:
-        "Search Done tasks across work items within an explicit projectId or repositoryId and a nonempty keyword query. Returns bounded field-labeled matches, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Continue with nextCursor and unchanged search inputs until null. Archived history is excluded unless includeArchived is true. Read research, Resolution and sources together with get_task_history using the result's id, workItemId, version and the same includeArchived option. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
+        "Search Done tasks across work items within an explicit projectId or repositoryId and a nonempty keyword query. Returns bounded field-labeled matches, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Execute an item's historyCall unchanged to read its research, Resolution and sources; execute top-level nextCall unchanged for the next search page, stopping when null. These name/arguments objects preserve scope, version and the explicit archive option. nextCursor remains available. Archived history is excluded unless includeArchived is true. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
       inputSchema: searchCompletedTasksRequestSchema,
-      outputSchema: searchCompletedTasksResponseSchema,
+      outputSchema: searchCompletedTasksOutputSchema,
       annotations: readOnly,
     },
     (input) =>
-      runReadTool("actionables.search_completed_tasks", () =>
-        searchCompletedTasks(prisma, input),
-      ),
+      runReadTool("actionables.search_completed_tasks", async () => {
+        const result = await searchCompletedTasks(prisma, input);
+        return searchCompletedTasksOutputSchema.parse({
+          ...result,
+          items: result.items.map((item) => ({
+            ...item,
+            historyCall: {
+              name: "actionables.get_task_history",
+              arguments: {
+                id: item.id,
+                workItemId: item.workItemId,
+                version: item.version,
+                includeArchived: input.includeArchived,
+                offset: 0,
+              },
+            },
+          })),
+          nextCall:
+            result.nextCursor === null
+              ? null
+              : {
+                  name: "actionables.search_completed_tasks",
+                  arguments: { ...input, cursor: result.nextCursor },
+                },
+        });
+      }),
   );
   server.registerTool(
     "actionables.get_task_context",
@@ -1677,14 +1732,14 @@ function createActionablesMcpServer(
     {
       title: "Read completed Actionable history",
       description:
-        "Read research, Resolution, userSources, files and sourceThread together for a Done or Dismissed task using id, top-level workItemId and version from search_completed_tasks or get_task. No claim or thread metadata is required. Returns whole native values when they fit and labeled plain-text chunks for oversized values, never serialized JSON fragments. Items identify field and zero-based index; text chunks add property for split references, offset and totalLength in UTF-16 units. Pages cap items at 40 and their serialized size at 8,000 characters. fieldCounts identifies empty collections; complete, remainingItems and nextOffset identify remaining content. Start at offset 0, then pass each nextOffset with the same version, contentHash and includeArchived until null. On VERSION_CONFLICT discard partial history and restart with a fresh version; on TERMINAL_READ_INVALIDATED discard it and stop terminal inspection. Never claims, renews, reopens, restores or changes records.",
+        "Read research, Resolution, userSources, files and sourceThread together for a Done or Dismissed task. Execute a search item's historyCall unchanged, or start at offset 0 with id, top-level workItemId and version from get_task. No claim or thread metadata is required. Returns whole native values when they fit and labeled plain-text chunks for oversized values, never serialized JSON fragments. Items identify field and zero-based index; text chunks add property for split references, offset and totalLength in UTF-16 units. Pages cap items at 40 and their serialized size at 8,000 characters. Execute nextCall unchanged for each subsequent page; it preserves id, workItemId, version, includeArchived, offset and contentHash. nextCall is null when complete. fieldCounts, complete, remainingItems and nextOffset remain available. On VERSION_CONFLICT discard partial history and restart with a fresh version; on TERMINAL_READ_INVALIDATED discard it and stop terminal inspection. Never claims, renews, reopens, restores or changes records.",
       inputSchema: getTaskHistorySchema,
-      outputSchema: taskHistoryPageSchema,
+      outputSchema: taskHistoryOutputSchema,
       annotations: readOnly,
     },
     (input) =>
-      runReadTool("actionables.get_task_history", async () =>
-        taskHistoryPage(
+      runReadTool("actionables.get_task_history", async () => {
+        const page = taskHistoryPage(
           await getScopedTerminalAgentTask(
             prisma,
             input.id,
@@ -1693,8 +1748,22 @@ function createActionablesMcpServer(
             input.includeArchived,
           ),
           input,
-        ),
-      ),
+        );
+        return taskHistoryOutputSchema.parse({
+          ...page,
+          nextCall:
+            page.nextOffset === null
+              ? null
+              : {
+                  name: "actionables.get_task_history",
+                  arguments: {
+                    ...input,
+                    offset: page.nextOffset,
+                    contentHash: page.contentHash,
+                  },
+                },
+        });
+      }),
   );
   server.registerTool(
     "actionables.get_task",

@@ -17,7 +17,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   actionablesErrorResponseSchema,
-  type SearchCompletedTasksResponse,
   type InspectAgentTaskResponse,
   type AgentDependencyReceipt,
   type AgentTaskCompletionReceipt,
@@ -27,6 +26,7 @@ import { buildApp } from "../src/app.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { getAgentCoordinationSettings } from "../src/helper-agent-settings.js";
 import type {
+  SearchCompletedTasksOutput,
   TaskHistoryPage,
   TaskContextPage,
   CompletionView,
@@ -4605,7 +4605,12 @@ describe("Actionables MCP", () => {
     const files = [
       { path: "apps/api/src/mcp.ts", lines: "12-18", symbol: "reader" },
     ];
-    const task = await createTask({ status: "Done", research, resolution });
+    const task = await createTask({
+      status: "Done",
+      title: randomUUID(),
+      research,
+      resolution,
+    });
     await prisma.actionable.update({
       where: { id: task.id },
       data: {
@@ -4637,10 +4642,14 @@ describe("Actionables MCP", () => {
         version: task.version,
       };
       const page = output<TaskHistoryPage>(
-        await client.callTool({
-          name: "actionables.get_task_history",
-          arguments: args,
-        }),
+        await client.callTool(
+          output<SearchCompletedTasksOutput>(
+            await client.callTool({
+              name: "actionables.search_completed_tasks",
+              arguments: { repositoryId: scope.repositoryId, q: task.title },
+            }),
+          ).items[0]!.historyCall,
+        ),
       );
       expect(page).toMatchObject({
         ...args,
@@ -4649,6 +4658,7 @@ describe("Actionables MCP", () => {
         totalItems: 7,
         remainingItems: 0,
         nextOffset: null,
+        nextCall: null,
         complete: true,
         fieldCounts: { research: 3, userSources: 1, files: 1 },
         archiveState: { isArchived: false },
@@ -4689,6 +4699,13 @@ describe("Actionables MCP", () => {
           }),
         ),
       ).toEqual(page);
+      const archivedOptionPage = output<TaskHistoryPage>(
+        await client.callTool({
+          name: "actionables.get_task_history",
+          arguments: { ...args, includeArchived: true },
+        }),
+      );
+      expect(archivedOptionPage.contentHash).toBe(page.contentHash);
       const emptyPage = output<TaskHistoryPage>(
         await client.callTool({
           name: "actionables.get_task_history",
@@ -4704,6 +4721,7 @@ describe("Actionables MCP", () => {
         fieldCounts: { research: 0, userSources: 0, files: 0 },
         complete: true,
         nextOffset: null,
+        nextCall: null,
         remainingItems: 0,
         items: [
           { field: "resolution", index: 0, kind: "value", value: "" },
@@ -4727,7 +4745,12 @@ describe("Actionables MCP", () => {
     const locator = "https://example.test/" + "long-path/".repeat(1_000);
     const path = "directory/".repeat(900) + "reader.ts";
     const sourceThread = "source-thread-".repeat(800);
-    const task = await createTask({ status: "Done", research, resolution });
+    const task = await createTask({
+      status: "Done",
+      title: randomUUID(),
+      research,
+      resolution,
+    });
     await prisma.actionable.update({
       where: { id: task.id },
       data: {
@@ -4743,22 +4766,20 @@ describe("Actionables MCP", () => {
     try {
       const items: TaskHistoryPage["items"] = [];
       let contentHash: string | undefined;
-      let offset = 0;
+      const found = output<SearchCompletedTasksOutput>(
+        await client.callTool({
+          name: "actionables.search_completed_tasks",
+          arguments: {
+            repositoryId: scope.repositoryId,
+            q: task.title,
+            includeArchived: false,
+          },
+        }),
+      );
+      let call = found.items[0]!.historyCall;
       let pages = 0;
       for (; pages < 100; pages += 1) {
-        const args = {
-          id: task.sourceOrdinal,
-          workItemId: task.sourceOrdinal,
-          version: task.version,
-          offset,
-          ...(contentHash ? { contentHash } : {}),
-        };
-        const page = output<TaskHistoryPage>(
-          await client.callTool({
-            name: "actionables.get_task_history",
-            arguments: args,
-          }),
-        );
+        const page = output<TaskHistoryPage>(await client.callTool(call));
         contentHash ??= page.contentHash;
         expect(page.contentHash).toBe(contentHash);
         expect(page.offset).toBe(items.length);
@@ -4775,18 +4796,25 @@ describe("Actionables MCP", () => {
           page.totalItems - page.offset - page.items.length,
         );
         expect(page.complete).toBe(page.nextOffset === null);
-        expect(
-          output(
-            await client.callTool({
-              name: "actionables.get_task_history",
-              arguments: args,
-            }),
-          ),
-        ).toEqual(page);
+        expect(output(await client.callTool(call))).toEqual(page);
         items.push(...page.items);
-        if (page.nextOffset === null) break;
+        if (page.complete) {
+          expect(page.nextCall).toBeNull();
+          break;
+        }
         expect(page.nextOffset).toBe(items.length);
-        offset = page.nextOffset;
+        expect(page.nextCall).toEqual({
+          name: "actionables.get_task_history",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+            includeArchived: false,
+            offset: page.nextOffset,
+            contentHash,
+          },
+        });
+        call = page.nextCall!;
       }
       expect(pages).toBeGreaterThan(1);
       expect(pages).toBeLessThan(100);
@@ -4853,12 +4881,12 @@ describe("Actionables MCP", () => {
     try {
       let before = await historyReadState();
       const first = output<TaskHistoryPage>(await read(args));
-      const next = {
-        ...args,
-        offset: first.nextOffset,
-        contentHash: first.contentHash,
-      };
+      const nextCall = first.nextCall!;
+      const next = nextCall.arguments;
       expect(first.nextOffset).not.toBeNull();
+      expect(
+        output<TaskHistoryPage>(await client.callTool(nextCall)).offset,
+      ).toBe(first.nextOffset);
       expect(
         validationErrorText(await read({ ...args, workItemId: undefined })),
       ).toContain("workItemId");
@@ -4878,6 +4906,12 @@ describe("Actionables MCP", () => {
           await read({ ...args, workItemId: unrelated.sourceOrdinal }),
         ).code,
       ).toBe("INVALID_REQUEST");
+      expect(errorOutput(await read({ ...next, id: 2_000_000_000 })).code).toBe(
+        "NOT_FOUND",
+      );
+      expect(
+        errorOutput(await read({ ...next, workItemId: 2_000_000_000 })).code,
+      ).toBe("NOT_FOUND");
       expect(
         errorOutput(
           await read({
@@ -4911,7 +4945,9 @@ describe("Actionables MCP", () => {
         data: { locator: "changed" },
       });
       before = await historyReadState();
-      expect(errorOutput(await read(next)).code).toBe("VERSION_CONFLICT");
+      expect(errorOutput(await client.callTool(nextCall)).code).toBe(
+        "VERSION_CONFLICT",
+      );
       expect(await historyReadState()).toEqual(before);
       await prisma.actionable.update({
         where: { id: task.id },
@@ -4919,15 +4955,16 @@ describe("Actionables MCP", () => {
       });
       before = await historyReadState();
       expect(errorOutput(await read(args)).code).toBe("VERSION_CONFLICT");
+      expect(errorOutput(await client.callTool(nextCall)).code).toBe(
+        "VERSION_CONFLICT",
+      );
       expect(await historyReadState()).toEqual(before);
       await prisma.actionable.update({
         where: { id: task.id },
         data: { status: "Ready", version: { increment: 1 } },
       });
       before = await historyReadState();
-      expect(
-        errorOutput(await read({ ...next, includeArchived: true })),
-      ).toMatchObject({
+      expect(errorOutput(await client.callTool(nextCall))).toMatchObject({
         code: "TERMINAL_READ_INVALIDATED",
         retryMode: "never",
         recovery: { action: "stop" },
@@ -4995,7 +5032,7 @@ describe("Actionables MCP", () => {
     const before = await historyReadState();
     const { client, transport } = await connectClient(bearerToken, null);
     const search = async (arguments_: Record<string, unknown>) =>
-      output<SearchCompletedTasksResponse>(
+      output<SearchCompletedTasksOutput>(
         await client.callTool({
           name: "actionables.search_completed_tasks",
           arguments: arguments_,
@@ -5031,6 +5068,15 @@ describe("Actionables MCP", () => {
         matches[2]!.sourceOrdinal,
       ]);
       expect(first.nextCursor).toBe(matches[2]!.sourceOrdinal);
+      expect(first.nextCall).toEqual({
+        name: "actionables.search_completed_tasks",
+        arguments: {
+          ...request,
+          q: keyword.toUpperCase(),
+          includeArchived: false,
+          cursor: first.nextCursor,
+        },
+      });
       expect(first.items[0]).toMatchObject({
         id: matches[3]!.sourceOrdinal,
         workItemId: matches[3]!.sourceOrdinal,
@@ -5052,7 +5098,9 @@ describe("Actionables MCP", () => {
       expect(
         first.items.every((item) => item.match.excerpt.length <= 400),
       ).toBe(true);
-      const second = await search({ ...request, cursor: first.nextCursor });
+      const second = output<SearchCompletedTasksOutput>(
+        await client.callTool(first.nextCall!),
+      );
       expect(second.items.map((item) => item.id)).toEqual([
         matches[1]!.sourceOrdinal,
         matches[0]!.sourceOrdinal,
@@ -5062,15 +5110,58 @@ describe("Actionables MCP", () => {
         "title",
       ]);
       expect(second.nextCursor).toBeNull();
+      expect(second.nextCall).toBeNull();
+      for (const item of [...first.items, ...second.items]) {
+        expect(item.historyCall).toEqual({
+          name: "actionables.get_task_history",
+          arguments: {
+            id: item.id,
+            workItemId: item.workItemId,
+            version: item.version,
+            includeArchived: false,
+            offset: 0,
+          },
+        });
+        expect(
+          output<TaskHistoryPage>(await client.callTool(item.historyCall)),
+        ).toMatchObject({
+          id: item.id,
+          workItemId: item.workItemId,
+          complete: true,
+          nextCall: null,
+        });
+      }
+      const combined = await search({
+        ...request,
+        projectId: historyScope.projectId,
+        includeArchived: true,
+      });
+      expect(combined.nextCall!.arguments).toEqual({
+        ...first.nextCall!.arguments,
+        projectId: historyScope.projectId,
+        includeArchived: true,
+      });
+      const combinedSecond = output<SearchCompletedTasksOutput>(
+        await client.callTool(combined.nextCall!),
+      );
+      expect(combinedSecond.items.map((item) => item.id)).toEqual(
+        second.items.map((item) => item.id),
+      );
+      expect(combinedSecond.nextCall).toBeNull();
+      expect(
+        combinedSecond.items.every(
+          (item) => item.historyCall.arguments.includeArchived,
+        ),
+      ).toBe(true);
       expect(
         await search({ ...request, cursor: second.items.at(-1)!.id }),
-      ).toEqual({ items: [], nextCursor: null });
+      ).toEqual({ items: [], nextCursor: null, nextCall: null });
       expect(
         await search({ ...request, q: "unmatched-history-keyword" }),
-      ).toEqual({ items: [], nextCursor: null });
+      ).toEqual({ items: [], nextCursor: null, nextCall: null });
       expect(
         await search({ ...request, projectId: outsideScope.projectId }),
-      ).toEqual({ items: [], nextCursor: null });
+      ).toEqual({ items: [], nextCursor: null, nextCall: null });
       const projectMatches = await search({
         projectId: historyScope.projectId,
         q: keyword.toLowerCase(),
@@ -5190,8 +5281,8 @@ describe("Actionables MCP", () => {
               arguments: searchArgs,
             }),
           ),
-        ).toEqual({ items: [], nextCursor: null });
-        const found = output<SearchCompletedTasksResponse>(
+        ).toEqual({ items: [], nextCursor: null, nextCall: null });
+        const found = output<SearchCompletedTasksOutput>(
           await client.callTool({
             name: "actionables.search_completed_tasks",
             arguments: { ...searchArgs, includeArchived: true },
@@ -5240,21 +5331,13 @@ describe("Actionables MCP", () => {
             }),
           ),
         ).toMatchObject(archiveReadRecovery);
-        let historyOffset = 0;
-        let historyHash: string | undefined;
+        let historyCall = found.items[0]!.historyCall;
         const historyItems: TaskHistoryPage["items"] = [];
         for (let pageNumber = 0; pageNumber < 30; pageNumber += 1) {
-          const args = {
-            ...historyArgs,
-            includeArchived: true,
-            offset: historyOffset,
-            ...(historyHash ? { contentHash: historyHash } : {}),
-          };
+          const args = historyCall.arguments;
+          expect(args).toMatchObject({ ...historyArgs, includeArchived: true });
           const page = output<TaskHistoryPage>(
-            await client.callTool({
-              name: "actionables.get_task_history",
-              arguments: args,
-            }),
+            await client.callTool(historyCall),
           );
           expect(page.archiveState).toEqual(compact.archiveState);
           expect(
@@ -5266,9 +5349,16 @@ describe("Actionables MCP", () => {
             ),
           ).toMatchObject(archiveReadRecovery);
           historyItems.push(...page.items);
-          if (page.complete) break;
-          historyOffset = page.nextOffset!;
-          historyHash = page.contentHash;
+          if (page.complete) {
+            expect(page.nextCall).toBeNull();
+            break;
+          }
+          expect(page.nextCall!.arguments).toEqual({
+            ...args,
+            offset: page.nextOffset,
+            contentHash: page.contentHash,
+          });
+          historyCall = page.nextCall!;
         }
         expect(
           historyItems
@@ -5832,6 +5922,15 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(first.progress).toMatchObject({ total: 1, completed: 1, open: 0 });
+      expect(first).not.toHaveProperty("nextCall");
+      expect(
+        output<CompletionView>(
+          await client.callTool({
+            name: "actionables.get_completion_view",
+            arguments: parentCredentials,
+          }),
+        ),
+      ).toEqual(first);
       expect(first.outstandingRequirements).toEqual([
         "Save a Resolution describing completed changes and decisions.",
         "Record current Passed validation after the latest move into In progress.",
@@ -6005,6 +6104,8 @@ describe("Actionables MCP", () => {
           }),
         );
       const small = await read();
+      expect(small).not.toHaveProperty("nextCall");
+      expect(await read()).toEqual(small);
       expect(small).toMatchObject({
         complete: true,
         nextOffset: null,

@@ -308,8 +308,11 @@ The default `limit` is 25 (maximum 100). Each result includes `id`, `workItemId`
 title, scope, Done status, version, `archiveState`, `updatedAt`, and a bounded
 `match` containing the matched field and an excerpt around the match.
 `updatedAt` means last modification, not completion date. Results are ordered
-by descending public task ID. Continue with `nextCursor` as `cursor`, keeping
-the scope, query, and archive option unchanged, until `nextCursor` is null.
+by descending public task ID. Execute the response's `nextCall` unchanged to
+continue searching; it contains the exact tool `name` and `arguments`, including
+the same scope, normalized query, limit, archive option and next cursor. Null
+means the search is exhausted, including an empty result. `nextCursor` remains
+available for older clients; use it as `cursor` with the same search inputs.
 Each page reads current records; restart if changes during paging need to be
 included. Search scans the selected completed history using ordinary text
 matching; it has no relevance ranking or separate search index.
@@ -321,11 +324,22 @@ them. `archiveState` describes the selected task and its project/repository/
 worktree inheritance; an archived work-item root may also require inclusion.
 No restore or lifecycle mutation occurs.
 
-Use each result's `id`, `workItemId` and `version` with
-`actionables.get_task_history` to read research, Resolution and stored source
-references together. The tool is exclusively an agent MCP capability; it adds
+Execute a selected result's `historyCall` unchanged to read research, Resolution
+and stored source references together. It targets `actionables.get_task_history`
+with the exact `id`, top-level `workItemId`, `version`, explicit `includeArchived`
+and `offset: 0`. The tool is exclusively an agent MCP capability; it adds
 no dashboard behavior. It also accepts a known Done or Dismissed task's version
 from `get_task`. It requires no claim token or thread metadata.
+
+History pages include `nextCall`, another `{ name, arguments }` object that can
+be passed directly to the MCP client's `callTool`. It carries the same task,
+root, version and archive option plus the next item offset and content hash.
+It is null exactly when the page is complete; do not issue another history
+call then. Check `isError` before reading or following descriptors. These are
+ordinary call parameters, not credentials: every execution still enforces the
+existing scope, archive, terminal-status, version and content checks. Transport
+authentication stays with the client. The archive option reflects the request,
+including when an archived root requires inclusion but the child is unarchived.
 
 Each `items` entry identifies a `field` (`research`, `resolution`, `userSources`,
 `files` or `sourceThread`) and zero-based `index`. Research indexes identify
@@ -371,7 +385,8 @@ Pages contain at most 40 items and 8,000 characters of serialized `items`, plus
 bounded metadata. `fieldCounts` reports note, source and file counts, including
 empty collections; empty scalar values are explicit complete strings.
 `offset` and `nextOffset` count **items**, not characters. `totalItems`,
-`remainingItems` and `complete` make completeness explicit. Start at offset 0;
+`remainingItems` and `complete` make completeness explicit. These existing fields
+remain available. For older servers without call descriptors, start at offset 0;
 repeat with the returned `nextOffset`, same version, first `contentHash` and
 same archive option until `nextOffset` is null. The hash covers the entire
 focused snapshot, so an edit to any returned field/reference rejects mixed
