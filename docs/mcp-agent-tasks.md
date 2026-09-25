@@ -297,22 +297,53 @@ that would reuse the now-invalid terminal scope.
 ### Find completed research
 
 `actionables.search_completed_tasks` searches Done tasks across work items in
-an explicit `projectId` or `repositoryId`. Supply a nonempty `q` (up to 200
-characters); supplying both scope IDs restricts results to their intersection.
-It uses the dashboard's case-insensitive keyword/phrase text matching over
-titles, findings, descriptions, research, and Resolution. Dashboard text search
-also now includes Resolution. Dismissed and active tasks are never history
-search results.
+an explicit `projectId` or `repositoryId`; supplying both scope IDs restricts
+results to their intersection. Supply exactly one text selector:
+
+- `q`: one string, trimmed to 1–200 characters. It matches one contiguous,
+  case-insensitive substring or phrase in a supported field, preserving the
+  existing behavior.
+- `terms`: 1–10 submitted strings, each trimmed to 1–200 characters. Every
+  distinct term must match the same Done task, but terms may match different
+  fields: title, finding, description, joined research notes, or Resolution.
+  The submitted count is checked before case-insensitive deduplication. Matching
+  uses locale lowercase; evidence keeps the first trimmed spelling and order.
+
+Both selectors use literal substrings or phrases, without word tokenization,
+Boolean operators, or regular expressions. For example, `q: "claim token"`
+requires that phrase in one field, while `terms: ["claim token", "recovery"]`
+also requires `recovery` somewhere in the same task's supported fields. These
+are alternative calls, not two selectors in one request:
+
+```json
+{ "repositoryId": "repo-id", "q": "claim token" }
+```
+
+```json
+{ "repositoryId": "repo-id", "terms": ["claim token", "recovery"] }
+```
+
+Omitting both selectors, supplying both, a blank or oversized value, an empty
+terms list, more than 10 submitted terms, or a non-string term rejects the
+request. Correct the reported input error before retrying. Dismissed and active
+tasks are never history search results. Dashboard text search is unchanged.
 
 The default `limit` is 25 (maximum 100). Each result includes `id`, `workItemId`,
 title, scope, Done status, version, `archiveState`, `updatedAt`, and a bounded
-`match` containing the matched field and an excerpt around the match.
+`match` containing the matched field and an excerpt around the match. A `q`
+response is unchanged. A `terms` response additionally includes `termMatches`,
+one `{ term, field, excerpt }` for each distinct term in input order; `match`
+contains the first term's evidence. Each term uses its first matching field in
+title, finding, description, research, Resolution order, with an excerpt of at
+most 400 characters. It does not list every occurrence or matching field.
 `updatedAt` means last modification, not completion date. Results are ordered
 by descending public task ID. Execute the response's `nextCall` unchanged to
 continue searching; it contains the exact tool `name` and `arguments`, including
-the same scope, normalized query, limit, archive option and next cursor. Null
-means the search is exhausted, including an empty result. `nextCursor` remains
-available for older clients; use it as `cursor` with the same search inputs.
+the same scope, selector (`q` or `terms`), limit, archive option and next cursor.
+The selector is trimmed; `terms` retains submitted order and may retain
+duplicates. Null means the search is exhausted, including an empty result.
+`nextCursor` remains available for older clients; use it as `cursor` with the
+same search inputs.
 Each page reads current records; restart if changes during paging need to be
 included. Search scans the selected completed history using ordinary text
 matching; it has no relevance ranking or separate search index.

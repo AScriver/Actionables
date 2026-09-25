@@ -659,7 +659,7 @@ function searchText(row: ActionableRow) {
     .toLocaleLowerCase();
 }
 
-/** Searches completed text within an explicit scope without changing task or claim state. */
+/** Matches one literal phrase or all explicit terms without changing task or claim state. */
 export async function searchCompletedTasks(
   prisma: AppPrismaClient,
   query: SearchCompletedTasksRequest,
@@ -683,14 +683,37 @@ export async function searchCompletedTasks(
       include: { project: true, repository: true, worktree: true },
       orderBy: { sourceOrdinal: "desc" },
     });
-    const keyword = query.q.toLocaleLowerCase();
+    const keywords = new Map<string, string>();
+    for (const term of query.terms ?? [query.q!]) {
+      const keyword = term.toLocaleLowerCase();
+      if (!keywords.has(keyword)) keywords.set(keyword, term);
+    }
     const items: SearchCompletedTasksResponse["items"] = [];
     // ponytail: linear scoped text scan; add indexed search if history volume makes it slow.
     for (const row of rows) {
-      const match = Object.entries(taskSearchFields(row)).find(([, text]) =>
-        text.toLocaleLowerCase().includes(keyword),
-      );
-      if (!match) continue;
+      const fields = Object.entries(taskSearchFields(row));
+      const termMatches: NonNullable<
+        SearchCompletedTasksResponse["items"][number]["termMatches"]
+      > = [];
+      for (const [keyword, term] of keywords) {
+        const match = fields.find(([, text]) =>
+          text.toLocaleLowerCase().includes(keyword),
+        );
+        if (!match) break;
+        const [field, text] = match;
+        const start = Math.max(
+          0,
+          text.toLocaleLowerCase().indexOf(keyword) - 80,
+        );
+        const excerpt = `${start > 0 ? "…" : ""}${text.slice(start, start + 398)}${text.length > start + 398 ? "…" : ""}`;
+        termMatches.push({
+          term,
+          field:
+            field as SearchCompletedTasksResponse["items"][number]["match"]["field"],
+          excerpt,
+        });
+      }
+      if (termMatches.length !== keywords.size) continue;
       const root = await getHierarchyRoot(tx, row.id);
       if (!query.includeArchived && root.id !== row.id) {
         const workItem = await tx.actionable.findUniqueOrThrow({
@@ -705,9 +728,7 @@ export async function searchCompletedTasks(
           nextCursor: items.at(-1)!.id,
         });
       }
-      const [field, text] = match;
-      const start = Math.max(0, text.toLocaleLowerCase().indexOf(keyword) - 80);
-      const excerpt = `${start > 0 ? "…" : ""}${text.slice(start, start + 398)}${text.length > start + 398 ? "…" : ""}`;
+      const { field, excerpt } = termMatches[0]!;
       items.push({
         id: row.sourceOrdinal,
         workItemId: root.sourceOrdinal,
@@ -724,11 +745,8 @@ export async function searchCompletedTasks(
         version: row.version,
         archiveState: archiveState(row),
         updatedAt: row.updatedAt.toISOString(),
-        match: {
-          field:
-            field as SearchCompletedTasksResponse["items"][number]["match"]["field"],
-          excerpt,
-        },
+        match: { field, excerpt },
+        ...(query.terms ? { termMatches } : {}),
       });
     }
     return { items, nextCursor: null };

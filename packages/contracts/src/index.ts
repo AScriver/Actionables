@@ -915,8 +915,17 @@ export const searchCompletedTasksRequestSchema = z
       .trim()
       .min(1)
       .max(200)
+      .optional()
       .describe(
-        "Nonempty case-insensitive keyword or phrase in task text, research, or Resolution.",
+        "Trimmed 1-200-character case-insensitive literal keyword or phrase in task text, research, or Resolution. Supply exactly one of q or terms.",
+      ),
+    terms: z
+      .array(z.string().trim().min(1).max(200))
+      .min(1)
+      .max(10)
+      .optional()
+      .describe(
+        "Supply exactly one of q or terms. Submit 1-10 literal terms or phrases, each trimmed to 1-200 characters. Every distinct case-insensitive term must match a supported field in the same task; terms may match different fields or research notes. Duplicates match once, retaining first spelling and order.",
       ),
     includeArchived: z
       .boolean()
@@ -945,7 +954,24 @@ export const searchCompletedTasksRequestSchema = z
     path: ["projectId"],
     message:
       "Completed history requires an explicit projectId or repositoryId.",
+  })
+  .refine((input) => (input.q !== undefined) !== (input.terms !== undefined), {
+    path: ["terms"],
+    message: "Supply exactly one of q or terms.",
   });
+
+const completedTaskMatchSchema = z
+  .object({
+    field: z.enum([
+      "title",
+      "finding",
+      "description",
+      "research",
+      "resolution",
+    ]),
+    excerpt: z.string().max(400),
+  })
+  .strict();
 
 export const searchCompletedTasksResponseSchema = z
   .object({
@@ -961,18 +987,16 @@ export const searchCompletedTasksResponseSchema = z
             version: z.number().int().positive(),
             archiveState: archiveStateSchema,
             updatedAt: z.string().datetime(),
-            match: z
-              .object({
-                field: z.enum([
-                  "title",
-                  "finding",
-                  "description",
-                  "research",
-                  "resolution",
-                ]),
-                excerpt: z.string().max(400),
-              })
-              .strict(),
+            match: completedTaskMatchSchema,
+            termMatches: z
+              .array(
+                completedTaskMatchSchema.extend({
+                  term: z.string().min(1).max(200),
+                }),
+              )
+              .min(1)
+              .max(10)
+              .optional(),
           })
           .strict(),
       )

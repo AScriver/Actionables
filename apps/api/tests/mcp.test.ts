@@ -71,6 +71,7 @@ async function createTask(
     status?: string;
     title?: string;
     finding?: string;
+    description?: string;
     research?: string[];
     resolution?: string;
     archivedAt?: Date;
@@ -94,7 +95,7 @@ async function createTask(
       evidenceState: "Confirmed",
       updatedLabel: "fixture",
       finding: overrides.finding ?? "Initial finding",
-      description: "Initial description",
+      description: overrides.description ?? "Initial description",
       researchJson: json(overrides.research ?? []),
       resolution: overrides.resolution ?? "",
       archivedAt: overrides.archivedAt,
@@ -580,6 +581,27 @@ describe("Actionables MCP", () => {
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
+      });
+      const searchCompletedTool = tools.find(
+        (tool) => tool.name === "actionables.search_completed_tasks",
+      );
+      expect(searchCompletedTool?.description).toMatch(/exactly one/i);
+      expect(searchCompletedTool?.inputSchema.required ?? []).not.toContain(
+        "q",
+      );
+      expect(searchCompletedTool?.inputSchema.required ?? []).not.toContain(
+        "terms",
+      );
+      expect(searchCompletedTool?.inputSchema.properties?.q).toMatchObject({
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+      });
+      expect(searchCompletedTool?.inputSchema.properties?.terms).toMatchObject({
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: { type: "string", minLength: 1, maxLength: 200 },
       });
       expect(workflow).toContain("actionables.search_completed_tasks");
       expect(byName["actionables.get_task_history"]).toMatchObject({
@@ -4975,221 +4997,439 @@ describe("Actionables MCP", () => {
     }
   });
 
-  it("searches only scoped Done history with matching excerpts and bounded continuation without writes", async () => {
+  it.each(["q", "terms"] as const)(
+    "searches only scoped Done history with %s, matching excerpts and bounded continuation without writes",
+    async (queryMode) => {
+      const historyScope = await createHistoryScope();
+      const siblingScope = await createHistoryScope(historyScope.projectId);
+      const outsideScope = await createHistoryScope();
+      const keyword = "HistoryNeedle";
+      const queryInput = (value: string) =>
+        queryMode === "q"
+          ? { q: value }
+          : {
+              terms: [value, value.trim().toLowerCase(), "Initial description"],
+            };
+      const root = await createTask({ scope: historyScope });
+      const parent = await createTask({ scope: historyScope });
+      await prisma.hierarchyRelationship.create({
+        data: { parentId: root.id, childId: parent.id, provenance: "test" },
+      });
+      const matches = [];
+      for (const fields of [
+        { title: `Earlier ${keyword} decision` },
+        { finding: `Verified ${keyword} behavior` },
+        {
+          research: [
+            `${"prior context ".repeat(80)}${keyword} researched here`,
+          ],
+        },
+        { resolution: `Resolved ${keyword} in the shared reader` },
+      ]) {
+        matches.push(
+          await createTask({ status: "Done", scope: historyScope, ...fields }),
+        );
+      }
+      await prisma.hierarchyRelationship.create({
+        data: {
+          parentId: parent.id,
+          childId: matches[2]!.id,
+          provenance: "test",
+        },
+      });
+      const sibling = await createTask({
+        status: "Done",
+        title: keyword,
+        scope: siblingScope,
+      });
+      await createTask({ status: "Done", title: keyword, scope: outsideScope });
+      const active = await createTask({
+        status: "In progress",
+        title: keyword,
+        scope: historyScope,
+      });
+      await createTask({
+        status: "Dismissed",
+        title: keyword,
+        scope: historyScope,
+      });
+      if (queryMode === "terms") {
+        await createTask({
+          status: "Done",
+          title: keyword,
+          description: "Only the first term matches",
+          scope: historyScope,
+        });
+      }
+      await prisma.agentTaskClaim.create({
+        data: {
+          actionableId: active.id,
+          agentId,
+          claimTokenHash: randomUUID(),
+          leaseExpiresAt: new Date("2000-01-01T00:00:00Z"),
+        },
+      });
+      const before = await historyReadState();
+      const { client, transport } = await connectClient(bearerToken, null);
+      const search = async (arguments_: Record<string, unknown>) =>
+        output<SearchCompletedTasksOutput>(
+          await client.callTool({
+            name: "actionables.search_completed_tasks",
+            arguments: arguments_,
+          }),
+        );
+      try {
+        for (const args of [
+          { ...queryInput(keyword) },
+          { projectId: " ", ...queryInput(keyword) },
+          { projectId: historyScope.projectId, ...queryInput(" ") },
+          { projectId: historyScope.projectId },
+          {
+            projectId: historyScope.projectId,
+            ...queryInput(keyword),
+            limit: 101,
+          },
+          {
+            projectId: historyScope.projectId,
+            ...queryInput(keyword),
+            cursor: 0,
+          },
+        ]) {
+          expect(
+            validationErrorText(
+              await client.callTool({
+                name: "actionables.search_completed_tasks",
+                arguments: args,
+              }),
+            ),
+          ).toBeTruthy();
+        }
+        const request = {
+          repositoryId: historyScope.repositoryId,
+          ...queryInput(` ${keyword.toUpperCase()} `),
+          limit: 2,
+        };
+        const first = await search(request);
+        expect(await search(request)).toEqual(first);
+        expect(first.items.map((item) => item.id)).toEqual([
+          matches[3]!.sourceOrdinal,
+          matches[2]!.sourceOrdinal,
+        ]);
+        expect(first.nextCursor).toBe(matches[2]!.sourceOrdinal);
+        expect(first.nextCall).toEqual({
+          name: "actionables.search_completed_tasks",
+          arguments: {
+            ...request,
+            ...queryInput(keyword.toUpperCase()),
+            includeArchived: false,
+            cursor: first.nextCursor,
+          },
+        });
+        expect(first.items[0]).toMatchObject({
+          id: matches[3]!.sourceOrdinal,
+          workItemId: matches[3]!.sourceOrdinal,
+          title: matches[3]!.title,
+          scope: historyScope,
+          status: "Done",
+          version: matches[3]!.version,
+          updatedAt: matches[3]!.updatedAt.toISOString(),
+          archiveState: { isArchived: false },
+          match: {
+            field: "resolution",
+            excerpt: expect.stringContaining(keyword),
+          },
+        });
+        expect(first.items[1]).toMatchObject({
+          workItemId: root.sourceOrdinal,
+          match: {
+            field: "research",
+            excerpt: expect.stringContaining(keyword),
+          },
+        });
+        expect(
+          first.items.every((item) => item.match.excerpt.length <= 400),
+        ).toBe(true);
+        const second = output<SearchCompletedTasksOutput>(
+          await client.callTool(first.nextCall!),
+        );
+        expect(second.items.map((item) => item.id)).toEqual([
+          matches[1]!.sourceOrdinal,
+          matches[0]!.sourceOrdinal,
+        ]);
+        expect(second.items.map((item) => item.match.field)).toEqual([
+          "finding",
+          "title",
+        ]);
+        expect(second.nextCursor).toBeNull();
+        expect(second.nextCall).toBeNull();
+        for (const item of [...first.items, ...second.items]) {
+          if (queryMode === "terms") {
+            expect(item.termMatches).toEqual([
+              { term: keyword.toUpperCase(), ...item.match },
+              {
+                term: "Initial description",
+                field: "description",
+                excerpt: "Initial description",
+              },
+            ]);
+          } else {
+            expect(item).not.toHaveProperty("termMatches");
+          }
+          expect(item.historyCall).toEqual({
+            name: "actionables.get_task_history",
+            arguments: {
+              id: item.id,
+              workItemId: item.workItemId,
+              version: item.version,
+              includeArchived: false,
+              offset: 0,
+            },
+          });
+          expect(
+            output<TaskHistoryPage>(await client.callTool(item.historyCall)),
+          ).toMatchObject({
+            id: item.id,
+            workItemId: item.workItemId,
+            complete: true,
+            nextCall: null,
+          });
+        }
+        const combined = await search({
+          ...request,
+          projectId: historyScope.projectId,
+          includeArchived: true,
+        });
+        expect(combined.nextCall!.arguments).toEqual({
+          ...first.nextCall!.arguments,
+          projectId: historyScope.projectId,
+          includeArchived: true,
+        });
+        const combinedSecond = output<SearchCompletedTasksOutput>(
+          await client.callTool(combined.nextCall!),
+        );
+        expect(combinedSecond.items.map((item) => item.id)).toEqual(
+          second.items.map((item) => item.id),
+        );
+        expect(combinedSecond.nextCall).toBeNull();
+        expect(
+          combinedSecond.items.every(
+            (item) => item.historyCall.arguments.includeArchived,
+          ),
+        ).toBe(true);
+        expect(
+          await search({ ...request, cursor: second.items.at(-1)!.id }),
+        ).toEqual({ items: [], nextCursor: null, nextCall: null });
+        expect(
+          await search({
+            ...request,
+            ...queryInput("unmatched-history-keyword"),
+          }),
+        ).toEqual({ items: [], nextCursor: null, nextCall: null });
+        expect(
+          await search({ ...request, projectId: outsideScope.projectId }),
+        ).toEqual({ items: [], nextCursor: null, nextCall: null });
+        const projectMatches = await search({
+          projectId: historyScope.projectId,
+          ...queryInput(keyword.toLowerCase()),
+        });
+        expect(projectMatches.items.map((item) => item.id)).toEqual([
+          sibling.sourceOrdinal,
+          ...matches.map((item) => item.sourceOrdinal).reverse(),
+        ]);
+        const selected = output<{ id: number; workItemId: number }>(
+          await client.callTool({
+            name: "actionables.get_task",
+            arguments: {
+              id: first.items[1]!.id,
+              workItemId: first.items[1]!.workItemId,
+            },
+          }),
+        );
+        expect(selected).toMatchObject({
+          id: matches[2]!.sourceOrdinal,
+          workItemId: root.sourceOrdinal,
+        });
+        const dashboard = await app.inject({
+          url: `/api/actionables?${new URLSearchParams({ repository: historyScope.repositoryId, status: "Done", q: "Resolved HistoryNeedle" })}`,
+        });
+        expect(dashboard.statusCode).toBe(200);
+        expect(
+          dashboard.json().items.map((item: { id: number }) => item.id),
+        ).toEqual([matches[3]!.sourceOrdinal]);
+        expect(await historyReadState()).toEqual(before);
+      } finally {
+        await transport.close();
+      }
+    },
+  );
+
+  it("matches every literal completed-history term across supported fields and research notes with ordered evidence", async () => {
     const historyScope = await createHistoryScope();
-    const siblingScope = await createHistoryScope(historyScope.projectId);
-    const outsideScope = await createHistoryScope();
-    const keyword = "HistoryNeedle";
-    const root = await createTask({ scope: historyScope });
-    const parent = await createTask({ scope: historyScope });
-    await prisma.hierarchyRelationship.create({
-      data: { parentId: root.id, childId: parent.id, provenance: "test" },
-    });
-    const matches = [];
-    for (const fields of [
-      { title: `Earlier ${keyword} decision` },
-      { finding: `Verified ${keyword} behavior` },
-      {
-        research: [`${"prior context ".repeat(80)}${keyword} researched here`],
-      },
-      { resolution: `Resolved ${keyword} in the shared reader` },
-    ]) {
-      matches.push(
-        await createTask({ status: "Done", scope: historyScope, ...fields }),
-      );
-    }
-    await prisma.hierarchyRelationship.create({
-      data: {
-        parentId: parent.id,
-        childId: matches[2]!.id,
-        provenance: "test",
-      },
-    });
-    const sibling = await createTask({
+    const task = await createTask({
       status: "Done",
-      title: keyword,
-      scope: siblingScope,
-    });
-    await createTask({ status: "Done", title: keyword, scope: outsideScope });
-    const active = await createTask({
-      status: "In progress",
-      title: keyword,
       scope: historyScope,
+      title: "Alpha intervening BETA",
+      finding: "FindingOnly BETA",
+      description: "Literal red blue.%_ pattern",
+      research: [`${"prior context ".repeat(80)}Delta end`, "ResearchTwo"],
+      resolution: "Élan settled",
     });
-    await createTask({
-      status: "Dismissed",
-      title: keyword,
+    const unsupported = await createTask({
+      status: "Done",
       scope: historyScope,
+      title: "Alpha",
     });
-    await prisma.agentTaskClaim.create({
+    await prisma.actionable.update({
+      where: { id: unsupported.id },
       data: {
-        actionableId: active.id,
-        agentId,
-        claimTokenHash: randomUUID(),
-        leaseExpiresAt: new Date("2000-01-01T00:00:00Z"),
+        tagsJson: json(["UnsupportedNeedle"]),
+        filesJson: json([{ path: "UnsupportedNeedle" }]),
+        validationJson: json(["UnsupportedNeedle"]),
+        sourceThread: "UnsupportedNeedle",
       },
     });
+    for (const title of ["OnlyA", "OnlyB"]) {
+      await createTask({ status: "Done", scope: historyScope, title });
+    }
     const before = await historyReadState();
     const { client, transport } = await connectClient(bearerToken, null);
-    const search = async (arguments_: Record<string, unknown>) =>
+    const search = async (query: Record<string, unknown>) =>
       output<SearchCompletedTasksOutput>(
         await client.callTool({
           name: "actionables.search_completed_tasks",
-          arguments: arguments_,
+          arguments: { repositoryId: historyScope.repositoryId, ...query },
         }),
       );
     try {
-      for (const args of [
-        { q: keyword },
-        { projectId: " ", q: keyword },
-        { projectId: historyScope.projectId, q: " " },
-        { projectId: historyScope.projectId },
-        { projectId: historyScope.projectId, q: keyword, limit: 101 },
-        { projectId: historyScope.projectId, q: keyword, cursor: 0 },
-      ]) {
-        expect(
-          validationErrorText(
-            await client.callTool({
-              name: "actionables.search_completed_tasks",
-              arguments: args,
-            }),
-          ),
-        ).toBeTruthy();
-      }
-      const request = {
-        repositoryId: historyScope.repositoryId,
-        q: ` ${keyword.toUpperCase()} `,
-        limit: 2,
-      };
-      const first = await search(request);
-      expect(await search(request)).toEqual(first);
-      expect(first.items.map((item) => item.id)).toEqual([
-        matches[3]!.sourceOrdinal,
-        matches[2]!.sourceOrdinal,
-      ]);
-      expect(first.nextCursor).toBe(matches[2]!.sourceOrdinal);
-      expect(first.nextCall).toEqual({
-        name: "actionables.search_completed_tasks",
-        arguments: {
-          ...request,
-          q: keyword.toUpperCase(),
-          includeArchived: false,
-          cursor: first.nextCursor,
-        },
+      const found = await search({
+        terms: [
+          " Delta ",
+          " beta ",
+          "BETA",
+          " Alpha ",
+          "red blue.%_",
+          "ÉLAN",
+          "FindingOnly",
+          "ResearchTwo",
+        ],
       });
-      expect(first.items[0]).toMatchObject({
-        id: matches[3]!.sourceOrdinal,
-        workItemId: matches[3]!.sourceOrdinal,
-        title: matches[3]!.title,
-        scope: historyScope,
-        status: "Done",
-        version: matches[3]!.version,
-        updatedAt: matches[3]!.updatedAt.toISOString(),
-        archiveState: { isArchived: false },
-        match: {
-          field: "resolution",
-          excerpt: expect.stringContaining(keyword),
-        },
-      });
-      expect(first.items[1]).toMatchObject({
-        workItemId: root.sourceOrdinal,
-        match: { field: "research", excerpt: expect.stringContaining(keyword) },
-      });
+      expect(found.items.map((item) => item.id)).toEqual([task.sourceOrdinal]);
+      const item = found.items[0]!;
+      const expectedEvidence = [
+        { term: "Delta", field: "research" },
+        { term: "beta", field: "title" },
+        { term: "Alpha", field: "title" },
+        { term: "red blue.%_", field: "description" },
+        { term: "ÉLAN", field: "resolution" },
+        { term: "FindingOnly", field: "finding" },
+        { term: "ResearchTwo", field: "research" },
+      ];
       expect(
-        first.items.every((item) => item.match.excerpt.length <= 400),
-      ).toBe(true);
-      const second = output<SearchCompletedTasksOutput>(
-        await client.callTool(first.nextCall!),
-      );
-      expect(second.items.map((item) => item.id)).toEqual([
-        matches[1]!.sourceOrdinal,
-        matches[0]!.sourceOrdinal,
-      ]);
-      expect(second.items.map((item) => item.match.field)).toEqual([
-        "finding",
-        "title",
-      ]);
-      expect(second.nextCursor).toBeNull();
-      expect(second.nextCall).toBeNull();
-      for (const item of [...first.items, ...second.items]) {
-        expect(item.historyCall).toEqual({
-          name: "actionables.get_task_history",
-          arguments: {
-            id: item.id,
-            workItemId: item.workItemId,
-            version: item.version,
-            includeArchived: false,
-            offset: 0,
-          },
-        });
-        expect(
-          output<TaskHistoryPage>(await client.callTool(item.historyCall)),
-        ).toMatchObject({
-          id: item.id,
-          workItemId: item.workItemId,
-          complete: true,
+        item.termMatches?.map(({ term, field }) => ({ term, field })),
+      ).toEqual(expectedEvidence);
+      for (const match of item.termMatches!) {
+        expect(match.excerpt.length).toBeLessThanOrEqual(400);
+        expect(match.excerpt.toLocaleLowerCase()).toContain(
+          match.term.toLocaleLowerCase(),
+        );
+      }
+      expect(item.match).toEqual({
+        field: item.termMatches![0]!.field,
+        excerpt: item.termMatches![0]!.excerpt,
+      });
+      for (const query of [
+        { terms: ["alpha", "missing-term"] },
+        { terms: ["OnlyA", "OnlyB"] },
+        { terms: ["Alpha", "UnsupportedNeedle"] },
+        { terms: ["blue red"] },
+        { terms: ["red blue.*"] },
+        { terms: ["alpha beta"] },
+        { q: "alpha beta" },
+      ]) {
+        expect(await search(query)).toEqual({
+          items: [],
+          nextCursor: null,
           nextCall: null,
         });
       }
-      const combined = await search({
-        ...request,
-        projectId: historyScope.projectId,
-        includeArchived: true,
-      });
-      expect(combined.nextCall!.arguments).toEqual({
-        ...first.nextCall!.arguments,
-        projectId: historyScope.projectId,
-        includeArchived: true,
-      });
-      const combinedSecond = output<SearchCompletedTasksOutput>(
-        await client.callTool(combined.nextCall!),
-      );
-      expect(combinedSecond.items.map((item) => item.id)).toEqual(
-        second.items.map((item) => item.id),
-      );
-      expect(combinedSecond.nextCall).toBeNull();
-      expect(
-        combinedSecond.items.every(
-          (item) => item.historyCall.arguments.includeArchived,
-        ),
-      ).toBe(true);
-      expect(
-        await search({ ...request, cursor: second.items.at(-1)!.id }),
-      ).toEqual({ items: [], nextCursor: null, nextCall: null });
-      expect(
-        await search({ ...request, q: "unmatched-history-keyword" }),
-      ).toEqual({ items: [], nextCursor: null, nextCall: null });
-      expect(
-        await search({ ...request, projectId: outsideScope.projectId }),
-      ).toEqual({ items: [], nextCursor: null, nextCall: null });
-      const projectMatches = await search({
-        projectId: historyScope.projectId,
-        q: keyword.toLowerCase(),
-      });
-      expect(projectMatches.items.map((item) => item.id)).toEqual([
-        sibling.sourceOrdinal,
-        ...matches.map((item) => item.sourceOrdinal).reverse(),
+      for (const terms of [
+        ["alpha", "beta"],
+        ["Delta", "end"],
+        ["end\nResearchTwo"],
+        ["red blue.%_"],
+      ]) {
+        expect(
+          (await search({ terms })).items.map((match) => match.id),
+        ).toEqual([task.sourceOrdinal]);
+      }
+      const phrase = await search({ q: "  RED BLUE.%_  " });
+      expect(phrase.items.map((match) => match.id)).toEqual([
+        task.sourceOrdinal,
       ]);
-      const selected = output<{ id: number; workItemId: number }>(
-        await client.callTool({
-          name: "actionables.get_task",
-          arguments: {
-            id: first.items[1]!.id,
-            workItemId: first.items[1]!.workItemId,
-          },
-        }),
-      );
-      expect(selected).toMatchObject({
-        id: matches[2]!.sourceOrdinal,
-        workItemId: root.sourceOrdinal,
+      expect(phrase.items[0]).not.toHaveProperty("termMatches");
+      expect(await historyReadState()).toEqual(before);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("requires exactly one bounded completed-history query before deduplicating terms", async () => {
+    const historyScope = await createHistoryScope();
+    const terms = Array.from(
+      { length: 10 },
+      (_, index) => `${index}${"x".repeat(199)}`,
+    );
+    const task = await createTask({
+      status: "Done",
+      scope: historyScope,
+      research: terms,
+    });
+    const before = await historyReadState();
+    const { client, transport } = await connectClient(bearerToken, null);
+    const search = (query: Record<string, unknown>) =>
+      client.callTool({
+        name: "actionables.search_completed_tasks",
+        arguments: { projectId: historyScope.projectId, ...query },
       });
-      const dashboard = await app.inject({
-        url: `/api/actionables?${new URLSearchParams({ repository: historyScope.repositoryId, status: "Done", q: "Resolved HistoryNeedle" })}`,
-      });
-      expect(dashboard.statusCode).toBe(200);
-      expect(
-        dashboard.json().items.map((item: { id: number }) => item.id),
-      ).toEqual([matches[3]!.sourceOrdinal]);
+    try {
+      for (const query of [
+        {},
+        { q: "x", terms: ["x"] },
+        { q: " ", terms: ["x"] },
+        { q: "x".repeat(201) },
+        { q: null },
+        { q: ["x"] },
+        { terms: [] },
+        { terms: "x" },
+        { terms: null },
+        { terms: [null] },
+        { terms: [1] },
+        { terms: [""] },
+        { terms: [" \t\n "] },
+        { terms: ["x", " "] },
+        { terms: ["x".repeat(201)] },
+        { terms: Array(11).fill("x") },
+      ]) {
+        expect(validationErrorText(await search(query))).toBeTruthy();
+      }
+      for (const query of [
+        { terms: terms.map((term) => ` ${term} `) },
+        { terms: Array(10).fill(" x ") },
+        { q: ` ${terms[0]} ` },
+        { q: "x" },
+      ]) {
+        const found = output<SearchCompletedTasksOutput>(await search(query));
+        expect(found.items.map((item) => item.id)).toEqual([
+          task.sourceOrdinal,
+        ]);
+        if (query.terms) {
+          expect(
+            found.items[0]!.termMatches?.map((match) => match.term),
+          ).toEqual([...new Set(query.terms.map((term) => term.trim()))]);
+        } else {
+          expect(found.items[0]).not.toHaveProperty("termMatches");
+        }
+      }
       expect(await historyReadState()).toEqual(before);
     } finally {
       await transport.close();
@@ -5298,6 +5538,29 @@ describe("Actionables MCP", () => {
             ? [kind]
             : [],
         });
+        for (const includeArchived of [false, true]) {
+          const byTerms = output<SearchCompletedTasksOutput>(
+            await client.callTool({
+              name: "actionables.search_completed_tasks",
+              arguments: {
+                repositoryId: historyScope.repositoryId,
+                terms: ["archiveneedle", "resolved"],
+                includeArchived,
+              },
+            }),
+          );
+          expect(
+            byTerms.items.map(({ termMatches, ...item }) => {
+              expect(
+                termMatches?.map(({ term, field }) => ({ term, field })),
+              ).toEqual([
+                { term: "archiveneedle", field: "research" },
+                { term: "resolved", field: "resolution" },
+              ]);
+              return item;
+            }),
+          ).toEqual(includeArchived ? found.items : []);
+        }
         const readArgs = { id: task.sourceOrdinal, workItemId };
         const archiveError = errorOutput(
           await client.callTool({

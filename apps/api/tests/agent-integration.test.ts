@@ -35,6 +35,7 @@ const legacySkillPaths = [
   "./fixtures/actionables-workflow-v9.md",
   "./fixtures/actionables-workflow-v10.md",
   "./fixtures/actionables-workflow-v11.md",
+  "./fixtures/actionables-workflow-v12.md",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 const latestLegacySkillPath = legacySkillPaths[legacySkillPaths.length - 1]!;
 
