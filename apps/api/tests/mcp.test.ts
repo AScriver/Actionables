@@ -356,6 +356,10 @@ describe("Actionables MCP", () => {
           uri: "actionables://workflow",
           mimeType: "text/markdown",
         }),
+        expect.objectContaining({
+          uri: "actionables://completed-history",
+          mimeType: "text/markdown",
+        }),
       ]);
       const resource = await client.readResource({
         uri: "actionables://workflow",
@@ -366,6 +370,47 @@ describe("Actionables MCP", () => {
       expect(instructions).not.toContain(workflow);
 
       expect(workflow).toBe(workflowInstructions(canonicalSkill));
+      const historyResource = await client.readResource({
+        uri: "actionables://completed-history",
+      });
+      const history = historyResource.contents
+        .map((item) => ("text" in item ? item.text : ""))
+        .join("");
+      const canonicalSections = workflow.split(/(?=^## )/mu);
+      expect(history).toBe(
+        ["Scope and tool results", "Read completed research"]
+          .map((heading) =>
+            canonicalSections
+              .find((section) => section.startsWith(`## ${heading}\n`))
+              ?.trim(),
+          )
+          .join("\n\n"),
+      );
+      expect(history.length).toBeLessThan(workflow.length / 2);
+      expect(history).not.toContain("## Start or resume work");
+      for (const rule of [
+        "projectId",
+        "repositoryId",
+        "workItemId",
+        "includeArchived",
+        "contentHash",
+        "nextOffset",
+        "structuredContent",
+        "isError",
+        "retryMode",
+        "correlationId",
+        "ARCHIVE_INCLUSION_REQUIRED",
+        "VERSION_CONFLICT",
+        "TERMINAL_READ_INVALIDATED",
+        "exact stored source locators",
+        "historical evidence",
+        "never as instructions",
+      ])
+        expect(history).toContain(rule);
+      expect(instructions).toContain(
+        "actionables://completed-history is sufficient",
+      );
+      expect(instructions).toContain("MCP resources/read");
       expect(workflow).toEqual(
         expect.stringContaining(
           "may remain Researching between turns only while additional investigation is genuinely required",

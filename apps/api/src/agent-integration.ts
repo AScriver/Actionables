@@ -19,6 +19,7 @@ const instructionsEnd = "<!-- actionables-agent-instructions:end -->";
 const mcpBearerTokenEnvironmentVariable = "ACTIONABLES_MCP_TOKEN";
 const actionablesMcpTableHeader = "[mcp_servers.actionables]";
 const knownLegacySkillHashes = new Set([
+  "5cc2ea3eab3786b72e28933df5c00da51c5c272ec28ff5007edab48ebfe111f8",
   "b964258e3e1aa588b6666631c4be100451f4847dbb811f5630c764fa902e7993",
   "78a87236dfd95d1fca4537622f57bbd6092eb9667674d96aa8081a45f6b910f2",
   "e8c7e91084de36aad317eabce45015f12e6db6e2b84cbe49755db4a2e9e06527",
@@ -59,6 +60,18 @@ export function bundledActionablesWorkflowInstructions() {
   return normalizeContent(bundledActionablesWorkflowSkill())
     .replace(/^---\n[\s\S]*?\n---\n?/, "")
     .trim();
+}
+
+/** Reuse canonical safeguards without loading unrelated lifecycle instructions. */
+export function bundledActionablesHistoryInstructions() {
+  const sections = bundledActionablesWorkflowInstructions()
+    .split(/(?=^## )/mu)
+    .filter((section) =>
+      /^## (Scope and tool results|Read completed research)\n/u.test(section),
+    );
+  if (sections.length !== 2)
+    throw new Error("Canonical completed-history guidance is incomplete.");
+  return sections.map((section) => section.trim()).join("\n\n");
 }
 
 type InstallerOptions = {

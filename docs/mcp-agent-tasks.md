@@ -153,9 +153,13 @@ derives claim ownership and creator provenance from that host metadata; agents
 do not supply or invent an `agentId`.
 
 Initialization sends concise coordination safeguards, because some hosts repeat
-server instructions beside every tool. The full canonical workflow is available
-once from the installed skill or the `actionables://workflow` MCP resource
-(`resources/list` then `resources/read`). Discover tool names first and inspect
+server instructions beside every tool. For history-only reads, use
+`resources/read` with `actionables://completed-history` on the connected server.
+This resource is sufficient: it derives the scope/error and completed-research
+sections from the canonical skill without requiring lifecycle instructions.
+For task coordination, read `actionables://workflow` through MCP, or the installed
+skill when filesystem reads are allowed. Resource URIs are not file paths.
+Discover tool names first and inspect
 only the needed schemas; avoid dumping all descriptions. Resource reads require
 the same authenticated MCP connection and do not read or mutate task state.
 

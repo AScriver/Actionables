@@ -79,7 +79,10 @@ import {
   parsePersistedStatus,
   permittedTransitions,
 } from "./actionable-transitions.js";
-import { bundledActionablesWorkflowInstructions } from "./agent-integration.js";
+import {
+  bundledActionablesHistoryInstructions,
+  bundledActionablesWorkflowInstructions,
+} from "./agent-integration.js";
 import {
   DomainValidationError,
   searchCompletedTasks,
@@ -1425,8 +1428,8 @@ function createActionablesMcpServer(
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "Read the full Actionables workflow once from actionables://workflow or the installed actionables-workflow skill. Discover tool names first, then inspect only the schemas needed for the current operation. " +
-        "Stay within user-authorized scope. List mine, then list available with the explicitly identified top-level workItemId; never discover unrelated work. Create tasks only when authorized, using stable idempotency keys. " +
+        "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Discover names first, then only needed schemas. " +
+        "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
         "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
         "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +
         "structuredContent is authoritative. Check isError before dependent calls and follow retryMode/recovery; reconcile uncertain mutation delivery instead of blindly replaying. Use handoff to save unfinished work before releasing ownership.",
@@ -1447,6 +1450,25 @@ function createActionablesMcpServer(
           uri: uri.href,
           mimeType: "text/markdown",
           text: bundledActionablesWorkflowInstructions(),
+        },
+      ],
+    }),
+  );
+  server.registerResource(
+    "actionables-completed-history",
+    "actionables://completed-history",
+    {
+      title: "Completed-history guidance",
+      description:
+        "Sufficient for scoped historical reads; canonical scope, error and retrieval rules without lifecycle instructions.",
+      mimeType: "text/markdown",
+    },
+    (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: bundledActionablesHistoryInstructions(),
         },
       ],
     }),
