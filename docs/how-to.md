@@ -288,12 +288,16 @@ coordinate agents; they do not lock project files or prevent dashboard edits.
 
 An eligible parent also shows **Work on subtasks**. Leave **Next task only**
 selected to authorize one child, or explicitly choose **All subtasks, one at a
-time**. Pick the first task when several are equally eligible; the list does
+time**. In **First subtask**, pick a task or explicitly select **Let the agent
+choose** to delegate that decision. Manual selection remains the default. The
+agent chooses a currently eligible descendant within this parent's subtree
+when it starts; **Next task only** still authorizes just one task. The list does
 not invent an order between independent tasks. Nested coordination tasks become
 eligible for finalization only after their children are terminal.
 
-**Prepare subtask prompt** refreshes eligibility and the selected task before
-offering **Open subtask work in Codex** and **Copy subtask prompt**. It preserves
+**Prepare subtask prompt** refreshes eligibility and the selected task, or the
+parent when delegating selection, before offering **Open subtask work in Codex**
+and **Copy subtask prompt**. It preserves
 the original root, tracked workspace, validation boundaries and references to
 completed prerequisites. Preparation does not claim or change tasks. If work
 changed, choose from the refreshed list and prepare again. The ordinary parent

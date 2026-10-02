@@ -94,7 +94,7 @@ describe("Codex prompt templates", () => {
         ],
       },
     } as unknown as ActionableDetail;
-    const parent = { id: 535, workItemId: 534 };
+    const parent = { id: 535, workItemId: 534, scope: child.scope };
     const next = renderCodexSubtaskPrompt(parent, child, templates, "next")!;
     expect(next).toContain("work item #534. Claim task #537");
     expect(next).toContain(
@@ -138,6 +138,48 @@ describe("Codex prompt templates", () => {
       ),
     ).toBeNull();
   });
+  it.each(["next", "sequential"] as const)(
+    "delegates first selection within the parent subtree in %s mode",
+    (mode) => {
+      const parent = {
+        id: 535,
+        workItemId: 534,
+        scope: {
+          projectName: "Dashboard",
+          repositoryName: "Actionables",
+          worktreeName: "Default",
+        } as ActionableDetail["scope"],
+      };
+      const prompt = renderCodexSubtaskPrompt(parent, null, templates, mode)!;
+      expect(prompt).toContain("Use Actionables work item #534");
+      expect(prompt).toContain(
+        "delegates first subtask selection to you within parent #535's subtree",
+      );
+      expect(prompt).toContain("follow every nextAfterId");
+      expect(prompt).toContain(
+        "skip terminal, archived, blocked or live-claimed tasks",
+      );
+      expect(prompt).toContain(
+        "If no task is eligible, report the blocker and stop",
+      );
+      expect(prompt).toContain("task.truncation.reconciliationGuidance");
+      expect(prompt).toContain("readiness.requiredForReady");
+      expect(prompt).not.toContain("Claim task #535");
+      expect(prompt).not.toContain("Start with #");
+      if (mode === "next") {
+        expect(prompt).toContain(
+          "Authorization covers one eligible descendant of parent #535; do not start another child automatically",
+        );
+        expect(prompt).not.toContain("authorizes sequential work");
+      } else {
+        expect(prompt).toContain(
+          "authorizes sequential work only within parent #535's subtree",
+        );
+        expect(prompt).toContain("verify it is Done before starting the next");
+        expect(prompt).toContain("do not mark the parent Done");
+      }
+    },
+  );
   it.each([
     ["Inbox", "begin the Researching phase"],
     ["Researching", "resume the Researching phase"],

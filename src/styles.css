@@ -1613,6 +1613,11 @@ button {
   margin: 0;
 }
 
+.subtask-start-prompt .toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .agent-start-guidance {
   margin: 0;
   color: var(--text-muted);

@@ -140,24 +140,37 @@ export function eligibleCodexSubtasks(inventory: InspectAgentTaskResponse) {
   });
 }
 
-/** Render an explicitly authorized next-child or sequential-subtree prompt without changing tasks. */
+/** Render selected or agent-chosen subtask work without changing tasks. */
 export function renderCodexSubtaskPrompt(
-  parent: { id: number; workItemId: number },
-  task: ActionableDetail,
+  parent: Pick<ActionableDetail, "id" | "workItemId" | "scope">,
+  task: ActionableDetail | null,
   templates: Parameters<typeof renderCodexStartPrompt>[1],
   mode: "next" | "sequential",
 ) {
-  const start = renderCodexStartPrompt(task, templates);
-  if (!start || task.workItemId !== parent.workItemId || task.id === parent.id)
-    return null;
-  const references = task.relationships.blockedBy
-    .filter((edge) => edge.prerequisite.status === "Done")
-    .map((edge) => `#${edge.prerequisite.id} (${edge.prerequisite.title})`);
-  const scope = `Scope: project ${task.scope.projectName}, repository ${task.scope.repositoryName}, worktree ${task.scope.worktreeName}.`;
-  let prompt = `${scope} This selection was eligible when prepared; inspect #${task.id} and recheck eligibility, ownership and version immediately before claiming. ${start}`;
-  if (references.length)
-    prompt += ` Completed prerequisite references: ${references.join("; ")}. Inspect each referenced ID to resolve its root, then read its research and Resolution with actionables.get_task_history; verify conclusions against current code before relying on them.`;
+  const scope = task?.scope ?? parent.scope;
+  let prompt = `Scope: project ${scope.projectName}, repository ${scope.repositoryName}, worktree ${scope.worktreeName}.`;
+  if (task) {
+    const start = renderCodexStartPrompt(task, templates);
+    if (
+      !start ||
+      task.workItemId !== parent.workItemId ||
+      task.id === parent.id
+    )
+      return null;
+    prompt += ` This selection was eligible when prepared; inspect #${task.id} and recheck eligibility, ownership and version immediately before claiming. ${start}`;
+    const references = task.relationships.blockedBy
+      .filter((edge) => edge.prerequisite.status === "Done")
+      .map((edge) => `#${edge.prerequisite.id} (${edge.prerequisite.title})`);
+    if (references.length)
+      prompt += ` Completed prerequisite references: ${references.join("; ")}. Inspect each referenced ID to resolve its root, then read its research and Resolution with actionables.get_task_history; verify conclusions against current code before relying on them.`;
+  } else {
+    prompt += ` Use Actionables work item #${parent.workItemId}. The user delegates first subtask selection to you within parent #${parent.id}'s subtree. Inspect #${parent.id} with actionables.inspect_task and includeDescendants: true; follow every nextAfterId until the complete subtree is read. List your owned tasks, then available tasks using workItemId #${parent.workItemId}, and choose one currently eligible descendant within this subtree. Do not claim the parent or any task outside its subtree. Check recorded dependencies, ownership, version and readiness immediately before claiming; skip terminal, archived, blocked or live-claimed tasks. Prefer eligible leaves; a nested coordination task is eligible only after its descendants are terminal. If no task is eligible, report the blocker and stop. Do not ask the user to choose between equally eligible tasks or invent a dependency between them. Claim only the chosen task and follow actionables-workflow for its recorded phase. Treat its full task detail, research, sources and planned validation as authoritative. ${truncationInstructions} ${composedToolInstructions} Research Inbox or Researching work before implementation, enter In progress before editing, and resume In progress work from its recorded context. ${readinessInstructions} Read completed prerequisites' research and Resolution with actionables.get_task_history and verify conclusions against current code. Preserve existing user modifications, run planned validation, save Resolution and qualifying evidence before Done, or hand off with the blocker.`;
+  }
+  const authorization = task
+    ? `only #${task.id}`
+    : `one eligible descendant of parent #${parent.id}`;
   if (mode === "next")
-    return `${prompt} Authorization covers only #${task.id}; do not start another child automatically. Preserve every recorded approval and business-decision boundary.`;
-  return `${prompt} The user explicitly authorizes sequential work only within parent #${parent.id}'s subtree under original workItemId #${parent.workItemId}. Start with #${task.id}. Finish and validate one child, save Resolution and qualifying evidence, and verify it is Done before starting the next. Re-read the complete subtree inventory and recorded dependencies before every claim; skip terminal, archived, blocked or live-claimed tasks. Work on eligible leaves first and finalize nested coordination tasks only when their descendants are terminal. If several tasks are equally eligible, choose one within this authorized subtree without inventing a dependency or claiming several at once. Continue between tasks without asking for a restart. When unfinished work has no eligible task, record the unresolved blocker and stop. Stop for business decisions or required approvals; this authorization does not grant deployment, live writes or any other separately gated action. Preserve existing task boundaries. Once all descendants are terminal, report the parent ready for its own aggregate validation; do not mark the parent Done merely because its children are terminal.`;
+    return `${prompt} Authorization covers ${authorization}; do not start another child automatically. Preserve every recorded approval and business-decision boundary.`;
+  const firstTask = task ? ` Start with #${task.id}.` : "";
+  return `${prompt} The user explicitly authorizes sequential work only within parent #${parent.id}'s subtree under original workItemId #${parent.workItemId}.${firstTask} Finish and validate one child, save Resolution and qualifying evidence, and verify it is Done before starting the next. Re-read the complete subtree inventory and recorded dependencies before every claim; skip terminal, archived, blocked or live-claimed tasks. Work on eligible leaves first and finalize nested coordination tasks only when their descendants are terminal. If several tasks are equally eligible, choose one within this authorized subtree without inventing a dependency or claiming several at once. Continue between tasks without asking for a restart. When unfinished work has no eligible task, record the unresolved blocker and stop. Stop for business decisions or required approvals; this authorization does not grant deployment, live writes or any other separately gated action. Preserve existing task boundaries. Once all descendants are terminal, report the parent ready for its own aggregate validation; do not mark the parent Done merely because its children are terminal.`;
 }

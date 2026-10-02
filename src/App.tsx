@@ -1734,7 +1734,7 @@ function ActivityTimeline({ selected }: { selected: ActionableDetail }) {
   );
 }
 
-/** Prepare explicitly selected subtask work from freshly checked, read-only state. */
+/** Prepare selected or agent-chosen subtask work from freshly checked, read-only state. */
 function SubtaskPromptControls({
   parent,
   templates,
@@ -1767,6 +1767,7 @@ function SubtaskPromptControls({
     : [];
   let choice = selectedId;
   if (!choice && candidates.length === 1) choice = String(candidates[0].id);
+  const delegateSelection = choice === "agent";
   const prepare = async () => {
     setPreparing(true);
     setPrepared(null);
@@ -1774,12 +1775,11 @@ function SubtaskPromptControls({
     try {
       const fresh = await inventory.refetch();
       if (fresh.error) throw fresh.error;
-      const candidate =
-        fresh.data &&
-        eligibleCodexSubtasks(fresh.data).find(
-          (task) => task.id === Number(choice),
-        );
-      if (!candidate)
+      const eligible = fresh.data ? eligibleCodexSubtasks(fresh.data) : [];
+      const candidate = delegateSelection
+        ? fresh.data?.task
+        : eligible.find((task) => task.id === Number(choice));
+      if (!candidate || eligible.length === 0)
         throw new Error(
           "This task is no longer eligible. Choose from the refreshed subtasks.",
         );
@@ -1788,7 +1788,10 @@ function SubtaskPromptControls({
         throw new Error(
           "This task changed. Refresh subtasks and prepare the prompt again.",
         );
-      const prompt = renderCodexSubtaskPrompt(parent, task, templates, mode);
+      let prompt;
+      if (delegateSelection)
+        prompt = renderCodexSubtaskPrompt(task, null, templates, mode);
+      else prompt = renderCodexSubtaskPrompt(parent, task, templates, mode);
       if (!prompt)
         throw new Error("This task cannot start in its current state.");
       let path = task.workspacePath;
@@ -1840,7 +1843,8 @@ function SubtaskPromptControls({
             setError("");
           }}
         >
-          <option value="">Choose an eligible task</option>
+          <option value="">Select a subtask…</option>
+          <option value="agent">Let the agent choose</option>
           {candidates.map((task) => (
             <option key={task.id} value={task.id}>
               #{task.id} · {task.title}
@@ -1848,8 +1852,15 @@ function SubtaskPromptControls({
           ))}
         </select>
       </label>
-      {candidates.length > 1 && (
-        <p>These tasks are equally eligible; no dependency orders them.</p>
+      {delegateSelection && (
+        <p>The agent will choose an eligible subtask when it starts.</p>
+      )}
+      {candidates.length > 1 && !delegateSelection && (
+        <p>
+          {choice
+            ? "These tasks are equally eligible; no dependency orders them."
+            : "Choose a first subtask or let the agent choose, then prepare its prompt."}
+        </p>
       )}
       {inventory.isFetching && (
         <p role="status">Checking subtask eligibility…</p>
@@ -1884,20 +1895,26 @@ function SubtaskPromptControls({
           type="button"
           className="toolbar-button"
           disabled={
-            !candidates.some((task) => task.id === Number(choice)) ||
+            !candidates.some(
+              (task) => delegateSelection || task.id === Number(choice),
+            ) ||
             preparing ||
             inventory.isFetching
           }
           onClick={() => void prepare()}
         >
+          {preparing && <RefreshCw className="spin" aria-hidden="true" />}
           {preparing ? "Preparing…" : "Prepare subtask prompt"}
         </button>
       </div>
       {prepared &&
-        candidates.some(
-          (task) =>
-            task.id === prepared.taskId && task.version === prepared.version,
-        ) &&
+        ((prepared.taskId === parent.id &&
+          inventory.data?.task.version === prepared.version &&
+          candidates.length > 0) ||
+          candidates.some(
+            (task) =>
+              task.id === prepared.taskId && task.version === prepared.version,
+          )) &&
         !inventory.isFetching && (
           <div className="agent-start-actions">
             <a className="toolbar-button" href={prepared.url}>

@@ -4,6 +4,150 @@ import { expect, test, type Page } from "@playwright/test";
 type ClaimState = "unclaimed" | "active" | "expired";
 const ACTIONABLE_ID = 32;
 
+test("subtask prompts explain selection and stay disabled until preparation finishes", async ({
+  page,
+}) => {
+  const original = await detailFixture(page);
+  const created = await page.request.post("/api/actionables", {
+    data: {
+      title: "Subtask prompt controls",
+      priority: "Medium",
+      effort: "S",
+      evidenceState: "Proposed",
+      projectId: original.scope.projectId,
+      repositoryId: original.scope.repositoryId,
+      worktreeId: original.scope.worktreeId,
+      finding: "Verify prompt selection and pending feedback",
+      description: "Prepare a prompt without claiming or changing child work.",
+      research: [],
+      validation: [],
+      tags: [],
+      userSources: [],
+    },
+  });
+  expect(created.status()).toBe(201);
+  let parent = (await created.json()).item;
+  for (const title of ["First prompt child", "Second prompt child"]) {
+    const child = await page.request.post(
+      `/api/actionables/${parent.id}/subtasks`,
+      {
+        data: { version: parent.version, title },
+      },
+    );
+    expect(child.ok()).toBe(true);
+    parent = (await child.json()).item;
+  }
+  const childId = parent.relationships.subtasks[0].child.id;
+  await page.goto(`/actionables/${parent.id}`);
+  const controls = page.locator(".subtask-start-prompt");
+  const prepare = controls.getByRole("button", {
+    name: "Prepare subtask prompt",
+  });
+  await expect(prepare).toBeDisabled();
+  await expect(controls).toContainText(
+    "Choose a first subtask or let the agent choose, then prepare its prompt.",
+  );
+  await expect(prepare).toHaveCSS("cursor", "not-allowed");
+  await controls
+    .getByRole("combobox", { name: "First subtask" })
+    .selectOption(String(childId));
+  await expect(prepare).toBeEnabled();
+
+  let releaseDetail!: () => void;
+  const heldDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let detailRequests = 0;
+  await page.route(`**/api/actionables/${childId}`, async (route) => {
+    detailRequests += 1;
+    await heldDetail;
+    await route.continue();
+  });
+  try {
+    await prepare.click();
+    await expect.poll(() => detailRequests).toBe(1);
+    const pending = controls.getByRole("button", {
+      name: "Preparing…",
+      exact: true,
+    });
+    await expect(pending).toBeDisabled();
+    await expect(pending.locator(".spin")).toBeVisible();
+    await expect(
+      controls.getByRole("button", { name: "Refresh subtasks" }),
+    ).toBeDisabled();
+    await expect(
+      controls.getByRole("combobox", { name: "First subtask" }),
+    ).toBeDisabled();
+    await pending.click({ force: true });
+    expect(detailRequests).toBe(1);
+  } finally {
+    releaseDetail();
+  }
+  const copy = controls.getByRole("button", {
+    name: "Copy subtask prompt",
+    exact: true,
+  });
+  await expect(copy).toBeVisible();
+  await expect(copy).toBeEnabled();
+  const link = controls.getByRole("link", {
+    name: "Open subtask work in Codex",
+  });
+  const prompt = new URL((await link.getAttribute("href"))!).searchParams.get(
+    "prompt",
+  );
+  expect(prompt).toContain(`Claim task #${childId}`);
+  expect(prompt).toContain(`Authorization covers only #${childId}`);
+
+  await controls
+    .getByRole("combobox", { name: "First subtask" })
+    .selectOption("agent");
+  await expect(copy).toHaveCount(0);
+  await expect(controls).toContainText(
+    "The agent will choose an eligible subtask when it starts.",
+  );
+  for (const mode of ["next", "sequential"]) {
+    await controls
+      .getByRole("combobox", { name: "Subtask execution" })
+      .selectOption(mode);
+    await prepare.click();
+    await expect(copy).toBeVisible();
+    const delegated = new URL(
+      (await link.getAttribute("href"))!,
+    ).searchParams.get("prompt");
+    expect(delegated).toContain(
+      `delegates first subtask selection to you within parent #${parent.id}'s subtree`,
+    );
+    expect(delegated).not.toContain(`Claim task #${childId}`);
+    if (mode === "next")
+      expect(delegated).toContain("do not start another child automatically");
+    else
+      expect(delegated).toContain(
+        "authorizes sequential work only within parent",
+      );
+  }
+  expect(detailRequests).toBe(1);
+
+  const inventoryUrl = `/api/actionables/${parent.id}/codex-subtasks`;
+  const inventory = await (await page.request.get(inventoryUrl)).json();
+  await page.route(`**${inventoryUrl}`, (route) =>
+    route.fulfill({
+      json: {
+        ...inventory,
+        descendants: inventory.descendants.map(
+          (task: Record<string, unknown>) => ({
+            ...task,
+            availableForClaim: false,
+          }),
+        ),
+      },
+    }),
+  );
+  await controls.getByRole("button", { name: "Refresh subtasks" }).click();
+  await expect(controls).toContainText("No eligible subtasks.");
+  await expect(prepare).toBeDisabled();
+  await expect(copy).toHaveCount(0);
+});
+
 test("custom start templates persist, render exact links and clipboard text, and reset independently", async ({
   page,
   context,
