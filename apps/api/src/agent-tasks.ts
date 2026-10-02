@@ -92,6 +92,7 @@ import {
   getActionable,
   normalizedLocalPath,
   recordValidationWithRecord,
+  requiredReason,
   transitionActionable,
   updateActionable,
   VersionConflictError,
@@ -469,6 +470,20 @@ function requireClaimable(
     throw new AgentTaskClaimError(
       "TERMINAL",
       "Terminal Actionables cannot be claimed.",
+    );
+  }
+}
+
+function requireResolvedDependencies(row: AgentTaskRow) {
+  if (
+    row.dependenciesAsDependent.some(
+      (edge) => !edge.waivedAt && edge.prerequisite.status !== "Done",
+    )
+  ) {
+    throw new DomainValidationError(
+      "UNRESOLVED_DEPENDENCIES",
+      { dependencies: ["Inspect this task's unresolved prerequisite IDs."] },
+      "Resolve every prerequisite before claiming or resuming this Actionable.",
     );
   }
 }
@@ -2631,6 +2646,19 @@ async function transitionClaimedAgentTaskResult<T = never>(
     request,
     now,
     async (tx, row, claim) => {
+      const unblocking =
+        row.status === "Blocked" &&
+        (request.status === "Researching" || request.status === "Ready");
+      if (unblocking || request.status === "In progress")
+        requireResolvedDependencies(row);
+      if (unblocking) {
+        requiredReason(
+          request.reason,
+          "reason",
+          "Explain which blocker was resolved and how resolution was verified.",
+          true,
+        );
+      }
       const saved = await transitionActionable(
         prisma,
         sourceOrdinal,
@@ -3383,6 +3411,7 @@ async function claimAgentTaskUnlocked<T = never>(
           row.version,
         );
       }
+      requireResolvedDependencies(row);
       await recordObservedExpiry(tx, row, now);
       const leaseMinutes =
         request.leaseMinutes ??

@@ -169,6 +169,7 @@ const taskDetailFieldSchema = z
   .enum([
     "finding",
     "description",
+    "manualBlocker",
     "resolution",
     "research",
     "plannedValidation",
@@ -319,7 +320,7 @@ const claimTaskSchema = z
       .positive()
       .describe("Top-level Actionable ID for the current feature or bug."),
     version: agentTaskVersionInputSchema.describe(
-      "Exact task version returned by list_tasks.",
+      "Exact task version from list_tasks, or inspect_task for an explicitly authorized blocked task.",
     ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
@@ -363,6 +364,7 @@ const compactReferenceSchema = z
 const compactTruncatedFieldSchema = z.enum([
   "finding",
   "description",
+  "manualBlocker",
   "resolution",
   "research",
   "plannedValidation",
@@ -413,6 +415,7 @@ const compactTaskSchema = z
     updatedAt: z.string().datetime(),
     finding: z.string().max(1_500),
     description: z.string().max(2_500),
+    manualBlocker: z.string().max(1_500).nullable(),
     resolution: z.string().max(2_500),
     research: z.array(z.string().max(400)).max(6),
     plannedValidation: z.array(z.string().max(400)).max(6),
@@ -463,7 +466,7 @@ const compactTaskSchema = z
     blocks: z.array(compactReferenceSchema).max(5),
     truncation: z
       .object({
-        truncatedFields: z.array(compactTruncatedFieldSchema).max(12),
+        truncatedFields: z.array(compactTruncatedFieldSchema).max(13),
         omitted: z
           .object({
             research: z.number().int().nonnegative(),
@@ -576,6 +579,7 @@ const taskDetailPageSchema = z
 const historyFieldSchema = z.enum([
   "finding",
   "description",
+  "manualBlocker",
   "research",
   "plannedValidation",
   "resolution",
@@ -824,6 +828,8 @@ function taskHistoryPage(
       ? {
           finding: [task.finding],
           description: [task.description],
+          manualBlocker:
+            task.manualBlocker === null ? [] : [task.manualBlocker],
           plannedValidation: task.validation,
           validationRecords: task.validationRecords,
           parent: task.relationships.parent
@@ -1003,6 +1009,8 @@ function taskDetailField(
       return task.finding;
     case "description":
       return task.description;
+    case "manualBlocker":
+      return task.manualBlocker;
     case "resolution":
       return task.resolution;
     case "research":
@@ -1139,6 +1147,10 @@ function compactTask(
     updatedAt: task.updatedAt,
     finding: compactText(task.finding, 1_500, "finding", true),
     description: compactText(task.description, 2_500, "description", true),
+    manualBlocker:
+      task.manualBlocker === null
+        ? null
+        : compactText(task.manualBlocker, 1_500, "manualBlocker", true),
     resolution: compactText(task.resolution, 2_500, "resolution"),
     research: task.research
       .slice(0, 6)
@@ -1429,7 +1441,7 @@ function createActionablesMcpServer(
     {
       instructions:
         "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Discover names first, then only needed schemas. " +
-        "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
+        "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId, or inspect an explicitly authorized blocked task to resume it; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
         "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
         "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +
         "structuredContent is authoritative. Check isError before dependent calls and follow retryMode/recovery; reconcile uncertain mutation delivery instead of blindly replaying. Use handoff to save unfinished work before releasing ownership.",
@@ -1607,7 +1619,7 @@ function createActionablesMcpServer(
     {
       title: "Inspect an explicit Actionable",
       description:
-        "Read an explicitly named task without a claim; resolves its original workItemId and immediate parent. Optionally page only its descendants, including blocked, claimed and terminal tasks. Archived inclusion is explicit. Continue with nextAfterId as afterId and unchanged options until null; pages reflect current state. Availability reasons and bounded blocker IDs explain exclusion from available work; compare unresolvedDependencyCount for omitted IDs. Lifecycle permittedTransitions still require ownership and all normal mutation checks. Never claims, expires, renews, restores or changes records, and never authorizes siblings.",
+        "Read an explicitly named task without a claim; resolves its original workItemId and immediate parent. Optionally page only its descendants, including blocked, claimed and terminal tasks. Archived inclusion is explicit. Continue with nextAfterId as afterId and unchanged options until null; pages reflect current state. Availability reasons and bounded blocker IDs explain exclusion from available work; compare unresolvedDependencyCount for omitted IDs. For an explicitly authorized unblock request, claim_task may use this version despite manual_blocker, subject to ownership and dependency checks. Lifecycle permittedTransitions still require ownership and all normal mutation checks. Never claims, expires, renews, restores or changes records, and never authorizes siblings.",
       inputSchema: inspectAgentTaskRequestSchema,
       outputSchema: inspectAgentTaskResponseSchema,
       annotations: readOnly,
@@ -1690,7 +1702,7 @@ function createActionablesMcpServer(
     {
       title: "Read complete active Actionable context",
       description:
-        "Read finding, description, research, plannedValidation, Resolution, validationRecords, files, userSources, sourceThread, parent, subtasks and blockedBy together using a valid claimToken and exact task version. Native values and labeled plain-text chunks use the get_task_history format: at most 40 items and 8,000 serialized item characters per page. fieldCounts includes empty fields; complete, remainingItems and nextOffset make continuation explicit. Start at offset 0, then keep the same version and contentHash with every nextOffset until null. No JSON-fragment reconstruction is needed. Every page revalidates the claim; stale versions, changed relationship content and invalid claims stop retrieval. Discard partial context on failure and reconcile. Existing claim-expiry cleanup applies; a successful read never renews or changes the task.",
+        "Read finding, description, manualBlocker, research, plannedValidation, Resolution, validationRecords, files, userSources, sourceThread, parent, subtasks and blockedBy together using a valid claimToken and exact task version. Native values and labeled plain-text chunks use the get_task_history format: at most 40 items and 8,000 serialized item characters per page. fieldCounts includes empty fields; complete, remainingItems and nextOffset make continuation explicit. Start at offset 0, then keep the same version and contentHash with every nextOffset until null. No JSON-fragment reconstruction is needed. Every page revalidates the claim; stale versions, changed relationship content and invalid claims stop retrieval. Discard partial context on failure and reconcile. Existing claim-expiry cleanup applies; a successful read never renews or changes the task.",
       inputSchema: getTaskContextSchema,
       outputSchema: taskContextPageSchema,
       annotations: readOnly,
@@ -1847,7 +1859,7 @@ function createActionablesMcpServer(
     {
       title: "Claim Actionable",
       description:
-        "Claim one task for the current Codex thread at its exact listed version within the same explicitly identified feature or bug work item. Thread identity comes from request metadata. A successful claim returns `{ task, claim }`; use `task.version` as the latest version and `claim.claimToken` as the secret capability for later claimed-task calls.",
+        "Claim one task for the current Codex thread at its exact listed version within the same explicitly identified feature or bug work item. For an explicitly authorized blocked task, use inspect_task's version even though available discovery excludes it. Unresolved dependencies and another thread's live claim prevent claiming. Claiming does not clear the blocker; read the full manualBlocker and verify its resolution before a reasoned transition. Thread identity comes from request metadata. A successful claim returns `{ task, claim }`; use `task.version` as the latest version and `claim.claimToken` as the secret capability for later claimed-task calls.",
       inputSchema: claimTaskSchema,
       outputSchema: claimTaskOutputSchema,
       annotations: mutation,
@@ -1945,7 +1957,7 @@ function createActionablesMcpServer(
     {
       title: "Transition claimed Actionable",
       description:
-        "Move a claimed task through Inbox to Researching to Ready to In progress. Ready requires non-empty finding, description, Research, and planned validation; use readiness.requiredForReady and permittedTransitions before requesting Ready or moving Ready to In progress. Return In progress directly to Researching only with a meaningful reason. Implementation changes must wait until In progress. Done requires non-empty Resolution plus qualifying validation and releases the claim. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
+        "Move a claimed task through Inbox to Researching to Ready to In progress. Ready requires non-empty finding, description, Research, and planned validation; use readiness.requiredForReady and permittedTransitions before requesting Ready or moving Ready to In progress. Unblock to Researching or Ready only with a meaningful reason describing verified blocker resolution; the reason is audited. Unresolved dependencies prevent unblocking or entering In progress. Return In progress directly to Researching only with a meaningful reason. Implementation changes must wait until In progress. Done requires non-empty Resolution plus qualifying validation and releases the claim. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
       inputSchema: transitionTaskSchema,
       outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },

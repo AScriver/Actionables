@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { open, rm } from "node:fs/promises";
+import { mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,9 +18,11 @@ let app: ReturnType<typeof buildApp> | undefined;
 let scope: { projectId: string; repositoryId: string; worktreeId: string };
 
 beforeAll(async () => {
-  const databaseName = `lifecycle-${randomUUID()}.db`;
-  databasePath = resolve(repoRoot, "data", databaseName);
-  const databaseUrl = `file:./data/${databaseName}`;
+  databasePath = resolve(
+    await mkdtemp(resolve(tmpdir(), "actionables-lifecycle-")),
+    "test.db",
+  );
+  const databaseUrl = `file:${databasePath.replaceAll("\\", "/")}`;
   const databaseFile = await open(databasePath, "a");
   await databaseFile.close();
   execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {

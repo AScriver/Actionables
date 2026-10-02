@@ -2107,7 +2107,7 @@ type TransitionDecision = {
   validationRecordId: string | null;
 };
 
-function requiredReason(
+export function requiredReason(
   value: string | undefined,
   field: "reason" | "completionOverrideReason",
   message: string,
@@ -2223,6 +2223,8 @@ function validateTransition(
       "Explain why implementation is returning to Researching.",
       true,
     );
+  } else if (previousStatus === "Blocked") {
+    reason = request.reason?.trim() ?? "";
   }
 
   if (nextStatus !== "Done") {
@@ -2347,6 +2349,7 @@ async function writeTransitionHistory(
     context.reason = decision.reason;
   } else if (previousStatus === "Blocked") {
     context.clearedManualBlocker = "true";
+    if (decision.reason) context.reason = decision.reason;
   }
 
   await transaction.activityEvent.create({

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { open, rm } from "node:fs/promises";
+import { mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -245,9 +246,11 @@ describe("Actionables error recovery contract", () => {
 });
 
 beforeAll(async () => {
-  const databaseName = `agent-tasks-${randomUUID()}.db`;
-  databasePath = resolve(repoRoot, "data", databaseName);
-  databaseUrl = `file:./data/${databaseName}`;
+  databasePath = resolve(
+    await mkdtemp(resolve(tmpdir(), "actionables-claims-")),
+    "test.db",
+  );
+  databaseUrl = `file:${databasePath.replaceAll("\\", "/")}`;
   const databaseFile = await open(databasePath, "a");
   await databaseFile.close();
   execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {

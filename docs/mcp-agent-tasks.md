@@ -15,6 +15,7 @@ An installed release or already-open client can have an older tool surface.
 
 - [Enable it](#enable-it)
 - [Explicit task inspection](#explicit-task-inspection)
+- [Unblock an explicitly authorized task](#unblock-an-explicitly-authorized-task)
 - [Completion evidence and atomic completion](#completion-evidence-and-atomic-completion)
 - [Dependency coordination](#dependency-coordination)
 - [Agent workflow](#agent-workflow)
@@ -168,7 +169,7 @@ The full workflow directs agents to use this sequence:
 1. List `mine`.
 2. When the user authorizes one new task, call `actionables.create_task` with one caller-generated idempotency UUID, a deliberate priority other than `Unset`, an effort estimate other than `Unknown`, and at least one meaningful tag. For 2–25 authorized tasks, call `actionables.bulk_create_tasks` with `mode: "preview"` first; correct every reported item failure, then submit the explicit items with `mode: "apply"`. Every item needs its own caller-stable idempotency UUID. Keep it for corrections to the same intended task; use a new UUID only for a different task. For a top-level task, either provide the three existing scope IDs or provide the local Git `repositoryPath` with `ensureScope: true`. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. Reuse a UUID only for an exact retry.
 3. Resolve the explicitly identified feature or bug's top-level `workItemId`; `inspect_task` can resolve it from a supplied nested task ID without a claim. If no owned task matches and no work item was supplied, continue the user's work without claiming or listing `available`, and report the missing tracking scope. Otherwise list `available` with that `workItemId`. A scoped response with `workItem.terminal: true` and empty `items` is a successful final-state read, not a discovery failure.
-4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`.
+4. For a known Done or Dismissed task, inspect it with `get_task` using the top-level `workItemId` and do not claim it. Otherwise claim the exact listed active version with the same `workItemId`. An explicit unblock request may use the inspected version as described below.
 5. After every composed tool call, inspect `isError`. If it is true, stop before reading success fields or issuing dependent mutations and preserve the structured error. Treat `retryMode` as authoritative: repeat the exact call once only for `same_request`; correct arguments before a new call for `after_input_change`; satisfy the structured `recovery` and wait until any `recovery.retryAt` for `after_state_change`; and stop for `never`. Retain `correlationId` when diagnostics are needed. `retryable` and `nextAction` remain only for legacy compatibility. An awaited MCP tool error is a resolved result, not necessarily a thrown exception.
 6. Start from compact detail and inspect `task.truncation.reconciliationGuidance`. For claimed active work, prefer `actionables.get_task_context` with its exact version and claimToken. Follow nextOffset with the first contentHash until complete. Native values and labeled text chunks cover scope, research, planned validation, references and relationships together; fieldCounts identifies empty fields. No JSON-fragment assembly is needed. Terminal lifecycle detail and older servers retain `get_task_detail` with their existing field-by-field JSON contract. Discard partial results on version or authorization failures and reconcile before continuing. Do not advance or edit until critical fields are complete; absent guidance, normal flow may continue.
 7. If the owning thread loses the returned token, list `mine` and call `actionables.recover_task_claim` with the listed version.
@@ -198,6 +199,40 @@ applied, so blocked tasks cannot hide safe work. Every scoped list also returns
 Dismissed roots are valid read scopes; `mine` and `available` remain active-work
 views and return empty `items` for a terminal root. Every list response includes
 `hasMore`; callers must not treat `items` as exhaustive when it is true.
+
+### Unblock an explicitly authorized task
+
+Use `inspect_task` for the authorized ID to resolve its original `workItemId`,
+current version, manual blocker excerpt, prerequisites and claim state. A manual
+`Blocked` status remains excluded from available discovery and reports
+`availableForClaim: false`. For this explicit unblock request, `claim_task`
+accepts the inspected version when ownership, scope and dependency checks pass.
+Reuse an existing claim owned by the current thread; recover its token if needed.
+Never replace another thread's live claim. Claiming does not clear the blocker.
+
+Claimed compact detail includes `manualBlocker` (null when absent). Reconcile
+truncation through the existing `get_task_context` version/hash paging or
+`get_task_detail(field: manualBlocker)` before deciding the blocker is resolved.
+The context reader returns the full note as a value or labeled text chunks.
+
+Call `transition_task` with a meaningful `reason` describing the verified
+resolution. Use `Researching` when investigation remains, or `Ready` only when
+the readiness list is empty and the target is permitted. The normal transaction
+clears the manual blocker and records the reason and agent origin in activity.
+Direct `Blocked` to `In progress` remains invalid; enter In progress from Ready.
+Dashboard unblocking retains its existing optional-reason behavior.
+
+Claims, unblocking and entry to In progress reject `UNRESOLVED_DEPENDENCIES`.
+The server checks the current edges again at transition time, including after
+ownership was acquired. Inspect blockers, wait for resolution, and reconcile the
+current version before retrying. Unblocking never waives or removes an edge.
+Prerequisite `Done` satisfies an active edge; `Dismissed` does not. Existing
+explicit waivers and removals retain their normal meaning.
+
+Dependency-only tasks become available when their prerequisites are satisfied;
+they do not need a synthetic unblock transition. A separate manual blocker must
+still be cleared explicitly. On claim expiry or conflict, re-inspect the
+authorized blocked ID rather than searching unrelated available work.
 
 Task creation returns the created task detail and records the calling Codex
 thread as its creator, so an agent does not need to claim the task merely to

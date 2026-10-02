@@ -73,6 +73,7 @@ async function createTask(
     finding?: string;
     description?: string;
     research?: string[];
+    manualBlocker?: string;
     resolution?: string;
     archivedAt?: Date;
     scope?: typeof scope;
@@ -97,6 +98,7 @@ async function createTask(
       finding: overrides.finding ?? "Initial finding",
       description: overrides.description ?? "Initial description",
       researchJson: json(overrides.research ?? []),
+      manualBlockerMd: overrides.manualBlocker ?? null,
       resolution: overrides.resolution ?? "",
       archivedAt: overrides.archivedAt,
       validationJson: json(["Run the MCP integration test."]),
@@ -292,9 +294,11 @@ function describedProperties(
 }
 
 beforeAll(async () => {
-  const databaseName = `mcp-${randomUUID()}.db`;
-  databasePath = resolve(repoRoot, "data", databaseName);
-  const databaseUrl = `file:./data/${databaseName}`;
+  databasePath = resolve(
+    await mkdtemp(resolve(tmpdir(), "actionables-mcp-")),
+    "test.db",
+  );
+  const databaseUrl = `file:${databasePath.replaceAll("\\", "/")}`;
   const databaseFile = await open(databasePath, "a");
   await databaseFile.close();
   execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
@@ -722,6 +726,14 @@ describe("Actionables MCP", () => {
       expect(descriptions["actionables.transition_task"]).toContain(
         "If a composed call returns isError, stop",
       );
+      expect(descriptions["actionables.claim_task"]).toContain(
+        "inspect_task's version",
+      );
+      expect(descriptions["actionables.transition_task"]).toContain(
+        "Unresolved dependencies prevent unblocking or entering In progress",
+      );
+      expect(canonicalSkill).toContain("## Unblock explicitly authorized work");
+      expect(canonicalSkill).toContain("get_task_detail(field: manualBlocker)");
       expect(descriptions["actionables.handoff_task"]).toContain(
         "If any requested write fails",
       );
@@ -3646,6 +3658,424 @@ describe("Actionables MCP", () => {
     }
   });
 
+  it("unblocks explicitly inspected work with audited reasons and current dependency guards", async () => {
+    const root = await createTask();
+    const blocker = `Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Waiting for restored access. Verify write permission too.`;
+    const task = await createTask({
+      status: "Blocked",
+      manualBlocker: blocker,
+    });
+    const prerequisite = await createTask();
+    await prisma.hierarchyRelationship.create({
+      data: { parentId: root.id, childId: task.id, provenance: "test" },
+    });
+    const { client, transport } = await connectClient();
+    const other = await connectClient(bearerToken, randomUUID());
+    const call = (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name: "actionables." + name, arguments: args });
+    type Lease = {
+      task: { version: number; manualBlocker: string };
+      claim: { claimToken: string };
+    };
+    const snapshot = () =>
+      prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: {
+          agentTaskClaim: true,
+          activityEvents: true,
+          statusHistory: true,
+          dependenciesAsDependent: true,
+        },
+      });
+    const rejectUnchanged = async (
+      name: string,
+      args: Record<string, unknown>,
+      code: string,
+    ) => {
+      const before = await snapshot();
+      expect(errorOutput(await call(name, args)).code).toBe(code);
+      expect(await snapshot()).toEqual(before);
+    };
+    try {
+      const inspected = output<InspectAgentTaskResponse>(
+        await call("inspect_task", { id: task.sourceOrdinal }),
+      );
+      expect(inspected.task).toMatchObject({
+        workItemId: root.sourceOrdinal,
+        availableForClaim: false,
+        unavailableReasons: ["manual_blocker"],
+      });
+      expect(inspected.task.manualBlockerExcerpt).not.toContain(
+        "Verify write permission too.",
+      );
+      const available = output<{ items: Array<{ id: number }> }>(
+        await call("list_tasks", {
+          view: "available",
+          workItemId: root.sourceOrdinal,
+        }),
+      );
+      expect(available.items.map((item) => item.id)).not.toContain(
+        task.sourceOrdinal,
+      );
+      const claimArgs = {
+        id: task.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+        version: inspected.task.version,
+      };
+      await rejectUnchanged(
+        "claim_task",
+        { ...claimArgs, workItemId: prerequisite.sourceOrdinal },
+        "INVALID_REQUEST",
+      );
+      await rejectUnchanged(
+        "claim_task",
+        { ...claimArgs, version: inspected.task.version + 1 },
+        "VERSION_CONFLICT",
+      );
+      const claimed = output<Lease>(await call("claim_task", claimArgs));
+      expect(claimed.task.manualBlocker).toBe(blocker);
+      let credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+      };
+      const context = output<TaskContextPage>(
+        await call("get_task_context", credentials),
+      );
+      expect(context.complete).toBe(true);
+      expect(context.items).toContainEqual({
+        field: "manualBlocker",
+        index: 0,
+        kind: "value",
+        value: blocker,
+      });
+      const owned = await snapshot();
+      expect(
+        errorOutput(
+          await other.client.callTool({
+            name: "actionables.claim_task",
+            arguments: { ...claimArgs, version: credentials.version },
+          }),
+        ).code,
+      ).toBe("ALREADY_CLAIMED");
+      expect(await snapshot()).toEqual(owned);
+      await rejectUnchanged(
+        "transition_task",
+        {
+          ...credentials,
+          claimToken: "x".repeat(43),
+          status: "Researching",
+          reason: "Access verified.",
+        },
+        "INVALID_CLAIM_TOKEN",
+      );
+      await rejectUnchanged(
+        "transition_task",
+        {
+          ...credentials,
+          version: task.version,
+          status: "Researching",
+          reason: "Access verified.",
+        },
+        "VERSION_CONFLICT",
+      );
+      await rejectUnchanged(
+        "transition_task",
+        { ...credentials, status: "In progress", reason: "Access verified." },
+        "INVALID_STATUS_TRANSITION",
+      );
+      for (const reason of [undefined, "", "  ", "--", "ab"]) {
+        await rejectUnchanged(
+          "transition_task",
+          { ...credentials, status: "Researching", reason },
+          "REASON_REQUIRED",
+        );
+      }
+      await rejectUnchanged(
+        "transition_task",
+        { ...credentials, status: "Ready", reason: "Access verified." },
+        "READY_REQUIREMENTS_NOT_MET",
+      );
+      const edge = await prisma.dependencyRelationship.create({
+        data: {
+          dependentId: task.id,
+          prerequisiteId: prerequisite.id,
+          provenance: "test",
+        },
+      });
+      for (const status of ["Researching", "Ready"]) {
+        await rejectUnchanged(
+          "transition_task",
+          { ...credentials, status, reason: "Access verified." },
+          "UNRESOLVED_DEPENDENCIES",
+        );
+      }
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Dismissed" },
+      });
+      await rejectUnchanged(
+        "transition_task",
+        { ...credentials, status: "Researching", reason: "Access verified." },
+        "UNRESOLVED_DEPENDENCIES",
+      );
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Done" },
+      });
+      const reason = "Restored access and write permission were verified.";
+      const mutate = async (name: string, fields: Record<string, unknown>) => {
+        const receipt = output<{
+          version: number;
+          status: string;
+          claimReleased: boolean;
+        }>(await call(name, { ...credentials, ...fields }));
+        credentials = { ...credentials, version: receipt.version };
+        return receipt;
+      };
+      expect(
+        (
+          await mutate("transition_task", {
+            status: "Researching",
+            reason: " " + reason + " ",
+          })
+        ).status,
+      ).toBe("Researching");
+      const resumed = await snapshot();
+      expect(resumed.manualBlockerMd).toBeNull();
+      expect(resumed.activityEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "status-transition",
+            metadataJson: {
+              previousStatus: "Blocked",
+              newStatus: "Researching",
+              origin: "agent:" + agentId,
+              clearedManualBlocker: "true",
+              reason,
+            },
+          }),
+        ]),
+      );
+      expect(resumed.statusHistory).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            previousStatus: "Blocked",
+            newStatus: "Researching",
+            origin: "agent:" + agentId,
+          }),
+        ]),
+      );
+      expect(resumed.dependenciesAsDependent).toEqual([edge]);
+      await mutate("update_task", {
+        appendResearch: ["Resolution verified; implementation can resume."],
+      });
+      await mutate("transition_task", { status: "Ready" });
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Ready" },
+      });
+      await rejectUnchanged(
+        "transition_task",
+        { ...credentials, status: "In progress" },
+        "UNRESOLVED_DEPENDENCIES",
+      );
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Done" },
+      });
+      await mutate("transition_task", { status: "In progress" });
+      await mutate("transition_task", {
+        status: "Blocked",
+        reason: "Access expired again.",
+      });
+      expect(
+        (
+          await mutate("handoff_task", {
+            appendResearch: ["Waiting for access renewal."],
+          })
+        ).claimReleased,
+      ).toBe(true);
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Ready" },
+      });
+      await rejectUnchanged(
+        "claim_task",
+        { ...claimArgs, version: credentials.version },
+        "UNRESOLVED_DEPENDENCIES",
+      );
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Done" },
+      });
+      const fresh = output<InspectAgentTaskResponse>(
+        await call("inspect_task", { id: task.sourceOrdinal }),
+      );
+      expect(fresh.task).toMatchObject({
+        status: "Blocked",
+        unresolvedDependencyCount: 0,
+      });
+      const reclaimed = output<Lease>(
+        await call("claim_task", { ...claimArgs, version: fresh.task.version }),
+      );
+      const recovered = output<Lease>(
+        await call("recover_task_claim", {
+          id: task.sourceOrdinal,
+          version: reclaimed.task.version,
+        }),
+      );
+      credentials = {
+        id: task.sourceOrdinal,
+        version: recovered.task.version,
+        claimToken: recovered.claim.claimToken,
+      };
+      await rejectUnchanged(
+        "transition_task",
+        {
+          ...credentials,
+          claimToken: reclaimed.claim.claimToken,
+          status: "Ready",
+          reason,
+        },
+        "INVALID_CLAIM_TOKEN",
+      );
+      expect(
+        (await mutate("transition_task", { status: "Ready", reason })).status,
+      ).toBe("Ready");
+      expect((await snapshot()).activityEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            metadataJson: {
+              previousStatus: "Blocked",
+              newStatus: "Ready",
+              origin: "agent:" + agentId,
+              clearedManualBlocker: "true",
+              reason,
+            },
+          }),
+        ]),
+      );
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Ready" },
+      });
+      await prisma.dependencyRelationship.update({
+        where: { id: edge.id },
+        data: { waivedAt: new Date() },
+      });
+      const removedPrerequisite = await createTask();
+      await prisma.dependencyRelationship.create({
+        data: {
+          dependentId: task.id,
+          prerequisiteId: removedPrerequisite.id,
+          provenance: "test",
+          removedAt: new Date(),
+        },
+      });
+      const edgesBefore = await prisma.dependencyRelationship.findMany({
+        where: { dependentId: task.id },
+      });
+      await mutate("transition_task", { status: "In progress" });
+      expect(
+        await prisma.dependencyRelationship.findMany({
+          where: { dependentId: task.id },
+        }),
+      ).toEqual(edgesBefore);
+    } finally {
+      await transport.close();
+      await other.transport.close();
+    }
+  });
+
+  it("resumes dependency-only work through discovery after its prerequisite is Done", async () => {
+    const task = await createTask({ research: ["Ready to implement"] });
+    const prerequisite = await createTask();
+    await prisma.dependencyRelationship.create({
+      data: {
+        dependentId: task.id,
+        prerequisiteId: prerequisite.id,
+        provenance: "test",
+      },
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const call = (name: string, args: Record<string, unknown>) =>
+        client.callTool({ name: "actionables." + name, arguments: args });
+      for (const status of ["Ready", "Dismissed"]) {
+        await prisma.actionable.update({
+          where: { id: prerequisite.id },
+          data: { status },
+        });
+        expect(
+          output<{ items: unknown[] }>(
+            await call("list_tasks", {
+              view: "available",
+              workItemId: task.sourceOrdinal,
+            }),
+          ).items,
+        ).toEqual([]);
+        const error = errorOutput(
+          await call("claim_task", {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          }),
+        );
+        expect(error).toMatchObject({
+          code: "UNRESOLVED_DEPENDENCIES",
+          retryMode: "after_state_change",
+          recovery: {
+            action: "resolve_state",
+            guidance: expect.stringContaining(
+              "does not authorize waiving or removing",
+            ),
+          },
+        });
+        expect(
+          await prisma.agentTaskClaim.findUnique({
+            where: { actionableId: task.id },
+          }),
+        ).toBeNull();
+      }
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Done" },
+      });
+      const available = output<{
+        items: Array<{ id: number; version: number }>;
+      }>(
+        await call("list_tasks", {
+          view: "available",
+          workItemId: task.sourceOrdinal,
+        }),
+      );
+      expect(available.items).toHaveLength(1);
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await call("claim_task", {
+          id: task.sourceOrdinal,
+          workItemId: task.sourceOrdinal,
+          version: available.items[0].version,
+        }),
+      );
+      expect(
+        output<{ status: string }>(
+          await call("transition_task", {
+            id: task.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+            version: claimed.task.version,
+            status: "In progress",
+          }),
+        ).status,
+      ).toBe("In progress");
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("recovers discarded credentials only for the owning Codex thread", async () => {
     const task = await createTask({
       status: "Ready",
@@ -4106,6 +4536,7 @@ describe("Actionables MCP", () => {
       Array.from({ length: 36 }, (_, index) =>
         createTask({
           title: `Related ${index} ${"r".repeat(220)}`,
+          status: "Done",
         }),
       ),
     );
@@ -4121,6 +4552,7 @@ describe("Actionables MCP", () => {
       data: {
         finding,
         description,
+        manualBlockerMd: "b".repeat(100_000),
         resolution: "x".repeat(100_000),
         researchJson: json(research),
         validationJson: json(plannedValidation),
@@ -4204,6 +4636,7 @@ describe("Actionables MCP", () => {
         expect.arrayContaining([
           "finding",
           "description",
+          "manualBlocker",
           "resolution",
           "research",
           "plannedValidation",
@@ -4245,6 +4678,7 @@ describe("Actionables MCP", () => {
       const expectedFields = {
         finding,
         description,
+        manualBlocker: "b".repeat(100_000),
         resolution: "x".repeat(100_000),
         research,
         plannedValidation,
@@ -4431,7 +4865,7 @@ describe("Actionables MCP", () => {
     const task = await createTask({ title: "Omission-only detail" });
     const related = await Promise.all(
       Array.from({ length: 12 }, (_, index) =>
-        createTask({ title: `Short related ${index}` }),
+        createTask({ title: `Short related ${index}`, status: "Done" }),
       ),
     );
     await prisma.actionable.update({
@@ -6438,6 +6872,7 @@ describe("Actionables MCP", () => {
         data: {
           version: { increment: 1 },
           description: longText,
+          manualBlockerMd: longText,
           researchJson: json(["", longText, "last note"]),
           validationJson: json(["", longText]),
           filesJson: json([{ path: longText, lines: "1-2" }]),
@@ -6472,6 +6907,7 @@ describe("Actionables MCP", () => {
       expect(pages).toBeGreaterThan(1);
       for (const [field, index, property] of [
         ["description", 0, undefined],
+        ["manualBlocker", 0, undefined],
         ["research", 1, undefined],
         ["plannedValidation", 1, undefined],
         ["files", 0, "path"],

@@ -1032,7 +1032,7 @@ export const claimAgentTaskRequestSchema = z
       .positive()
       .describe("Top-level Actionable ID for the current feature or bug."),
     version: agentTaskVersionInputSchema.describe(
-      "Exact task version returned by list_tasks.",
+      "Exact task version from list_tasks, or inspect_task for an explicitly authorized blocked task.",
     ),
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
@@ -1612,7 +1612,7 @@ export const transitionClaimedAgentTaskRequestSchema = z
       .max(10_000)
       .optional()
       .describe(
-        "Required explanation for blocking, dismissal, reopening, or returning In progress work to Researching.",
+        "Required explanation for blocking, unblocking, dismissal, reopening, or returning In progress work to Researching.",
       ),
   })
   .strict();
@@ -2155,6 +2155,12 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       guidance:
         "Add the required meaningful reason, then submit the corrected request.",
     },
+    UNRESOLVED_DEPENDENCIES: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Use inspect_task to read unresolved prerequisite IDs. Wait until the prerequisites are satisfied, then inspect again and use the current version. Unblocking does not authorize waiving or removing a dependency.",
+    },
     VALIDATION_EVIDENCE_REQUIRED: {
       retryMode: "after_input_change",
       action: "modify_request",
@@ -2207,7 +2213,7 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       retryMode: "after_state_change",
       action: "resolve_state",
       guidance:
-        "Wait until the active claim expires, then re-list available tasks in the same work item before claiming its current version.",
+        "Wait until the active claim expires, then re-list available tasks in the same work item before claiming its current version. For an explicitly authorized blocked task, use inspect_task's current version instead.",
     },
     OWN_CLAIM_ACTIVE: {
       retryMode: "after_state_change",
@@ -2225,7 +2231,7 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       retryMode: "after_state_change",
       action: "reconcile_state",
       guidance:
-        "List mine; if the task is no longer owned, list available in the same work item and claim its current version.",
+        "List mine; if the task is no longer owned, list available in the same work item and claim its current version. For an explicitly authorized blocked task, use inspect_task's current version instead.",
     },
     INVALID_CLAIM_TOKEN: {
       retryMode: "after_state_change",
@@ -2237,7 +2243,7 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       retryMode: "after_state_change",
       action: "reconcile_state",
       guidance:
-        "Re-list available tasks in the same work item and claim the current version.",
+        "Re-list available tasks in the same work item and claim the current version. For an explicitly authorized blocked task, use inspect_task's current version instead.",
     },
     ARCHIVED: {
       retryMode: "after_state_change",
