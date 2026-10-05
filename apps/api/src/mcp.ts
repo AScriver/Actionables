@@ -719,6 +719,28 @@ type HistoryValues = Partial<
   >
 >;
 
+/** Plain-text chunks preserve word boundaries, UTF-16 pairs and CRLF. */
+export function* readableTextChunks(text: string) {
+  let offset = 0;
+  do {
+    let end = Math.min(offset + 1_000, text.length);
+    if (end < text.length) {
+      const boundary = Math.max(
+        text.lastIndexOf("\n", end - 1),
+        text.lastIndexOf(" ", end - 1),
+      );
+      if (boundary >= offset + 500) end = boundary + 1;
+      if (
+        /[\uD800-\uDBFF]/u.test(text[end - 1]!) ||
+        (text[end - 1] === "\r" && text[end] === "\n")
+      )
+        end -= 1;
+    }
+    yield { offset, totalLength: text.length, text: text.slice(offset, end) };
+    offset = end;
+  } while (offset < text.length);
+}
+
 /** Keeps whole values when they fit; large values become independently readable text. */
 function* taskHistoryItems(
   values: HistoryValues,
@@ -736,22 +758,7 @@ function* taskHistoryItems(
           ? [[undefined, value]]
           : Object.entries(value).map(([key, value]) => [key, String(value)]);
       for (const [property, text] of parts) {
-        let offset = 0;
-        do {
-          let end = Math.min(offset + 1_000, text.length);
-          if (end < text.length) {
-            const boundary = Math.max(
-              text.lastIndexOf("\n", end - 1),
-              text.lastIndexOf(" ", end - 1),
-            );
-            if (boundary >= offset + 500) end = boundary + 1;
-            // Preserve UTF-16 pairs and CRLF when no nearby word boundary fits.
-            if (
-              /[\uD800-\uDBFF]/u.test(text[end - 1]!) ||
-              (text[end - 1] === "\r" && text[end] === "\n")
-            )
-              end -= 1;
-          }
+        for (const chunk of readableTextChunks(text)) {
           yield {
             field,
             index,
@@ -759,19 +766,16 @@ function* taskHistoryItems(
             ...(property === undefined
               ? {}
               : { property: historyPropertySchema.parse(property) }),
-            offset,
-            totalLength: text.length,
-            text: text.slice(offset, end),
+            ...chunk,
           };
-          offset = end;
-        } while (offset < text.length);
+        }
       }
     }
   }
 }
 
 /** Bound any native content stream by both serialized size and item count. */
-function readableItemsPage<T>(stream: Iterable<T>, offset: number) {
+export function readableItemsPage<T>(stream: Iterable<T>, offset: number) {
   const items: T[] = [];
   let totalItems = 0;
   let size = 2;
@@ -1421,7 +1425,7 @@ function failure(
   };
 }
 
-async function runTool(
+export async function runTool(
   context: McpToolFailureContext,
   operation: () => Promise<object>,
 ): Promise<CallToolResult> {
@@ -2136,6 +2140,7 @@ export function registerMcpRoutes(
   app: FastifyInstance,
   prisma: AppPrismaClient,
   bearerToken: string,
+  createServer = createActionablesMcpServer,
 ) {
   const onRequest = (request: FastifyRequest, reply: FastifyReply) =>
     authorizeMcpRequest(request, reply, bearerToken);
@@ -2154,7 +2159,7 @@ export function registerMcpRoutes(
   app.get("/mcp", { onRequest }, methodNotAllowed);
   app.delete("/mcp", { onRequest }, methodNotAllowed);
   app.post("/mcp", { onRequest }, async (request, reply) => {
-    const server = createActionablesMcpServer(prisma, {
+    const server = createServer(prisma, {
       correlationId: request.id,
       logger: request.log,
     });

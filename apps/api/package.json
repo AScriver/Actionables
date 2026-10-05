@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@actionables/contracts": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@prisma/adapter-better-sqlite3": "^7.9.0",
     "@prisma/client": "^7.9.0",

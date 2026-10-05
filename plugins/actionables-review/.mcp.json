@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "actionables_review": {
+      "type": "http",
+      "url": "http://127.0.0.1:4184/mcp",
+      "bearer_token_env_var": "ACTIONABLES_CHATGPT_MCP_TOKEN"
+    }
+  }
+}

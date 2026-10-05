@@ -82,6 +82,9 @@ settings, managed installations, and isolated verification commands.
   troubleshoot, and verify Actionables.
 - [Connect Codex through MCP](docs/mcp-agent-tasks.md) — token setup,
   configuration, and the agent workflow.
+- [Local Desktop Actionables review plugin](docs/chatgpt-integration.md) —
+  repository-local marketplace setup, the separate two-tool read-only listener,
+  embedded review card, and isolated synthetic verification.
 - [Local data and historical backups](docs/backup-restore.md) — storage and
   recovery limitations.
 - [Runtime and browser support](docs/support-policy.md) — supported configuration

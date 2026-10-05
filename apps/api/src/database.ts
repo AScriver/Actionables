@@ -45,8 +45,15 @@ export function getDatabaseUrl() {
   return process.env.DATABASE_URL ?? "file:./data/actionables.db";
 }
 
-export function createPrismaClient(databaseUrl = getDatabaseUrl()) {
-  const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
+export function createPrismaClient(
+  databaseUrl = getDatabaseUrl(),
+  readOnly = false,
+) {
+  const adapter = new PrismaBetterSqlite3({
+    url: databaseUrl,
+    readonly: readOnly,
+    fileMustExist: readOnly,
+  });
   return new PrismaClient({ adapter });
 }
 

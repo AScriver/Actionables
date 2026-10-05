@@ -24,9 +24,11 @@ export function safeMarkdownUrl(url: string) {
 export function Markdown({
   children,
   inline = false,
+  inert = false,
 }: {
   children: string;
   inline?: boolean;
+  inert?: boolean;
 }) {
   if (!children.trim()) return null;
   return (
@@ -34,8 +36,15 @@ export function Markdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml
-        urlTransform={safeMarkdownUrl}
+        urlTransform={inert ? () => "" : safeMarkdownUrl}
         components={{
+          ...(inert
+            ? {
+                img: ({ alt }: { alt?: string }) => (
+                  <span>[Image omitted{alt ? `: ${alt}` : ""}]</span>
+                ),
+              }
+            : {}),
           a({ href, children }) {
             if (!href) return <span>{children}</span>;
             const external = /^https?:/i.test(href);

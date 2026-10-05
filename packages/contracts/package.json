@@ -6,6 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./chatgpt": {
+      "types": "./dist/chatgpt.d.ts",
+      "default": "./dist/chatgpt.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
