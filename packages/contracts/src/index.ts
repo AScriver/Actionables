@@ -629,7 +629,7 @@ export const actionableQuerySchema = z.object({
     .default("")
     .transform((value) => parseActionableExcludeFilterKeys(value).join(",")),
   q: z.string().trim().max(500).default(""),
-  sort: actionableSortSchema.default("priority"),
+  sort: actionableSortSchema.default("updated-desc"),
 });
 
 type ActionableExcludeFilterQuery = Partial<

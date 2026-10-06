@@ -317,7 +317,7 @@ test("Done navigation separates completed work and preserves other filters", asy
   const done = await doneResponse.json();
   expect(done.items.length).toBeGreaterThan(0);
 
-  await page.goto("/?sort=updated-desc");
+  await page.goto("/?sort=priority");
   const actionablesButton = page.getByRole("button", {
     name: "Actionables",
     exact: true,
@@ -333,7 +333,7 @@ test("Done navigation separates completed work and preserves other filters", asy
 
   await doneButton.click();
   await expect(page).toHaveURL(/status=Done/);
-  await expect(page).toHaveURL(/sort=updated-desc/);
+  await expect(page).toHaveURL(/sort=priority/);
   await expect(page.getByRole("heading", { name: /^Done \d+$/ })).toBeVisible();
   await expect(doneButton).toHaveClass(/is-selected/);
   await expect(actionablesButton).not.toHaveClass(/is-selected/);
@@ -359,7 +359,7 @@ test("Done navigation separates completed work and preserves other filters", asy
 
   await actionablesButton.click();
   await expect(page).not.toHaveURL(/status=/);
-  await expect(page).toHaveURL(/sort=updated-desc/);
+  await expect(page).toHaveURL(/sort=priority/);
   await expect(
     page.getByRole("heading", { name: /^Actionables \d+$/ }),
   ).toBeVisible();

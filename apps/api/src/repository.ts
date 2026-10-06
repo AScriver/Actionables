@@ -897,7 +897,7 @@ export function actionableQueryRecord(query: ActionableQuery) {
   const excluded = activeActionableExcludeFilterKeys(query);
   if (excluded.length > 0) values.exclude = excluded.join(",");
   if (query.q) values.q = query.q;
-  if (query.sort !== "priority") values.sort = query.sort;
+  if (query.sort !== "updated-desc") values.sort = query.sort;
   return values;
 }
 

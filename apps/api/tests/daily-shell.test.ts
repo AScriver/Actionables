@@ -428,6 +428,44 @@ describe("daily-use shell queries and archive policy", () => {
     }
   });
 
+  it("defaults to newest updates and preserves explicit sort choices after refresh", async () => {
+    const before = await prisma.actionable.findMany({
+      select: { id: true, updatedAt: true },
+    });
+    try {
+      await prisma.actionable.updateMany({
+        data: { updatedAt: new Date("2020-01-01T00:00:00Z") },
+      });
+      await prisma.actionable.update({
+        where: { sourceOrdinal: 2 },
+        data: { updatedAt: new Date("2021-01-01T00:00:00Z") },
+      });
+      const list = async (sort = "") =>
+        (
+          await app.inject({ method: "GET", url: `/api/actionables${sort}` })
+        ).json();
+      expect((await list()).items[0].id).toBe(2);
+      expect((await list()).result.normalizedQuery).toEqual({});
+      await prisma.actionable.update({
+        where: { sourceOrdinal: 1 },
+        data: { updatedAt: new Date("2022-01-01T00:00:00Z") },
+      });
+      expect((await list()).items[0].id).toBe(1);
+      const priority = await list("?sort=priority");
+      expect(priority.items[0].id).toBe(3);
+      expect(priority.result.normalizedQuery).toEqual({ sort: "priority" });
+      expect((await list("?sort=title")).result.normalizedQuery).toEqual({
+        sort: "title",
+      });
+    } finally {
+      for (const row of before)
+        await prisma.actionable.update({
+          where: { id: row.id },
+          data: { updatedAt: row.updatedAt },
+        });
+    }
+  });
+
   it("combines cross-scope discovery, searches technical references, and sorts stably", async () => {
     const params = new URLSearchParams({
       project: scope.projectId,
@@ -463,7 +501,7 @@ describe("daily-use shell queries and archive policy", () => {
     });
     expect(
       excludePriority.json().items.map((item: { id: number }) => item.id),
-    ).toEqual([3, 2, 4, 6, 10]);
+    ).toEqual([10, 6, 4, 3, 2]);
     expect(excludePriority.json().result).toMatchObject({
       matched: 5,
       scopeTotal: 10,
@@ -477,7 +515,7 @@ describe("daily-use shell queries and archive policy", () => {
     });
     expect(
       multipleExclusions.json().items.map((item: { id: number }) => item.id),
-    ).toEqual([2, 4, 6, 10]);
+    ).toEqual([10, 6, 4, 2]);
     expect(multipleExclusions.json().result.normalizedQuery).toEqual({
       priority: "High",
       effort: "M",
@@ -490,7 +528,7 @@ describe("daily-use shell queries and archive policy", () => {
     });
     expect(
       mixedModes.json().items.map((item: { id: number }) => item.id),
-    ).toEqual([2, 4, 6, 10]);
+    ).toEqual([10, 6, 4, 2]);
 
     const canonicalExclusions = await app.inject({
       method: "GET",

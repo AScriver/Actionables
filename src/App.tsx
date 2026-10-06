@@ -6182,7 +6182,7 @@ export default function App() {
         (value === "all" && key !== "status") ||
         (key === "status" && value === "active") ||
         (key === "archived" && value === "active") ||
-        (key === "sort" && value === "priority")
+        (key === "sort" && value === "updated-desc")
       ) {
         delete next[key as keyof ActionableQuery];
       } else {
@@ -6749,7 +6749,7 @@ export default function App() {
   const worktreeName =
     activeWorktree?.name ??
     (activeRepository ? `${activeRepository.name} / All` : "All worktrees");
-  const activeSort = query.sort ?? "priority";
+  const activeSort = query.sort ?? "updated-desc";
   const totalFindings =
     listQuery.data?.counts.total ?? dashboardQuery.data?.counts.total ?? 0;
   const effectiveInspectorWidth = Math.min(

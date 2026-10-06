@@ -62,6 +62,9 @@ suppress the global shortcuts.
 
 The findings table shows **Created** alongside **Updated**, using the same
 local date format. Created retains the original creation date after edits.
+Actionables, Done and Archive grids default to **Updated descending**, so the
+most recently changed records appear first. Choose another column to change
+the sort; click Updated again to reverse its direction.
 
 ## Capture, research, and complete work
 
