@@ -2486,6 +2486,143 @@ describe("Actionables MCP", () => {
     }
   }, 15_000);
 
+  it("keeps branch scopes separate across checkout switches and linked worktrees", async () => {
+    const directory = await mkdtemp(
+      resolve(tmpdir(), "actionables-branch-scope-"),
+    );
+    const checkout = resolve(directory, "main");
+    const linked = resolve(directory, "linked");
+    await mkdir(checkout);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, ...args], {
+        stdio: "pipe",
+        windowsHide: true,
+      });
+    git("init", "--initial-branch=CurrentSprint");
+    await writeFile(resolve(checkout, "README.md"), "Branch scope fixture\n");
+    git("add", "README.md");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-m",
+      "chore(scope): initialize the checkout",
+      "-m",
+      "Create the tracked file needed to attach another Git worktree.",
+    );
+    const project = await prisma.project.create({
+      data: { externalKey: randomUUID(), name: "Branch scope fixture" },
+    });
+    const repository = await prisma.repository.create({
+      data: {
+        externalKey: randomUUID(),
+        name: "MyStotz2023",
+        projectId: project.id,
+        localPath: checkout,
+      },
+    });
+    const original = await prisma.worktree.create({
+      data: {
+        externalKey: randomUUID(),
+        name: "CurrentSprint",
+        localPath: checkout,
+        projectId: project.id,
+        repositoryId: repository.id,
+      },
+    });
+    const { client, transport } = await connectClient();
+    const firstArgs = {
+      idempotencyKey: randomUUID(),
+      repositoryPath: checkout,
+      ensureScope: true,
+      title: "Original branch task",
+      ...validTaskClassification,
+    };
+    type Created = {
+      id: number;
+      scope: { repositoryId: string; worktreeId: string };
+      scopeProvisioning: { worktreeCreated: boolean };
+    };
+    const create = async (repositoryPath = checkout) =>
+      output<Created>(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: {
+            ...firstArgs,
+            idempotencyKey: randomUUID(),
+            repositoryPath,
+          },
+        }),
+      );
+    try {
+      const first = output<Created>(
+        await client.callTool({
+          name: "actionables.create_task",
+          arguments: firstArgs,
+        }),
+      );
+      expect(first.scope.worktreeId).toBe(original.id);
+      git("checkout", "-b", "ascriver/workflow");
+      const workflow = await create();
+      expect(workflow.scope.worktreeId).not.toBe(original.id);
+      expect(
+        await prisma.worktree.findUniqueOrThrow({
+          where: { id: workflow.scope.worktreeId },
+        }),
+      ).toMatchObject({
+        name: "workflow",
+        localPath: await realpath(checkout),
+        repositoryId: repository.id,
+      });
+      expect((await create()).scope).toEqual(workflow.scope);
+      expect(
+        output<Created>(
+          await client.callTool({
+            name: "actionables.create_task",
+            arguments: firstArgs,
+          }),
+        ).scope,
+      ).toEqual(first.scope);
+      git("checkout", "CurrentSprint");
+      expect((await create()).scope).toEqual(first.scope);
+      git("worktree", "add", "-b", "ascriver/linked", linked);
+      const separate = await create(linked);
+      expect(separate.scope.repositoryId).toBe(repository.id);
+      expect(separate.scope.worktreeId).not.toBe(workflow.scope.worktreeId);
+      expect((await create(linked)).scope).toEqual(separate.scope);
+      git("checkout", "-b", "other/workflow");
+      expect((await create()).scope.worktreeId).not.toBe(
+        workflow.scope.worktreeId,
+      );
+      git("checkout", "--detach");
+      const detached = await create();
+      expect((await create()).scope).toEqual(detached.scope);
+      expect(
+        await prisma.worktree.count({
+          where: { repositoryId: repository.id },
+        }),
+      ).toBe(5);
+      expect(
+        (
+          await prisma.actionable.findUniqueOrThrow({
+            where: { sourceOrdinal: first.id },
+          })
+        ).worktreeId,
+      ).toBe(original.id);
+      expect(
+        (
+          await prisma.worktree.findUniqueOrThrow({
+            where: { id: original.id },
+          })
+        ).name,
+      ).toBe("CurrentSprint");
+    } finally {
+      await transport.close();
+    }
+  }, 20_000);
+
   it("selects the longest registered monorepo project and preserves worktree ownership", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "actionables-monorepo-"));
     const checkout = resolve(directory, "main");

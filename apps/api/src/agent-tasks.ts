@@ -1127,6 +1127,7 @@ type ResolvedRepositoryPlacement = {
   requestedPath: string;
   repositoryPath: string;
   worktreePath: string;
+  branchName: string;
   projectName: string;
   repositoryName: string;
   worktreeName: string;
@@ -1158,13 +1159,12 @@ function invalidRepositoryPath(message: string) {
   });
 }
 
-async function gitPath(path: string, argument: string) {
+async function gitValue(path: string, ...argumentsValue: string[]) {
   try {
-    const result = await execFileAsync(
-      "git",
-      ["-C", path, "rev-parse", "--path-format=absolute", argument],
-      { encoding: "utf8", windowsHide: true },
-    );
+    const result = await execFileAsync("git", ["-C", path, ...argumentsValue], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
     return String(result.stdout).trim();
   } catch {
     throw invalidRepositoryPath(
@@ -1189,10 +1189,24 @@ async function resolveRepositoryPlacement(
   }
 
   const worktreePath = normalizedLocalPath(
-    await realpath(await gitPath(localPath, "--show-toplevel")),
+    await realpath(
+      await gitValue(
+        localPath,
+        "rev-parse",
+        "--path-format=absolute",
+        "--show-toplevel",
+      ),
+    ),
   );
   const commonGitDirectory = normalizedLocalPath(
-    await realpath(await gitPath(localPath, "--git-common-dir")),
+    await realpath(
+      await gitValue(
+        localPath,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+    ),
   );
   const repositoryPath = normalizedLocalPath(
     await realpath(
@@ -1202,16 +1216,31 @@ async function resolveRepositoryPlacement(
     ),
   );
   const repositoryName = basename(repositoryPath);
+  let branchName = await gitValue(localPath, "branch", "--show-current");
+  let worktreeName = branchName.split("/").at(-1)!;
+  if (!branchName) {
+    const commit = await gitValue(localPath, "rev-parse", "HEAD");
+    branchName = `HEAD:${commit}`;
+    worktreeName = `detached-${commit.slice(0, 12)}`;
+  }
   return {
     requestedPath: normalizedLocalPath(localPath),
     repositoryPath,
     worktreePath,
+    branchName,
     projectName: repositoryName,
     repositoryName,
-    worktreeName: sameLocalPath(worktreePath, repositoryPath)
-      ? "Default"
-      : basename(worktreePath),
+    worktreeName,
   };
+}
+
+function agentWorktreeKey(
+  repositoryId: string,
+  placement: ResolvedRepositoryPlacement,
+) {
+  return `agent-scope-worktree-${hashToken(
+    `${repositoryId}:${placement.worktreePath.toLowerCase()}:${placement.branchName}`,
+  )}`;
 }
 
 async function findResolvedAgentTaskScope(
@@ -1276,7 +1305,11 @@ async function findResolvedAgentTaskScope(
       )
     : [];
   const worktree = repository?.worktrees.find(
-    (_, index) => worktreeMatches[index],
+    (candidate, index) =>
+      worktreeMatches[index] &&
+      (candidate.externalKey === agentWorktreeKey(repository.id, placement) ||
+        (!candidate.externalKey.startsWith("agent-scope-worktree-") &&
+          candidate.name === placement.branchName)),
   );
   return { repository, worktree };
 }
@@ -1336,9 +1369,7 @@ async function ensureAgentTaskScope(
     }
     const createdWorktree = await transaction.worktree.create({
       data: {
-        externalKey: `agent-scope-worktree-${hashToken(
-          `${repository.id}:${placement.worktreePath.toLowerCase()}`,
-        )}`,
+        externalKey: agentWorktreeKey(repository.id, placement),
         name: placement.worktreeName,
         localPath: placement.worktreePath,
         projectId: repository.projectId,
@@ -1379,9 +1410,7 @@ async function ensureAgentTaskScope(
   });
   const createdWorktree = await transaction.worktree.create({
     data: {
-      externalKey: `agent-scope-worktree-${hashToken(
-        placement.worktreePath.toLowerCase(),
-      )}`,
+      externalKey: agentWorktreeKey(createdRepository.id, placement),
       name: placement.worktreeName,
       localPath: placement.worktreePath,
       projectId: project.id,

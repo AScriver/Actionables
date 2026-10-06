@@ -190,8 +190,13 @@ For MCP creation with `ensureScope`, pass a path inside the intended project.
 The deepest matching registered project directory wins; sibling projects stay
 separate. Ambiguous registrations or a checkout-root path that does not select
 any registered project return a correction error. Explicit scope IDs retain
-their existing behavior. Directory edits require released claims and advance
-the affected scope/task versions without changing their IDs or lifecycle.
+their existing behavior. Automatic placement uses the checkout's current Git
+branch and displays its last name segment, such as **workflow** for
+`ascriver/workflow`. A branch switch creates or reuses a separate row; earlier
+Actionables keep their saved placement. Separate Git checkouts have separate
+rows, and detached HEAD uses a commit-specific row. Directory edits require
+released claims and advance the affected scope/task versions without changing
+their IDs or lifecycle.
 
 ## Organize subtasks
 

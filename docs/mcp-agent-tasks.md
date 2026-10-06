@@ -245,8 +245,8 @@ For a
 top-level task, existing scope IDs
 remain supported. When `repositoryPath` and `ensureScope: true` are supplied
 instead, the server verifies the local Git path, resolves its repository and
-worktree roots, reuses matching active scope records, and atomically creates
-any missing project, repository, or worktree with the task. The response
+worktree roots and current branch, reuses matching active scope records, and
+atomically creates any missing project, repository, or worktree with the task. The response
 reports which scope records were created. Creation does not claim the new task.
 
 `actionables.bulk_create_tasks` and `actionables.bulk_prepare_tasks` accept
@@ -282,7 +282,18 @@ missing, the task lacks creator-thread provenance, another thread created it,
 the item is archived or terminal, or it has an active claim. An expired claim
 is reconciled atomically before dismissal.
 
-Automatic scope provisioning is explicit rather than silent: `repositoryPath` alone is rejected, and `ensureScope` cannot be combined with existing scope IDs or `parentId`. Repository and worktree identity is based on canonical local Git paths, not an agent-invented display name.
+Automatic scope provisioning is explicit: `repositoryPath` alone is rejected,
+and `ensureScope` cannot be combined with existing scope IDs or `parentId`.
+Repository identity uses the canonical Git repository path. Worktree identity
+also includes the canonical checkout path and full current branch name; its
+display name uses the last branch segment. Switching branches in one checkout
+creates or reuses that branch's row without moving earlier tasks. Separate
+checkouts retain separate rows, even for the same branch. Detached HEAD uses the
+full commit identity and a `detached-<short-commit>` display name.
+
+Existing manually named rows are reused only when their name matches the full
+current branch; unmatched legacy rows and their tasks remain unchanged. Exact
+creation retries retain their original placement even after a branch switch.
 
 Claim tokens are secret capabilities. Do not put them in chat, code, files, logs, task text, or validation evidence.
 
