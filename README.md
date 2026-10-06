@@ -83,7 +83,7 @@ settings, managed installations, and isolated verification commands.
 - [Connect Codex through MCP](docs/mcp-agent-tasks.md) — token setup,
   configuration, and the agent workflow.
 - [Local Desktop Actionables review plugin](docs/chatgpt-integration.md) —
-  repository-local marketplace setup, the separate two-tool read-only listener,
+  repository-local marketplace setup, the automatic two-tool read-only process,
   embedded review card, and isolated synthetic verification.
 - [Local data and historical backups](docs/backup-restore.md) — storage and
   recovery limitations.

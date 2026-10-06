@@ -1,9 +1,14 @@
 {
   "mcpServers": {
     "actionables_review": {
-      "type": "http",
-      "url": "http://127.0.0.1:4184/mcp",
-      "bearer_token_env_var": "ACTIONABLES_CHATGPT_MCP_TOKEN"
+      "command": "node",
+      "args": [
+        "C:/Code/Actionables/apps/api/dist/chatgpt-server.js",
+        "--stdio"
+      ],
+      "env": {
+        "DATABASE_URL": "file:C:/Code/Actionables/data/actionables.db"
+      }
     }
   }
 }

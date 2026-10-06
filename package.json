@@ -9,7 +9,7 @@
     "pnpm": "11.9.0"
   },
   "scripts": {
-    "build": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsc -p apps/api/tsconfig.json && tsc -b && vite build",
+    "build": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsc -p apps/api/tsconfig.json && tsc -b && vite build && vite build --config vite.chatgpt.config.ts",
     "build:chatgpt": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsc -p apps/api/tsconfig.json && vite build --config vite.chatgpt.config.ts",
     "start:chatgpt": "node apps/api/dist/chatgpt-server.js",
     "contracts:build": "tsc -p packages/contracts/tsconfig.json",

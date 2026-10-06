@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 
 const inlineResource: Plugin = {
   name: "inline-mcp-review-resource",
+  // Vite emits combined CSS in generateBundle; inline it after that hook.
+  enforce: "post",
   generateBundle(_options, bundle) {
     const javascript: string[] = [];
     const css: string[] = [];

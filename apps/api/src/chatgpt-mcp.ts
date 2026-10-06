@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   registerAppResource,
@@ -233,7 +234,7 @@ async function readReview(
   });
 }
 
-function createChatgptMcpServer(
+export function createChatgptMcpServer(
   prisma: AppPrismaClient,
   context: { correlationId: string; logger: FastifyBaseLogger },
   reviewHtml: string,
@@ -341,6 +342,10 @@ export function buildChatgptApp({
   return app;
 }
 
-export function readReviewHtml(path: string | URL = defaultReviewHtmlPath) {
+export function readReviewHtml(
+  path: string | URL = process.env.CHATGPT_UI_OUT_DIR
+    ? resolve(process.env.CHATGPT_UI_OUT_DIR, "review.html")
+    : defaultReviewHtmlPath,
+) {
   return readFile(path, "utf8");
 }

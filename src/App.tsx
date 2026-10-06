@@ -137,6 +137,7 @@ import {
   codexThreadUrlFromAgentId,
 } from "./codex-links";
 import { Markdown } from "./Markdown";
+import { Badge } from "./Badge";
 import { BulkActionsDialog, type BulkAction } from "./BulkActionsDialog";
 import { safeImportedSourceUrl, safeSourceUrl } from "./source-links";
 
@@ -367,28 +368,6 @@ function AdvancedFilterField({
       </div>
       {children}
     </div>
-  );
-}
-
-function Badge({
-  children,
-  tone,
-  title,
-  ariaLabel,
-}: {
-  children: React.ReactNode;
-  tone: string;
-  title?: string;
-  ariaLabel?: string;
-}) {
-  return (
-    <span
-      className={`badge badge-${tone.toLowerCase().replace(/\s+/g, "-")}`}
-      title={title}
-      aria-label={ariaLabel}
-    >
-      {children}
-    </span>
   );
 }
 

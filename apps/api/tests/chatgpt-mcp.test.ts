@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { chromium, type Browser, type Page } from "@playwright/test";
 import {
@@ -356,6 +357,81 @@ afterAll(async () => {
 });
 
 describe("read-only ChatGPT MCP proof", () => {
+  it("automatically starts and stops a read-only review process without a port or token", async () => {
+    const before = snapshot();
+    const stdioClient = new Client({
+      name: "stdio-review-proof",
+      version: "1",
+    });
+    const stdioTransport = new StdioClientTransport({
+      command: process.execPath,
+      args: [
+        resolve(repoRoot, "node_modules/tsx/dist/cli.mjs"),
+        resolve(repoRoot, "apps/api/src/chatgpt-server.ts"),
+        "--stdio",
+      ],
+      cwd: directory,
+      env: {
+        DATABASE_URL: `file:${databasePath.replaceAll("\\", "/")}`,
+        CHATGPT_UI_OUT_DIR: resolve(directory, "ui"),
+      },
+      stderr: "pipe",
+    });
+    let diagnostics = "";
+    stdioTransport.stderr?.on("data", (chunk) => {
+      diagnostics += String(chunk);
+    });
+    try {
+      await stdioClient.connect(stdioTransport);
+      expect(
+        (await stdioClient.listTools()).tools.map(({ name }) => name).sort(),
+      ).toEqual([
+        "actionables.get_actionable",
+        "actionables.render_actionable_review",
+      ]);
+      const page = output(
+        await stdioClient.callTool({
+          name: "actionables.get_actionable",
+          arguments: { id: 1001 },
+        }),
+      );
+      const rendered = output(
+        await stdioClient.callTool({
+          name: "actionables.render_actionable_review",
+          arguments: {
+            id: 1001,
+            version: page.summary.version,
+            contentHash: page.contentHash,
+          },
+        }),
+      );
+      expect(rendered).toEqual(page);
+      expect(
+        (await stdioClient.readResource({ uri: reviewResourceUri }))
+          .contents[0],
+      ).toMatchObject({ text: html });
+      failure(
+        await stdioClient.callTool({
+          name: "actionables.update_task",
+          arguments: { id: 1001, title: "Unavailable write" },
+        }),
+      );
+      failure(
+        await stdioClient.callTool({
+          name: "actionables.get_actionable",
+          arguments: { id: 999999 },
+        }),
+        "NOT_FOUND",
+      );
+      expect(snapshot()).toEqual(before);
+      expect(diagnostics).toBe("");
+    } finally {
+      const processId = stdioTransport.pid;
+      await stdioClient.close();
+      if (processId) expect(() => process.kill(processId, 0)).toThrow();
+    }
+  });
+
   it("enforces exactly two tools, current UI metadata and server-side write rejection", async () => {
     const before = snapshot();
     const tools = (await client.listTools()).tools;
@@ -788,6 +864,37 @@ describe("actual built MCP Apps resource", () => {
     await frame
       .getByRole("heading", { name: "Synthetic review target" })
       .waitFor();
+    // Keep the dashboard palette even when the enclosing host uses light mode.
+    expect(
+      await frame.locator("body").evaluate((body) => ({
+        background: getComputedStyle(body).backgroundColor,
+        color: getComputedStyle(body).color,
+        colorScheme: getComputedStyle(document.documentElement).colorScheme,
+      })),
+    ).toEqual({
+      background: "rgb(10, 15, 19)",
+      color: "rgb(215, 221, 225)",
+      colorScheme: "dark",
+    });
+    expect(
+      await frame.locator("header .badge-in-progress").evaluate((badge) => ({
+        background: getComputedStyle(badge).backgroundColor,
+        color: getComputedStyle(badge).color,
+      })),
+    ).toEqual({
+      background: "rgb(23, 55, 67)",
+      color: "rgb(139, 215, 233)",
+    });
+    expect(
+      await frame
+        .locator("header .badge-high")
+        .evaluate((badge) => getComputedStyle(badge).color),
+    ).toBe("rgb(255, 118, 95)");
+    expect(
+      await frame
+        .getByRole("button", { name: "Reload review" })
+        .evaluate((button) => getComputedStyle(button).borderRadius),
+    ).toBe("3px");
     expect(
       await page.evaluate(
         () => (window as unknown as { observed: string[] }).observed,

@@ -1,13 +1,13 @@
 {
   "name": "actionables-review",
-  "version": "0.1.0",
-  "description": "Read-only review of a known Actionable through the local Actionables backend.",
+  "version": "0.1.2",
+  "description": "Automatically start a read-only local Actionables review connection.",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Actionables Review",
     "shortDescription": "Review a known local Actionable",
     "category": "Productivity",
     "capabilities": ["Read", "Interactive"],
-    "defaultPrompt": ["Retrieve Actionable 1001 and show its review."]
+    "defaultPrompt": ["Retrieve an Actionable by its ID and show its review."]
   }
 }

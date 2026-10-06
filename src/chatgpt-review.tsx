@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  App,
-  applyDocumentTheme,
-  applyHostStyleVariables,
-} from "@modelcontextprotocol/ext-apps";
+import { App } from "@modelcontextprotocol/ext-apps";
 import {
   actionableReviewPageSchema,
   reviewContentSchema,
@@ -14,6 +10,7 @@ import {
   type ReviewItem,
 } from "@actionables/contracts/chatgpt";
 import { Markdown } from "./Markdown";
+import { Badge } from "./Badge";
 import { actionablesErrorResponseSchema } from "@actionables/contracts";
 import "./chatgpt-review.css";
 
@@ -189,18 +186,9 @@ function Review() {
     bridge.addEventListener("toolcancelled", () =>
       setError("The review request was cancelled."),
     );
-    const style = (context: ReturnType<typeof bridge.getHostContext>) => {
-      if (context?.theme) applyDocumentTheme(context.theme);
-      if (context?.styles?.variables)
-        applyHostStyleVariables(context.styles.variables);
-    };
-    bridge.addEventListener("hostcontextchanged", style);
     bridge
       .connect()
-      .then(() => {
-        style(bridge.getHostContext());
-        setReady(true);
-      })
+      .then(() => setReady(true))
       .catch(() => setError("The review could not connect to its host."));
     // One iframe owns one bridge; no task content is persisted in browser storage.
     return () => {
@@ -279,9 +267,10 @@ function Review() {
     <ul>
       {content[field]?.map((task) => (
         <li key={task.id}>
-          #{task.id} · {task.title} <span className="badge">{task.status}</span>
+          #{task.id} · {task.title}{" "}
+          <Badge tone={task.status}>{task.status}</Badge>
           {task.archiveState.isArchived && (
-            <span className="badge">Archived</span>
+            <Badge tone="Dismissed">Archived</Badge>
           )}
         </li>
       ))}
@@ -291,7 +280,8 @@ function Review() {
     <ul>
       {content[field]?.map((task, index) => (
         <li key={`${task.id}-${index}`}>
-          #{task.id} · {task.title} <span className="badge">{task.status}</span>{" "}
+          #{task.id} · {task.title}{" "}
+          <Badge tone={task.status}>{task.status}</Badge>{" "}
           <strong>{task.state}</strong>
           {task.waiverReason && <Markdown inert>{task.waiverReason}</Markdown>}
         </li>
@@ -314,12 +304,12 @@ function Review() {
             <p className="eyebrow">Actionable #{summary.id} · Read-only</p>
             <h1>{content.title?.[0] ?? summary.title}</h1>
             <div className="badges">
-              <span className="badge">{summary.status}</span>
-              <span className="badge">{summary.priority} priority</span>
+              <Badge tone={summary.status}>{summary.status}</Badge>
+              <Badge tone={summary.priority}>{summary.priority} priority</Badge>
               {summary.archiveState.isArchived && (
-                <span className="badge">
+                <Badge tone="Dismissed">
                   Archived {summary.archiveState.inheritedFrom.join(", ")}
-                </span>
+                </Badge>
               )}
             </div>
             <p className="muted">
@@ -417,10 +407,10 @@ function Review() {
                     </strong>{" "}
                     · {date(record.recordedAt)}
                     {record.qualifiesForCompletion && (
-                      <span className="badge">Qualifies for completion</span>
+                      <Badge tone="Passed">Qualifies for completion</Badge>
                     )}
                     {record.supersededById && (
-                      <span className="badge">Superseded</span>
+                      <Badge tone="Dismissed">Superseded</Badge>
                     )}
                     {record.supersedesId && (
                       <p className="muted">Corrects {record.supersedesId}</p>
@@ -481,6 +471,7 @@ function Review() {
         {page && !page.complete && (
           <button
             type="button"
+            className="primary-action"
             disabled={!ready || busy}
             onClick={() => void read(true)}
           >
@@ -490,6 +481,7 @@ function Review() {
         {identity.current && (
           <button
             type="button"
+            className="toolbar-button"
             disabled={!ready || busy}
             onClick={() => void read(false)}
           >

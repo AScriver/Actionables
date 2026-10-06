@@ -1,41 +1,43 @@
 # Local Desktop Actionables review plugin
 
 This vertical slice exposes one known Actionable for review. It adds two tools,
-one embedded card, and a separate loopback listener. The existing Codex MCP
+one embedded card, and a client-owned local MCP process. The existing Codex MCP
 endpoint and coordination catalog retain their existing behavior.
 
 The primary deployment uses the user's authenticated ChatGPT Desktop/Codex
 environment and a repository-local plugin. No Secure MCP Tunnel, OpenAI Platform
 runtime API key, public endpoint, ngrok, or OpenAI API integration is required.
-The listener and SQLite database stay on this machine. Returned tool content
+The review process and SQLite database stay on this machine. Returned tool content
 still enters the authenticated ChatGPT conversation; local transport does not
 make model processing offline.
 
-The local marketplace installation and Codex runtime discovery are verified.
-**Actual embedded rendering in ChatGPT Desktop remains pending.** The existing
-simulated UI host checks are separate evidence, not desktop acceptance.
+Local installation, automatic STDIO startup and actual Desktop embedded
+rendering are verified. On October 6, 2026, the installed plugin retrieved and
+rendered known tracker ID 954 in Desktop; the user confirmed the visible card
+and its expandable research/validation sections. Synthetic safety checks remain
+separate from that actual-host acceptance.
 
 ## Implemented boundary
 
 ```text
 ChatGPT Desktop / Codex -> local Actionables Review plugin
-                       -> http://127.0.0.1:4184/mcp (read-only listener)
+                       -> automatically started STDIO process (read-only)
                        -> existing getActionable and Actionables domain backend
                        -> existing local Prisma/SQLite database (read-only)
 ```
 
-| File / symbol                                                                                     | Responsibility                                                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/api/src/chatgpt-server.ts` / `startChatgptServer`                                           | Separate executable; explicit existing database, token and port; schema readiness check without migrations or seed. Does not import executable `server.ts` or reconcile Codex configuration. |
-| `apps/api/src/chatgpt-mcp.ts` / `buildChatgptApp`, `readReview`                                   | Exact two-tool catalog and one UI resource. Transactional authoritative reads, privacy projection, archive opt-in, bounded context, version/hash checks. No REST API routes.                 |
-| `apps/api/src/repository.ts` / `getActionable`                                                    | Existing authoritative state, hierarchy, dependencies, readiness and validation derivation. Reused without changes.                                                                          |
-| `apps/api/src/mcp.ts` / `registerMcpRoutes`, `runTool`, `readableItemsPage`, `readableTextChunks` | Shared stateless Streamable HTTP transport, bearer and Host/Origin guards, error classification and native content paging. Existing server factory remains the default.                      |
-| `apps/api/src/database.ts` / `createPrismaClient`                                                 | Optional SQLite `readonly` and `fileMustExist`; existing callers retain writable defaults.                                                                                                   |
-| `packages/contracts/src/chatgpt.ts`                                                               | ChatGPT wire projection and input/output schemas, based on existing domain schemas. Separate `@actionables/contracts/chatgpt` export.                                                        |
-| `src/chatgpt-review.tsx`, `src/chatgpt-review.css`                                                | Focused React card and MCP Apps bridge; read continuations/reload only.                                                                                                                      |
-| `src/Markdown.tsx`                                                                                | Existing Markdown renderer with an opt-in inert mode for this card. Dashboard defaults preserved.                                                                                            |
-| `vite.chatgpt.config.ts`                                                                          | Builds JavaScript/CSS inline into `dist/chatgpt/review.html`; no remote assets.                                                                                                              |
-| `apps/api/tests/chatgpt-mcp.test.ts`                                                              | Synthetic database, real HTTP MCP client, all-table snapshots and actual production bundle browser checks.                                                                                   |
+| File / symbol                                                                                     | Responsibility                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/src/chatgpt-server.ts` / `startChatgptStdioServer`, `startChatgptServer`                | The plugin starts the executable with `--stdio` and its installed database path; no listener, token or port is required. Both transports check schema readiness without migrations or seed. Optional HTTP diagnostics retain bearer and loopback guards. |
+| `apps/api/src/chatgpt-mcp.ts` / `createChatgptMcpServer`, `buildChatgptApp`, `readReview`         | Both transports reuse the exact two-tool catalog and one UI resource. Transactional authoritative reads, privacy projection, archive opt-in, bounded context and version/hash checks. No REST API routes.                                                |
+| `apps/api/src/repository.ts` / `getActionable`                                                    | Existing authoritative state, hierarchy, dependencies, readiness and validation derivation. Reused without changes.                                                                                                                                      |
+| `apps/api/src/mcp.ts` / `registerMcpRoutes`, `runTool`, `readableItemsPage`, `readableTextChunks` | Shared stateless Streamable HTTP transport, bearer and Host/Origin guards, error classification and native content paging. Existing server factory remains the default.                                                                                  |
+| `apps/api/src/database.ts` / `createPrismaClient`                                                 | Optional SQLite `readonly` and `fileMustExist`; existing callers retain writable defaults.                                                                                                                                                               |
+| `packages/contracts/src/chatgpt.ts`                                                               | ChatGPT wire projection and input/output schemas, based on existing domain schemas. Separate `@actionables/contracts/chatgpt` export.                                                                                                                    |
+| `src/chatgpt-review.tsx`, `src/chatgpt-review.css`                                                | Focused React card and MCP Apps bridge; read continuations/reload only.                                                                                                                                                                                  |
+| `src/Markdown.tsx`                                                                                | Existing Markdown renderer with an opt-in inert mode for this card. Dashboard defaults preserved.                                                                                                                                                        |
+| `vite.chatgpt.config.ts`                                                                          | Builds JavaScript/CSS inline into `dist/chatgpt/review.html`; no remote assets.                                                                                                                                                                          |
+| `apps/api/tests/chatgpt-mcp.test.ts`                                                              | Synthetic database, real HTTP MCP client, all-table snapshots and actual production bundle browser checks.                                                                                                                                               |
 
 `actionables.get_actionable` accepts a positive public numeric `id`, optional
 `includeArchived` (default false), and optional `version`, `offset` and
@@ -77,6 +79,14 @@ waived/dismissed prerequisites, plans/readiness, qualifying and superseded
 validation, resolution, research, status history and activity. Native collapsible
 sections keep this smaller than the dashboard. Partial context is labeled;
 stale context is cleared before reload.
+
+The card and dashboard import `src/theme.css` and use the same `Badge`
+component. The shared stylesheet owns the Actionables dark palette,
+typography, status/priority colors, buttons and Markdown styling. The card
+keeps its compact collapsible layout and uses the app theme even when the
+host uses a light theme; host style variables do not override it.
+The inline-resource build runs after Vite emits the stylesheet, so the card
+includes its CSS without external asset requests.
 
 The projection excludes raw imported evidence, file/source locators, workspace
 paths, source threads, ownership/claim metadata and private activity context.
@@ -122,11 +132,21 @@ it. The tests stop their own listener/client/browser; disposable files remain
 in Windows TEMP. Do not run `dev`, `db:setup`, or a sample seed against the
 normal database for this proof.
 
-In a dedicated PowerShell session, start the built listener:
+The STDIO test starts the real executable from an unrelated working directory,
+using the synthetic database and built card. It retrieves/renders 1001, rejects
+write tools and missing IDs, compares all persisted tables, and checks that the
+client stops its process. No port or bearer token is supplied. `CHATGPT_UI_OUT_DIR`
+selects the same resource directory for the build and server in isolated checks.
+
+## Optional HTTP diagnostics
+
+The installed desktop plugin does not use this transport. For an HTTP Inspector
+check, start the built listener in a dedicated PowerShell session:
 
 ```powershell
 $manifest = Get-Content -Raw -LiteralPath '<printed proof.json path>' | ConvertFrom-Json
 $env:DATABASE_URL = $manifest.databaseUrl
+$env:CHATGPT_UI_OUT_DIR = Split-Path -Parent $manifest.reviewHtml
 $env:CHATGPT_MCP_PORT = '4184' # Verify this dedicated port is unused first.
 $env:ACTIONABLES_CHATGPT_MCP_TOKEN = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
 corepack pnpm run start:chatgpt
@@ -135,9 +155,9 @@ corepack pnpm run start:chatgpt
 Startup requires an explicit **absolute** `file:` URL naming an existing migrated
 SQLite file, a token of at least 32 characters, the built UI resource and an
 explicit port. It binds `127.0.0.1`, never migrates/seeds, and has no implicit
-normal database or port fallback. Stop this owned foreground process with
-Ctrl+C. Production connection to the normal database is a later deliberate
-operator decision; use synthetic data for acceptance here.
+database or port fallback. Stop this owned foreground process with Ctrl+C.
+Use synthetic data for these diagnostics; the installed STDIO plugin uses the
+existing normal database read-only.
 
 ## MCP Inspector
 
@@ -174,8 +194,8 @@ confirms metadata/HTML, not a real ChatGPT host render.
 ## Install the repository-local desktop plugin
 
 The minimum package is three JSON files: one marketplace, one plugin manifest,
-and one MCP connection file. It bundles no skills, hooks, backend executable,
-dashboard, auth client, or duplicate domain code. The compatibility manifest
+and one MCP connection file. It starts the existing backend executable and
+bundles no skills, hooks, dashboard, auth client, or duplicate domain code. The compatibility manifest
 format is supported by current OpenAI documentation and verified with this
 host's installed `codex-cli 0.155.0`; migrating it to portable `plugin.json` /
 `mcp.json` is unnecessary for this proof.
@@ -188,6 +208,7 @@ HTTP-to-stdio adapter is needed.
 From this repository root:
 
 ```powershell
+corepack pnpm run build:chatgpt
 codex plugin marketplace add . --json
 codex plugin list --marketplace actionables-local --available --json
 codex plugin add actionables-review@actionables-local --json
@@ -214,39 +235,28 @@ remains the source of truth. An optional trusted repo setting can select it:
 enabled = true
 ```
 
-Do not commit a token or a machine-specific database path. `.mcp.json` connects
-directly to `http://127.0.0.1:4184/mcp` and uses
-`bearer_token_env_var = ACTIONABLES_CHATGPT_MCP_TOKEN`. The installed runtime
-was verified to send this credential as bearer authentication. Desktop must
-inherit the **same** token as the listener: loading it in a child terminal
-cannot alter an already-running desktop process. Fully quit Desktop and launch
-it from the private PowerShell environment containing that token, or configure
-the operator's existing machine-local environment and restart Desktop. Keep
-the listener running in its own session. No Platform key is involved.
+Version 0.1.1 and later use native STDIO: Codex starts
+`node C:/Code/Actionables/apps/api/dist/chatgpt-server.js --stdio` when the
+plugin connects and stops that process when the connection closes. No listener
+needs to be started or kept running, and no port or bearer token is configured.
+This uses the [official Codex STDIO MCP transport](https://developers.openai.com/codex/mcp).
 
-To launch both from one private environment, use the manifest/database/token
-variables established above. Fully quit Desktop yourself first. Then, from
-the repository root:
+This repository-local marketplace targets the existing Windows installation in
+`C:/Code/Actionables`. Its connection file supplies the same explicit absolute
+database URL used by the installed Local Apps launcher. On another installation,
+set that installation's executable/database paths in its local package. The
+server refuses missing files or incompatible schemas; it never creates,
+migrates, seeds or substitutes a database. The main dashboard can be stopped
+while reviews continue, since both read the existing database directly.
 
-```powershell
-$listener = Start-Process -FilePath (Get-Command node).Source -ArgumentList 'apps/api/dist/chatgpt-server.js' -WorkingDirectory (Get-Location).Path -WindowStyle Hidden -PassThru
-# Launch the installed interactive Desktop executable from this same environment.
-Start-Process -FilePath '<installed ChatGPT Desktop / Codex executable>'
-# After acceptance, stop only the listener started above.
-Stop-Process -Id $listener.Id
-```
+The normal `build` also builds the review resource, so rebuilding the dashboard
+does not remove the card. The narrower `build:chatgpt` remains available for
+review-only changes. After package edits, reinstall the plugin and reconnect
+or refresh Desktop once to load its installed copy. No Platform key is involved.
 
-Keep the listener alive throughout the Desktop check; run the last command
-only afterward. Do not launch a second listener while the foreground example
-is already running. A previous private `proof.env` can supply the same three
-values to a new shell without displaying them; it is an operator artifact,
-not plugin content. Sign-in and Desktop plugin selection remain operator steps.
-
-Keep port 4184 dedicated. If it must change, update the plugin's loopback URL
-and `CHATGPT_MCP_PORT` together, then refresh the installed copy. On 401/403,
-verify process environment, port and loopback Host/Origin; retain the existing
-guards. The listener is intentionally started separately so installation
-cannot choose a database, migrate/seed it, or start the writable app.
+Use a public ID from the normal tracker. ID 1001 was a synthetic acceptance
+fixture and may not exist in the normal database. The suggested plugin prompt
+therefore asks for an ID instead of presenting that fixture as normal work.
 
 For acceptance, select only this review integration. The existing full Codex
 coordination server is a separate integration with write tools; it must not be
@@ -265,7 +275,55 @@ or started for this local deployment.
 
 ## Acceptance and evaluation record
 
-Verified on 2026-10-05:
+Desktop acceptance on 2026-10-06:
+
+- The installed 0.1.2 plugin retrieved tracker ID 954, then rendered with the
+  returned version and content hash in the actual Desktop conversation. The
+  user confirmed its title, status and expandable research/validation sections
+  display correctly.
+- The isolated review build and all nine focused tests passed. These independently
+  cover synthetic ID 1001, the exact two-tool catalog, rejected writes, database
+  invariance, startup/shutdown, errors, paging, stale context and shared styling.
+- Actual-host reads used the existing tracker; synthetic mutation rejection and
+  table comparisons used disposable fixtures. The writable coordination MCP
+  remains a separate integration and is not part of the review plugin's catalog.
+
+Version 0.1.2 theme verification on 2026-10-05:
+
+- The installed plugin is version 0.1.2. The dashboard and review card share
+  the existing app theme, badge component, button styles and Markdown styles.
+- The resource-packaging hook now runs after Vite's CSS emission. Previously
+  it removed the JavaScript entry before CSS collection, leaving an empty
+  inline stylesheet. The browser check now verifies computed app colors,
+  badge tones and button styling even under a light host theme.
+- Nine focused review tests, type checks and dashboard/review builds passed.
+  The existing hostile-Markdown, paging, stale-context and unchanged-database
+  checks remain in the suite.
+- A fresh STDIO client retrieved and rendered production ID 954. A local
+  simulated MCP Apps host displayed the actual resource with the app palette
+  and no browser errors. This does not verify the current Desktop host's
+  embedded card; reconnect that connection to load the rebuilt resource.
+
+Version 0.1.1 automatic-start verification on 2026-10-05:
+
+- The local marketplace reports version 0.1.1 installed and enabled. Its cached
+  connection uses STDIO and the installed database, with no URL, port or token.
+- The installed configuration started a review process, exposed exactly the
+  two read-only tools and the 739,356-byte card, rejected write calls, and stopped
+  when the client closed. All normal database tables remained logically identical.
+  Requested ID 1001 returned `NOT_FOUND`; synthetic fixtures were not substituted.
+- A fresh installed Codex runtime discovered `actionables_review` and both tools,
+  then called `actionables.get_actionable` for 1001 through the plugin and received
+  `NOT_FOUND`. This check used an ephemeral in-memory session without a model turn
+  or changes to saved integration settings. The existing Desktop chat still needs
+  to reconnect to load the updated package.
+- Nine focused tests, type checks and the complete build passed. The added
+  isolated test covers automatic STDIO startup, get/render, resource delivery,
+  unavailable writes, missing IDs, unchanged tables and process shutdown.
+- Actual embedded rendering in the current Desktop chat remains unverified;
+  process, transport and resource checks do not establish a visible card render.
+
+Earlier version 0.1.0 HTTP verification on 2026-10-05:
 
 - Local `actionables-local` marketplace registration and installation of
   `actionables-review@actionables-local` passed using the installed CLI.
@@ -305,8 +363,10 @@ Verified on 2026-10-05:
   Apps host with real MCP backend reads, no image/link loads or direct network
   requests. This is not a ChatGPT render result.
 
-Manual ChatGPT evaluation remains pending. Use only the synthetic plugin/fixture
-and record actual tool calls, arguments, card behavior and database comparison:
+Use these scenarios for repeat evaluation. Actual Desktop get/render acceptance
+is recorded above; the broader synthetic scenarios are covered by the isolated
+suite and are not claimed as individually executed Desktop prompts. For fixture
+evaluation, record calls, arguments, card behavior and database comparison:
 
 | Prompt / scenario                                                | Expected behavior                                                                                                    |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -320,14 +380,13 @@ and record actual tool calls, arguments, card behavior and database comparison:
 | “Mark Actionable 1001 Done.”                                     | Explain read-only capability; no write call or claim.                                                                |
 | “Explain photosynthesis.” / “What is invoice 1001?”              | No Actionables invocation merely because a number appears.                                                           |
 
-Final desktop acceptance requires this real path: authenticated ChatGPT Desktop
--> installed local plugin -> read-only listener -> get -> render -> embedded
-card, with synthetic hierarchy,
-dependencies, validation and research displayed, rejected mutation calls, and
-unchanged logical database snapshots afterward. Use the all-table snapshot
-method in the focused test to compare the same synthetic database, rather than
-comparing SQLite file bytes. Record actual Desktop discovery, calls and visible
-rendering separately from Inspector or app-server metadata/resource checks.
+Repeat Desktop acceptance through the real path: authenticated ChatGPT Desktop
+-> installed local plugin -> client-owned read-only process -> get -> render ->
+embedded card. Use a known tracker ID for normal read-only acceptance. Keep
+synthetic hierarchy, dependency, validation, mutation-rejection and database
+invariance checks isolated. Use the all-table snapshot method in the focused
+test, rather than comparing SQLite file bytes. Record actual Desktop calls and
+visible rendering separately from Inspector or simulated-host checks.
 
 Bounded search is explicitly deferred. This proof exposes known-ID retrieval
 and rendering only.
