@@ -10,6 +10,7 @@ import {
   CircleDot,
   Clock3,
   Copy,
+  Ellipsis,
   ExternalLink,
   FileCode2,
   GitBranch,
@@ -398,6 +399,70 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function RepositoryMenu({
+  id,
+  name,
+  archived,
+  onAction,
+}: {
+  id: string;
+  name: string;
+  archived: boolean;
+  onAction: () => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = `repository-menu-${id}`;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="icon-button"
+        ref={triggerRef}
+        style={{ anchorName: `--${menuId}` }}
+        aria-label={`Project options ${name}`}
+        title={`Project options ${name}`}
+        aria-haspopup="menu"
+        popoverTarget={menuId}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          event.currentTarget.click();
+        }}
+      >
+        <Ellipsis aria-hidden="true" />
+      </button>
+      <div
+        id={menuId}
+        className="scope-selector-menu repository-menu"
+        ref={menuRef}
+        style={{ positionAnchor: `--${menuId}` }}
+        popover="auto"
+        role="menu"
+        aria-label={`Project options ${name}`}
+        onToggle={(event) => {
+          if (event.newState === "open") {
+            menuRef.current?.querySelector("button")?.focus();
+          }
+        }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            menuRef.current?.hidePopover();
+            triggerRef.current?.focus();
+            onAction();
+          }}
+        >
+          {archived ? "Restore project" : "Remove project"}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -6617,12 +6682,11 @@ export default function App() {
           !archiveTarget.archived,
         );
         queryClient.setQueryData(["scopes"], scopes);
-        if (
-          archiveTarget.kind === "repository" &&
-          !archiveTarget.archived &&
-          query.repository === archiveTarget.id
-        ) {
-          patchQuery({ repository: "", worktree: "" });
+        if (archiveTarget.kind === "repository" && !archiveTarget.archived) {
+          if (view !== "archive") archiveReturnFocus.current = null;
+          if (query.repository === archiveTarget.id) {
+            patchQuery({ repository: "", worktree: "" });
+          }
         }
       }
       setNotice(
@@ -6940,9 +7004,11 @@ export default function App() {
                     <span>{repository.name}</span>
                     {repository.archivedAt && <Archive aria-label="Archived" />}
                   </button>
-                  <IconButton
-                    label={`${repository.archivedAt ? "Restore" : "Archive"} repository ${repository.name}`}
-                    onClick={() =>
+                  <RepositoryMenu
+                    id={repository.id}
+                    name={repository.name}
+                    archived={Boolean(repository.archivedAt)}
+                    onAction={() =>
                       openArchive(
                         "repository",
                         repository.id,
@@ -6951,9 +7017,7 @@ export default function App() {
                         Boolean(repository.archivedAt),
                       )
                     }
-                  >
-                    {repository.archivedAt ? <ArchiveRestore /> : <Archive />}
-                  </IconButton>
+                  />
                 </div>
                 <div
                   id={`repository-worktrees-${repository.id}`}

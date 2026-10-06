@@ -3,7 +3,10 @@
 The September 7 results below describe the earlier sidebar behavior. Repository
 archive/restore controls were restored on September 17 to support removal from
 active navigation. Archived repositories now appear in the sidebar only in
-**Archive**. See [Manage repositories and projects](how-to.md#manage-repositories-and-projects)
+**Archive**. On October 6, the direct repository archive/restore buttons were
+replaced with a three-dot menu containing **Remove project** or **Restore
+project**. Both choices retain the existing archive confirmation and recovery
+workflow. See [Manage repositories and projects](how-to.md#manage-repositories-and-projects)
 for the current behavior.
 
 Verified September 7, 2026 in `C:\Code\Actionables`, starting from clean commit

@@ -442,6 +442,20 @@ button {
   min-width: 280px;
 }
 
+.repository-menu {
+  position: fixed;
+  inset: auto;
+  top: calc(anchor(bottom) + 4px);
+  right: anchor(right);
+  min-width: 160px;
+  margin: 0;
+  position-try-fallbacks: flip-block;
+}
+
+.repository-menu:not(:popover-open) {
+  display: none;
+}
+
 .scope-selector-menu button {
   display: flex;
   align-items: center;

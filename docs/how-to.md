@@ -155,13 +155,15 @@ confirmation performs no writes; an executing batch must finish before closing.
 
 ## Manage repositories and projects
 
-To remove a repository from active navigation, use its **Archive repository**
-button in **Repositories**, review the affected work, and confirm. The repository
-and its worktrees disappear from the active sidebar and remain hidden after
-refresh. If that repository was selected, its repository/worktree filters clear;
-the project and other filters remain. Open **Archive** to find the repository and
-use **Restore repository** to bring it back. Archiving preserves Actionables,
-relationships, workflow status, history, and all local repository files.
+To remove a repository from active navigation, open its three-dot menu in
+**Repositories**, choose **Remove project**, review the affected work in the
+archive dialog, and confirm. Opening or dismissing the menu makes no changes.
+The repository and its worktrees disappear from the active sidebar and remain
+hidden after refresh. If that repository was selected, its repository/worktree
+filters clear; the project and other filters remain. Open **Archive** to find the repository and
+choose **Restore project** from its three-dot menu to bring it back. Archiving
+preserves Actionables, relationships, workflow status, history, and all local
+repository files.
 
 Manage existing repository assignments under **Settings → Repository projects**.
 Choose another active project or **No project**, then **Save assignment**.

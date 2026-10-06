@@ -82,8 +82,11 @@ test("repositories start collapsed and expand independently with selectable work
   const tree = sidebar.locator(".project-tree");
   await expect(tree.locator(".project-row")).toHaveCount(0);
   await expect(
-    sidebar.getByRole("button", { name: /^Archive repository / }),
+    sidebar.getByRole("button", { name: /^Project options / }),
   ).toHaveCount(repositories.length);
+  await expect(
+    sidebar.getByRole("button", { name: /^Archive repository / }),
+  ).toHaveCount(0);
   await expect(tree.locator(":scope > .repository-group")).toHaveCount(
     repositories.length,
   );
@@ -187,11 +190,63 @@ test("archives and restores repositories from the sidebar while preserving their
   const sidebar = page.getByRole("complementary", {
     name: "Repositories and worktrees",
   });
-  const archiveButton = sidebar.getByRole("button", {
-    name: `Archive repository ${repository.name}`,
+  const optionsButton = sidebar.getByRole("button", {
+    name: `Project options ${repository.name}`,
     exact: true,
   });
-  await expect(archiveButton).toBeVisible();
+  const menu = page.getByRole("menu", {
+    name: `Project options ${repository.name}`,
+    exact: true,
+  });
+  const removeProject = menu.getByRole("menuitem", {
+    name: "Remove project",
+    exact: true,
+  });
+  const openArchiveMenu = async () => {
+    await optionsButton.press("Enter");
+    await removeProject.click();
+    await expect(menu).not.toBeVisible();
+  };
+  await expect(optionsButton).toBeVisible();
+  await expect(optionsButton.locator("svg")).toHaveClass(/lucide-ellipsis/);
+  const initialLocation = page.url();
+  const expander = optionsButton.locator("..").locator(".repository-expander");
+  await optionsButton.click();
+  await expect(removeProject).toBeVisible();
+  await expect(removeProject).toBeFocused();
+  const menuBounds = (await menu.boundingBox())!;
+  const triggerBounds = (await optionsButton.boundingBox())!;
+  expect(menuBounds.x + menuBounds.width).toBeCloseTo(
+    triggerBounds.x + triggerBounds.width,
+    0,
+  );
+  expect(menuBounds.y).toBeCloseTo(
+    triggerBounds.y + triggerBounds.height + 4,
+    0,
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(expander).toHaveAttribute("aria-expanded", "false");
+  expect(page.url()).toBe(initialLocation);
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toBeVisible();
+  await expect(optionsButton).toBeFocused();
+  await optionsButton.press("ArrowDown");
+  await expect(removeProject).toBeFocused();
+  await sidebar.getByText("Repositories", { exact: true }).click();
+  await expect(menu).not.toBeVisible();
+  expect(page.url()).toBe(initialLocation);
+  const beforeArchive: ScopeOptionsResponse = await (
+    await page.request.get("/api/scopes")
+  ).json();
+  const otherRepositories = beforeArchive.projects
+    .flatMap((project) => project.repositories)
+    .filter((candidate) => candidate.id !== repository.id)
+    .map(({ id, archivedAt }) => ({ id, archivedAt }));
+  expect(
+    beforeArchive.projects
+      .flatMap((project) => project.repositories)
+      .find((candidate) => candidate.id === repository.id),
+  ).toMatchObject({ version: repository.version, archivedAt: null });
   const impactUrl = `**/api/archive-impact/repository/${repository.id}`;
   await page.route(impactUrl, (route) =>
     route.fulfill({
@@ -205,7 +260,7 @@ test("archives and restores repositories from the sidebar while preserving their
       },
     }),
   );
-  await archiveButton.press("Enter");
+  await openArchiveMenu();
   const dialog = page.getByRole("dialog", {
     name: `Archive ${repository.name}?`,
   });
@@ -218,13 +273,13 @@ test("archives and restores repositories from the sidebar while preserving their
   );
   await expect(confirm).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(archiveButton).toBeFocused();
+  await expect(optionsButton).toBeFocused();
   await page.unroute(impactUrl);
 
-  await archiveButton.press("Enter");
+  await openArchiveMenu();
   await expect(dialog).toContainText("1 actionable will be effectively hidden");
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(archiveButton).toBeFocused();
+  await expect(optionsButton).toBeFocused();
   await expect(page).toHaveURL(new RegExp(`worktree=${scope.worktreeId}`));
 
   const archiveUrl = `**/api/scopes/repository/${repository.id}/archive`;
@@ -240,7 +295,7 @@ test("archives and restores repositories from the sidebar while preserving their
       },
     }),
   );
-  await archiveButton.click();
+  await openArchiveMenu();
   await confirm.click();
   await expect(dialog.getByRole("alert")).toContainText("newer saved version");
   const unchanged = (
@@ -248,13 +303,13 @@ test("archives and restores repositories from the sidebar while preserving their
   ).item;
   expect(unchanged.archiveState.isArchived).toBe(false);
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(archiveButton).toBeFocused();
+  await expect(optionsButton).toBeFocused();
   await page.unroute(archiveUrl);
 
-  await archiveButton.press("Enter");
+  await openArchiveMenu();
   await confirm.click();
   await expect(dialog).toHaveCount(0);
-  await expect(archiveButton).toHaveCount(0);
+  await expect(optionsButton).toHaveCount(0);
   await expect(
     sidebar.getByRole("button", { name: repository.name, exact: true }),
   ).toHaveCount(0);
@@ -265,7 +320,7 @@ test("archives and restores repositories from the sidebar while preserving their
     Object.fromEntries(filters),
   );
   await page.reload();
-  await expect(archiveButton).toHaveCount(0);
+  await expect(optionsButton).toHaveCount(0);
   const archivedScopes: ScopeOptionsResponse = await (
     await page.request.get("/api/scopes")
   ).json();
@@ -273,6 +328,12 @@ test("archives and restores repositories from the sidebar while preserving their
     (project) => project.id === scope.projectId,
   )!.repositories[0]!;
   expect(archivedRepository.archivedAt).not.toBeNull();
+  expect(
+    archivedScopes.projects
+      .flatMap((project) => project.repositories)
+      .filter((candidate) => candidate.id !== repository.id)
+      .map(({ id, archivedAt }) => ({ id, archivedAt })),
+  ).toEqual(otherRepositories);
   expect(archivedRepository.worktrees[0]!.id).toBe(scope.worktreeId);
   expect(await readFile(localFile, "utf8")).toBe(
     "Keep local repository files.",
@@ -287,14 +348,10 @@ test("archives and restores repositories from the sidebar while preserving their
   });
   await sidebar.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page.locator(`[data-actionable-id="${item.id}"]`)).toBeVisible();
-  const restoreButton = sidebar.getByRole("button", {
-    name: `Restore repository ${repository.name}`,
-    exact: true,
-  });
-  await expect(restoreButton).toBeVisible();
+  await expect(optionsButton).toBeVisible();
   const archivedGroup = sidebar.locator(".repository-group").filter({
     has: page.getByRole("button", {
-      name: `Restore repository ${repository.name}`,
+      name: `Project options ${repository.name}`,
       exact: true,
     }),
   });
@@ -315,7 +372,9 @@ test("archives and restores repositories from the sidebar while preserving their
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open project navigation" }).click();
-  await restoreButton.press("Enter");
+  await optionsButton.press("Enter");
+  await menu.getByRole("menuitem", { name: "Restore project" }).click();
+  await expect(menu).not.toBeVisible();
   const restoreDialog = page.getByRole("dialog", {
     name: `Restore ${repository.name}?`,
   });
@@ -350,7 +409,7 @@ test("archives and restores repositories from the sidebar while preserving their
   );
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/?q=${encodeURIComponent(item.title)}`);
-  await expect(archiveButton).toBeVisible();
+  await expect(optionsButton).toBeVisible();
   await expect(page.locator(`[data-actionable-id="${item.id}"]`)).toBeVisible();
 });
 
