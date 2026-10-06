@@ -7780,6 +7780,7 @@ export default function App() {
                   )}
                 </button>
               </div>
+              <div role="columnheader">Created</div>
             </div>
             <div
               className="table-body"
@@ -7971,6 +7972,11 @@ export default function App() {
                     </div>
                     <div role="cell" className="updated-cell">
                       {new Date(item.updatedAt).toLocaleDateString()}
+                    </div>
+                    <div role="cell" className="updated-cell">
+                      <time dateTime={item.createdAt}>
+                        {new Date(item.createdAt).toLocaleDateString()}
+                      </time>
                     </div>
                   </div>
                 );

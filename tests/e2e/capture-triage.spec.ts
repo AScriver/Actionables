@@ -188,7 +188,10 @@ test("tags stay visible in the list and filter related work without opening it",
     page
       .getByRole("table", { name: "Actionable findings" })
       .getByRole("columnheader"),
-  ).toHaveCount(5);
+  ).toHaveCount(6);
+  await expect(
+    page.getByRole("columnheader", { name: "Created", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("columnheader", { name: "Worktree", exact: true }),
   ).toHaveCount(0);

@@ -60,6 +60,9 @@ URL. Keyboard shortcuts include `/` for search, `j`/`k` for row movement,
 **Enter** to open, `e` to edit, and `c` to create; typing fields and dialogs
 suppress the global shortcuts.
 
+The findings table shows **Created** alongside **Updated**, using the same
+local date format. Created retains the original creation date after edits.
+
 ## Capture, research, and complete work
 
 Choose **New actionable**, select its project/repository/worktree, and record

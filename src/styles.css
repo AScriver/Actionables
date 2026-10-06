@@ -760,9 +760,9 @@ button {
   display: grid;
   grid-template-columns:
     minmax(280px, 4.55fr) minmax(82px, 0.8fr) minmax(92px, 0.9fr)
-    minmax(65px, 0.55fr) minmax(83px, 0.7fr);
+    minmax(65px, 0.55fr) minmax(83px, 0.7fr) minmax(83px, 0.7fr);
   align-items: center;
-  min-width: 634px;
+  min-width: 717px;
 }
 
 .table-header {
@@ -3359,8 +3359,10 @@ button {
 
   .table-header > :nth-child(3),
   .table-header > :nth-child(4),
+  .table-header > :nth-child(6),
   .finding-row > :nth-child(3),
-  .finding-row > :nth-child(4) {
+  .finding-row > :nth-child(4),
+  .finding-row > :nth-child(6) {
     display: none;
   }
 
