@@ -283,7 +283,10 @@ describe("Actionables API", () => {
         (item: { status: string }) => item.status === "Inbox",
       ),
     ).toBe(true);
-    expect(payload.items[0].statusProvenance).toMatchObject({
+    expect(
+      payload.items.find((item: { id: number }) => item.id === 1)
+        .statusProvenance,
+    ).toMatchObject({
       kind: "neutral-import",
       suggestedStatus: "Ready",
     });
