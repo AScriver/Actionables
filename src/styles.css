@@ -3186,8 +3186,8 @@ button {
   }
 
   .table-grid {
-    min-width: 525px;
-    grid-template-columns: minmax(245px, 4fr) 76px 84px 50px 66px;
+    min-width: 591px;
+    grid-template-columns: minmax(245px, 4fr) 76px 84px 50px 66px 66px;
   }
 
   .worktree-row {
@@ -3222,8 +3222,8 @@ button {
   }
 
   .table-grid {
-    min-width: 555px;
-    grid-template-columns: minmax(250px, 4fr) 82px 92px 60px 76px;
+    min-width: 631px;
+    grid-template-columns: minmax(250px, 4fr) 82px 92px 60px 76px 76px;
   }
 }
 
