@@ -198,6 +198,17 @@ button {
   background: var(--surface-hover);
 }
 
+.repository-row > .icon-button {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.repository-row:hover > .icon-button,
+.repository-row > .icon-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .repository-expander:focus-visible,
 .repository-select:focus-visible {
   outline: 1px solid var(--accent);

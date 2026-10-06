@@ -211,6 +211,17 @@ test("archives and restores repositories from the sidebar while preserving their
   await expect(optionsButton.locator("svg")).toHaveClass(/lucide-ellipsis/);
   const initialLocation = page.url();
   const expander = optionsButton.locator("..").locator(".repository-expander");
+  await expect(optionsButton).toHaveCSS("opacity", "0");
+  await expect(optionsButton).toHaveCSS("pointer-events", "none");
+  await optionsButton.locator("..").hover();
+  await expect(optionsButton).toHaveCSS("opacity", "1");
+  await sidebar.getByText("Repositories", { exact: true }).hover();
+  await expect(optionsButton).toHaveCSS("opacity", "0");
+  await optionsButton.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(optionsButton).toBeFocused();
+  await expect(optionsButton).toHaveCSS("opacity", "1");
+  await optionsButton.locator("..").hover();
   await optionsButton.click();
   await expect(removeProject).toBeVisible();
   await expect(removeProject).toBeFocused();

@@ -155,9 +155,11 @@ confirmation performs no writes; an executing batch must finish before closing.
 
 ## Manage repositories and projects
 
-To remove a repository from active navigation, open its three-dot menu in
-**Repositories**, choose **Remove project**, review the affected work in the
-archive dialog, and confirm. Opening or dismissing the menu makes no changes.
+To remove a repository from active navigation, hover its row in **Repositories**
+to reveal the three-dot button, open its menu, choose **Remove project**, and
+review the affected work in the
+archive dialog, and confirm. Keyboard focus also reveals the button. Opening or
+dismissing the menu makes no changes.
 The repository and its worktrees disappear from the active sidebar and remain
 hidden after refresh. If that repository was selected, its repository/worktree
 filters clear; the project and other filters remain. Open **Archive** to find the repository and
