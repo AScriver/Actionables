@@ -472,6 +472,7 @@ describe("Actionables MCP", () => {
           "actionables.bulk_prepare_tasks",
           "actionables.list_tasks",
           "actionables.inspect_task",
+          "actionables.reopen_task",
           "actionables.create_dependency",
           "actionables.remove_dependency",
           "actionables.search_completed_tasks",
@@ -3006,6 +3007,197 @@ describe("Actionables MCP", () => {
           },
         }),
       ).toBe(1);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("reopens authorized terminal work with audited ancestors and normal claim guards", async () => {
+    const root = await createTask({ status: "Done" });
+    const parent = await createTask({ status: "Done" });
+    const child = await createTask({
+      status: "Dismissed",
+      research: ["Existing acceptance needs more DEV checks."],
+    });
+    const unrelated = await createTask({ status: "Done" });
+    const prerequisite = await createTask();
+    await prisma.hierarchyRelationship.createMany({
+      data: [
+        { parentId: root.id, childId: parent.id, provenance: "test" },
+        { parentId: parent.id, childId: child.id, provenance: "test" },
+      ],
+    });
+    const { client, transport } = await connectClient();
+    const args = {
+      id: child.sourceOrdinal,
+      workItemId: root.sourceOrdinal,
+      version: child.version,
+      reason: "User requested additional local DEV acceptance.",
+    };
+    const reopen = (overrides = {}) =>
+      client.callTool({
+        name: "actionables.reopen_task",
+        arguments: { ...args, ...overrides },
+      });
+    try {
+      expect(
+        errorOutput(await reopen({ workItemId: unrelated.sourceOrdinal })).code,
+      ).toBe("INVALID_REQUEST");
+      expect(
+        errorOutput(await reopen({ version: child.version + 1 })).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(errorOutput(await reopen({ reason: "..." })).code).toBe(
+        "REASON_REQUIRED",
+      );
+      expect(errorOutput(await reopen({ reason: "" })).code).toBe(
+        "INVALID_REQUEST",
+      );
+      await prisma.actionable.update({
+        where: { id: parent.id },
+        data: { archivedAt: new Date() },
+      });
+      expect(errorOutput(await reopen()).code).toBe("ARCHIVED");
+      await prisma.actionable.update({
+        where: { id: parent.id },
+        data: { archivedAt: null, status: "Dismissed" },
+      });
+      expect(errorOutput(await reopen()).code).toBe("TERMINAL");
+      await prisma.actionable.update({
+        where: { id: parent.id },
+        data: { status: "Done" },
+      });
+      await prisma.agentTaskClaim.create({
+        data: {
+          actionableId: parent.id,
+          agentId: "codex:other",
+          claimTokenHash: "private-claim-hash",
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      expect(errorOutput(await reopen()).code).toBe("ALREADY_CLAIMED");
+      await prisma.agentTaskClaim.delete({
+        where: { actionableId: parent.id },
+      });
+      expect(
+        await prisma.actionableStatusHistory.count({
+          where: { actionableId: { in: [root.id, parent.id, child.id] } },
+        }),
+      ).toBe(0);
+      await prisma.dependencyRelationship.create({
+        data: {
+          dependentId: child.id,
+          prerequisiteId: prerequisite.id,
+          provenance: "test",
+        },
+      });
+      const result = output<{
+        version: number;
+        affectedTasks: Array<{ id: number; version: number; status: string }>;
+      }>(await reopen());
+      expect(result).toMatchObject({
+        id: child.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+        status: "Ready",
+        unresolvedDependencyCount: 1,
+      });
+      expect(result.affectedTasks).toEqual(
+        expect.arrayContaining(
+          [root, parent, child].map((task) => ({
+            id: task.sourceOrdinal,
+            version: task.version + 1,
+            status: "Ready",
+          })),
+        ),
+      );
+      expect(result.affectedTasks).toHaveLength(3);
+      expect(JSON.stringify(result)).not.toContain("claimToken");
+      expect(
+        await prisma.agentTaskClaim.count({
+          where: { actionableId: { in: [root.id, parent.id, child.id] } },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.actionableStatusHistory.findFirst({
+          where: { actionableId: child.id },
+        }),
+      ).toMatchObject({
+        previousStatus: "Dismissed",
+        newStatus: "Ready",
+        origin: `agent:${agentId}`,
+      });
+      expect(
+        await prisma.activityEvent.findMany({
+          where: {
+            actionableId: { in: [root.id, parent.id] },
+            type: "parent-auto-reopened",
+          },
+        }),
+      ).toHaveLength(2);
+      expect(errorOutput(await reopen()).code).toBe("VERSION_CONFLICT");
+      expect(errorOutput(await reopen({ version: result.version })).code).toBe(
+        "INVALID_STATUS_TRANSITION",
+      );
+      const claimArgs = {
+        id: child.sourceOrdinal,
+        workItemId: root.sourceOrdinal,
+        version: result.version,
+      };
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.claim_task",
+            arguments: claimArgs,
+          }),
+        ).code,
+      ).toBe("UNRESOLVED_DEPENDENCIES");
+      await prisma.actionable.update({
+        where: { id: prerequisite.id },
+        data: { status: "Done" },
+      });
+      const available = output<{ items: Array<{ id: number }> }>(
+        await client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "available", workItemId: root.sourceOrdinal },
+        }),
+      );
+      expect(
+        available.items.some((task) => task.id === child.sourceOrdinal),
+      ).toBe(true);
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: claimArgs,
+        }),
+      );
+      output(
+        await client.callTool({
+          name: "actionables.release_task",
+          arguments: {
+            id: child.sourceOrdinal,
+            claimToken: claimed.claim.claimToken,
+          },
+        }),
+      );
+      const reopenedRoot = output(
+        await reopen({
+          id: unrelated.sourceOrdinal,
+          workItemId: unrelated.sourceOrdinal,
+          version: unrelated.version,
+        }),
+      );
+      expect(reopenedRoot).toMatchObject({
+        status: "Ready",
+        affectedTasks: [
+          {
+            id: unrelated.sourceOrdinal,
+            version: unrelated.version + 1,
+            status: "Ready",
+          },
+        ],
+      });
     } finally {
       await transport.close();
     }

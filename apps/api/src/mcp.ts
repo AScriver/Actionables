@@ -23,6 +23,8 @@ import {
   bulkPrepareAgentTasksResponseSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
+  reopenAgentTaskRequestSchema,
+  reopenAgentTaskReceiptSchema,
   handoffClaimedAgentTaskRequestSchema,
   inspectAgentTaskRequestSchema,
   inspectAgentTaskResponseSchema,
@@ -68,6 +70,7 @@ import {
   claimAgentTaskWithProjection,
   createAgentTask,
   dismissAgentTaskWithProjection,
+  reopenAgentTask,
   getClaimedAgentTask,
   getClaimedCompletionSnapshot,
   completeClaimedAgentTask,
@@ -435,6 +438,7 @@ const toolInputSchemas = {
   "actionables.bulk_prepare_tasks": bulkPrepareAgentTasksRequestSchema,
   "actionables.list_tasks": listTasksSchema,
   "actionables.inspect_task": inspectAgentTaskRequestSchema,
+  "actionables.reopen_task": reopenAgentTaskRequestSchema,
   "actionables.create_dependency": createAgentDependencyRequestSchema,
   "actionables.remove_dependency": removeAgentDependencyRequestSchema,
   "actionables.search_completed_tasks": searchCompletedTasksRequestSchema,
@@ -1788,6 +1792,21 @@ function createActionablesMcpServer(
     (input) =>
       runReadTool("actionables.inspect_task", () =>
         inspectAgentTask(prisma, input),
+      ),
+  );
+  server.registerTool(
+    "actionables.reopen_task",
+    {
+      title: "Reopen explicitly authorized terminal work",
+      description:
+        "Reopen an explicitly authorized Done or Dismissed task to Ready using its inspected id, original workItemId, exact version and meaningful reason. Reuses audited dashboard transitions and completed-ancestor reopening. Rejects archived records, active claims on affected records, and dismissed governing ancestors. Returns every affected ID/version (at most 100) and remaining dependency count. Preserves dependencies and does not claim; continue with normal list and claim. Inspection alone never authorizes reopening. On uncertain delivery inspect the affected task and ancestors before retrying.",
+      inputSchema: toolInputSchemas["actionables.reopen_task"],
+      outputSchema: reopenAgentTaskReceiptSchema,
+      annotations: { ...mutation, destructiveHint: true },
+    },
+    (input, extra) =>
+      runMutationTool("actionables.reopen_task", () =>
+        reopenAgentTask(prisma, input, { threadId: requestThreadId(extra) }),
       ),
   );
   server.registerTool(

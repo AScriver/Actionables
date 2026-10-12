@@ -1641,6 +1641,59 @@ export const dismissAgentTaskRequestSchema = z
   })
   .strict();
 
+export const reopenAgentTaskRequestSchema = z
+  .object({
+    id: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Explicit terminal Actionable ID authorized for continued work.",
+      ),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe("Original top-level work-item ID from inspect_task."),
+    version: agentTaskVersionInputSchema.describe(
+      "Exact current task version returned by inspect_task.",
+    ),
+    reason: z
+      .string()
+      .trim()
+      .min(3)
+      .max(10_000)
+      .describe(
+        "Required explanation of the explicitly authorized additional work.",
+      ),
+  })
+  .strict();
+
+export const reopenAgentTaskReceiptSchema = z
+  .object({
+    id: z.number().int().positive(),
+    workItemId: z.number().int().positive(),
+    version: z.number().int().positive(),
+    status: z.literal("Ready"),
+    affectedTasks: z
+      .array(
+        z
+          .object({
+            id: z.number().int().positive(),
+            version: z.number().int().positive(),
+            status: z.literal("Ready"),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+    unresolvedDependencyCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ReopenAgentTaskRequest = z.infer<
+  typeof reopenAgentTaskRequestSchema
+>;
+
 export const recordClaimedAgentTaskValidationRequestSchema = z
   .object({
     ...claimedAgentMutationFields,
@@ -2274,7 +2327,7 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       retryMode: "after_state_change",
       action: "resolve_state",
       guidance:
-        "Do not retry the claim or mutation. Inspect terminal work read-only with scoped list_tasks or get_task using workItemId. Continued work requires an explicitly authorized, reasoned dashboard reopen before normal list and claim.",
+        "Do not retry the claim or mutation. Inspect terminal work read-only. Only explicitly authorized continued work may use actionables.reopen_task with id, original workItemId, current version and a meaningful reason, followed by normal list and claim. Older servers require the dashboard reopen.",
     },
     TERMINAL_READ_INVALIDATED: {
       retryMode: "never",

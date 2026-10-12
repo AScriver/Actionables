@@ -2456,14 +2456,13 @@ export async function updateActionable(
     : prisma.$transaction(operation);
 }
 
-/** Reopens completed ancestors of unfinished work, retaining an audited history. */
-export async function reopenCompletedAncestors(
+/** Predict the completed records reopened when this task becomes unfinished. */
+export async function completedAncestorsToReopen(
   transaction: TransactionClient,
   child: { id: string; sourceOrdinal: number },
-  reason: string,
-  origin: "child-reopen" | "hierarchy-change",
+  becomingUnfinished = false,
 ) {
-  const parents = await transaction.$queryRaw<
+  return transaction.$queryRaw<
     Array<{ id: string; sourceOrdinal: number; version: number }>
   >`
     WITH RECURSIVE descendants(id) AS (
@@ -2476,6 +2475,7 @@ export async function reopenCompletedAncestors(
       SELECT task.id FROM Actionable task
       JOIN descendants ON descendants.id = task.id
       WHERE task.status NOT IN ('Done', 'Dismissed')
+        OR (${becomingUnfinished} AND task.id = ${child.id})
       UNION
       SELECT edge.parentId FROM HierarchyRelationship edge
       JOIN ancestors ON edge.childId = ancestors.id
@@ -2484,8 +2484,19 @@ export async function reopenCompletedAncestors(
     SELECT task.id, task.sourceOrdinal, task.version FROM Actionable task
     JOIN ancestors ON ancestors.id = task.id
     WHERE task.status = 'Done'
+      AND (NOT ${becomingUnfinished} OR task.id != ${child.id})
     ORDER BY task.sourceOrdinal
   `;
+}
+
+/** Reopens completed ancestors of unfinished work, retaining an audited history. */
+export async function reopenCompletedAncestors(
+  transaction: TransactionClient,
+  child: { id: string; sourceOrdinal: number },
+  reason: string,
+  origin: "child-reopen" | "hierarchy-change",
+) {
+  const parents = await completedAncestorsToReopen(transaction, child);
   for (const parent of parents) {
     const updated = await transaction.actionable.updateMany({
       where: { id: parent.id, version: parent.version, status: "Done" },

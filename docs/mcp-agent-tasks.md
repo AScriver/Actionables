@@ -300,6 +300,22 @@ missing, the task lacks creator-thread provenance, another thread created it,
 the item is archived or terminal, or it has an active claim. An expired claim
 is reconciled atomically before dismissal.
 
+`actionables.reopen_task` accepts an explicitly authorized terminal `id`, its
+original `workItemId`, current inspected `version` and a meaningful `reason`.
+It reuses the dashboard's audited Ready transition and completed-ancestor
+reopening in one transaction. Archived affected records, active claims, stale
+versions and dismissed governing ancestors reject the operation. Reopen a
+dismissed ancestor explicitly first. The receipt returns all affected IDs and
+versions (at most 100 per call) and the remaining dependency count. Dependencies
+are preserved and no claim is acquired; continue through normal list and claim.
+After uncertain delivery, inspect the task and ancestors before retrying.
+
+Malformed arguments are rejected before SDK dispatch using the same strict
+schemas as the advertised tools. The bounded `INVALID_REQUEST` response uses
+the normal recovery contract, preserves public field guidance and omits raw
+argument values and arbitrary keys. A valid inspection ID may yield a minimal
+safe read call; the server never guesses a selected task from its root ID.
+
 Automatic scope provisioning is explicit: `repositoryPath` alone is rejected,
 and `ensureScope` cannot be combined with existing scope IDs or `parentId`.
 Repository identity uses the canonical Git repository path. Worktree identity
@@ -510,9 +526,9 @@ evidence and verify relevant claims against current code. A source change or
 passing test does not establish support in the currently installed runtime.
 
 Terminal inspection never reopens work. Continued work requires explicit user
-authorization and the existing dashboard transition from Done or Dismissed to
-Ready, including its required audited reason, before the normal list and claim
-flow resumes. A separately authorized new follow-up is a new Actionable; do not
+authorization and `actionables.reopen_task` (or the reasoned dashboard transition
+on older servers) before the normal list and claim flow resumes. A separately
+authorized new follow-up is a new Actionable; do not
 claim a relationship unless one was actually recorded.
 
 Use `appendResearch`, `appendPlannedValidation`, and `addUserSources` when adding evidence or planned checks. The replacement fields remain available for intentional rewrites, but a call cannot replace and append the same collection at once. Exact duplicate appended research notes and added source references are ignored.
@@ -656,7 +672,7 @@ write gate requires orchestration support and is outside this endpoint.
 
 ## Tool inventory
 
-The endpoint registers 23 tools. The names below are MCP names; a client may
+The endpoint registers 24 tools. The names below are MCP names; a client may
 display them with its own server prefix.
 
 - `actionables.create_task`
@@ -679,6 +695,7 @@ display them with its own server prefix.
 - `actionables.update_task`
 - `actionables.transition_task`
 - `actionables.dismiss_task`
+- `actionables.reopen_task`
 - `actionables.record_task_validation`
 - `actionables.handoff_task`
 - `actionables.release_task`

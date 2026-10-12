@@ -19,6 +19,8 @@ const instructionsEnd = "<!-- actionables-agent-instructions:end -->";
 const mcpBearerTokenEnvironmentVariable = "ACTIONABLES_MCP_TOKEN";
 const actionablesMcpTableHeader = "[mcp_servers.actionables]";
 const knownLegacySkillHashes = new Set([
+  "4c2dd140ac168365c66e63b1864664563abd0ee1194ebf1f0ffda1fa607fc706",
+  "6334eb658c6e49bf6be95d7d084550b5924a685c229f3ac2fada8878d8012452",
   "80a7569391c076b7951ecda93c2739dde0a508b5f234c04726069573038d4406",
   "7037100eff22b05f22e618ce470524566dc28e1982bdaf6c31600d19f46aa714",
   "18e2cae371939f2dfc966d5d0354d633653959fe4e61c7a6a6a1f6f283818002",

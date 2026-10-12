@@ -29,6 +29,8 @@ import {
   claimAgentTaskResponseSchema,
   createAgentTaskRequestSchema,
   dismissAgentTaskRequestSchema,
+  reopenAgentTaskRequestSchema,
+  reopenAgentTaskReceiptSchema,
   handoffClaimedAgentTaskRequestSchema,
   inspectAgentTaskRequestSchema,
   inspectAgentTaskResponseSchema,
@@ -59,6 +61,7 @@ import {
   type ClaimAgentTaskResponse,
   type CreateAgentTaskRequest,
   type DismissAgentTaskRequest,
+  type ReopenAgentTaskRequest,
   type HandoffClaimedAgentTaskRequest,
   type InspectAgentTaskRequest,
   type InspectAgentTaskResponse,
@@ -94,6 +97,7 @@ import {
   recordValidationWithRecord,
   requiredReason,
   transitionActionable,
+  completedAncestorsToReopen,
   updateActionable,
   VersionConflictError,
 } from "./repository.js";
@@ -2758,6 +2762,125 @@ export function transitionClaimedAgentTaskWithProjection<T>(
     now,
     projectResponse,
   ) as Promise<T>;
+}
+
+/** Reopen only explicitly authorized terminal work, without acquiring a claim. */
+export async function reopenAgentTask(
+  prisma: AppPrismaClient,
+  input: ReopenAgentTaskRequest,
+  caller: AgentTaskCaller,
+  now = new Date(),
+) {
+  const request = parseInput(reopenAgentTaskRequestSchema, input);
+  return withClaimLock(String(request.id), () =>
+    prisma.$transaction(async (tx) => {
+      const root = await requireWorkItem(tx, request.workItemId, {
+        allowTerminal: true,
+      });
+      const row = await findTask(tx, request.id);
+      if (!row)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      await requireTaskInWorkItem(tx, row, root);
+      if (row.version !== request.version)
+        throw new AgentTaskClaimError(
+          "VERSION_CONFLICT",
+          "The task changed after inspection.",
+          undefined,
+          row.version,
+        );
+      if (!terminalStatuses.includes(row.status))
+        throw new DomainValidationError(
+          "INVALID_STATUS_TRANSITION",
+          {
+            status: [
+              "Inspect the active task and use the normal claim workflow.",
+            ],
+          },
+          "Only Done or Dismissed work can be reopened.",
+        );
+      requiredReason(
+        request.reason,
+        "reason",
+        "Explain the authorized additional work.",
+        true,
+      );
+      let ancestor = row;
+      while (ancestor.hierarchyAsChild[0]) {
+        ancestor = (await findTask(
+          tx,
+          ancestor.hierarchyAsChild[0].parent.sourceOrdinal,
+        ))!;
+        if (isArchived(ancestor))
+          throw new AgentTaskClaimError(
+            "ARCHIVED",
+            "An ancestor is archived; restore it before reopening.",
+          );
+        if (ancestor.status === "Dismissed")
+          throw new AgentTaskClaimError(
+            "TERMINAL",
+            "Explicitly reopen the dismissed ancestor before this task.",
+          );
+      }
+      const affected = [
+        row,
+        ...(await completedAncestorsToReopen(tx, row, true)),
+      ];
+      if (affected.length > 100)
+        throw new AgentTaskClaimError(
+          "INVALID_REQUEST",
+          "Reopen completed ancestors in smaller explicit steps; at most 100 records may change.",
+        );
+      for (const item of affected) {
+        const task = (await findTask(tx, item.sourceOrdinal))!;
+        await requireTaskInWorkItem(tx, task, root);
+        if (isArchived(task))
+          throw new AgentTaskClaimError(
+            "ARCHIVED",
+            "An affected task is archived; restore it before reopening.",
+          );
+        if (task.agentTaskClaim && task.agentTaskClaim.leaseExpiresAt > now)
+          throw new AgentTaskClaimError(
+            "ALREADY_CLAIMED",
+            "An affected task has an active claim.",
+            undefined,
+            task.version,
+            task.agentTaskClaim.leaseExpiresAt.toISOString(),
+          );
+      }
+      const saved = await transitionActionable(
+        prisma,
+        request.id,
+        {
+          version: request.version,
+          status: "Ready",
+          reason: request.reason,
+          origin: agentOrigin(`codex:${caller.threadId}`),
+        },
+        tx,
+      );
+      if (!saved)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      const affectedTasks = [];
+      for (const item of affected) {
+        const task = (await findTask(tx, item.sourceOrdinal))!;
+        affectedTasks.push({
+          id: task.sourceOrdinal,
+          version: task.version,
+          status: task.status,
+        });
+      }
+      return reopenAgentTaskReceiptSchema.parse({
+        id: request.id,
+        workItemId: request.workItemId,
+        version: saved.version,
+        status: saved.status,
+        affectedTasks,
+        unresolvedDependencyCount: row.dependenciesAsDependent.filter(
+          (edge) => !edge.waivedAt && edge.prerequisite.status !== "Done",
+        ).length,
+      });
+    }),
+  );
 }
 
 async function dismissAgentTaskResult<T = never>(
