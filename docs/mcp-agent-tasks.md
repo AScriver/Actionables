@@ -525,6 +525,20 @@ prerequisites that remain. Only fetch implementation-critical fields named by
 unchanged research or sources. Create, claim, recovery, and explicit reads keep
 their compact detail responses.
 
+`update_task` also returns `changedContext` when fields changed: exact stored
+values using the native context format, capped at 40 items and 8,000 serialized
+item characters. A complete page is the readback for those fields. Otherwise
+call `get_task_context` with its `nextRead` plus the existing `claimToken` until
+complete. Continuations never include the secret credential. No-op updates
+omit `changedContext`.
+
+`get_task_context` accepts optional `fields` for a narrow read; omission still
+reads complete context. Returned `fields` identifies included content, while
+`fieldCounts` reports all stored collection counts. Empty selected collections
+return an empty complete page. Keep the same selection, version and hash while
+paging; changed selection or content invalidates the continuation. Initial
+scope reconciliation must still cover every required field before work starts.
+
 ## Results and error recovery
 
 Successful calls expose their authoritative result in `structuredContent`.

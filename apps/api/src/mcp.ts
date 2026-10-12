@@ -260,6 +260,28 @@ const getTaskHistorySchema = z
       });
     }
   });
+const historyFieldSchema = z.enum([
+  "title",
+  "priority",
+  "effort",
+  "evidenceState",
+  "status",
+  "tags",
+  "finding",
+  "description",
+  "manualBlocker",
+  "research",
+  "plannedValidation",
+  "resolution",
+  "userSources",
+  "files",
+  "sourceThread",
+  "parent",
+  "subtasks",
+  "blockedBy",
+  "validationRecords",
+]);
+const contextFieldsSchema = z.array(historyFieldSchema).min(1).max(19);
 const getTaskContextSchema = z
   .object({
     id: idSchema,
@@ -275,6 +297,13 @@ const getTaskContextSchema = z
     path: ["contentHash"],
     message: "A returned contentHash is required after the first page.",
   });
+const getSelectedTaskContextSchema = getTaskContextSchema.safeExtend({
+  fields: contextFieldsSchema
+    .optional()
+    .describe(
+      "Optional exact fields to read; omit for complete context. Keep the same selection across pages.",
+    ),
+});
 // Use native tools/call parameters so clients can execute these objects unchanged.
 const historyCallSchema = z
   .object({
@@ -576,21 +605,6 @@ const taskDetailPageSchema = z
   })
   .strict();
 
-const historyFieldSchema = z.enum([
-  "finding",
-  "description",
-  "manualBlocker",
-  "research",
-  "plannedValidation",
-  "resolution",
-  "userSources",
-  "files",
-  "sourceThread",
-  "parent",
-  "subtasks",
-  "blockedBy",
-  "validationRecords",
-]);
 const historyPropertySchema = z.enum([
   "type",
   "locator",
@@ -681,8 +695,24 @@ const taskContextPageSchema = taskHistoryPageSchema.extend({
   status: statusSchema,
   fieldCounts: z.record(historyFieldSchema, z.number().int().nonnegative()),
 });
+const selectedTaskContextPageSchema = taskContextPageSchema.extend({
+  fields: contextFieldsSchema,
+  nextRead: z
+    .object({
+      id: idSchema,
+      version: getTaskDetailSchema.shape.version,
+      fields: contextFieldsSchema,
+      offset: getTaskDetailSchema.shape.offset,
+      contentHash: taskDetailPageSchema.shape.contentHash,
+    })
+    .strict()
+    .nullable(),
+});
+const updateTaskReceiptSchema = mutationReceiptSchema.extend({
+  changedContext: selectedTaskContextPageSchema.optional(),
+});
 /** Bounded active context; values share the terminal history chunk contract. */
-export type TaskContextPage = z.infer<typeof taskContextPageSchema>;
+export type TaskContextPage = z.infer<typeof selectedTaskContextPageSchema>;
 const completionTaskReferenceSchema = z
   .object({
     id: idSchema,
@@ -791,7 +821,7 @@ export function readableItemsPage<T>(stream: Iterable<T>, offset: number) {
     items.push(item);
     size += length;
   }
-  if (offset >= totalItems)
+  if (offset > 0 && offset >= totalItems)
     throw new AgentTaskClaimError(
       "INVALID_REQUEST",
       "The requested content offset is outside the content.",
@@ -812,8 +842,8 @@ export function readableItemsPage<T>(stream: Iterable<T>, offset: number) {
 function taskHistoryPage(
   task: ActionableDetail,
   input: Pick<
-    z.infer<typeof getTaskHistorySchema>,
-    "version" | "offset" | "contentHash"
+    z.infer<typeof getSelectedTaskContextSchema>,
+    "version" | "offset" | "contentHash" | "fields"
   >,
   activeContext = false,
 ) {
@@ -830,6 +860,12 @@ function taskHistoryPage(
     sourceThread: [task.sourceThread],
     ...(activeContext
       ? {
+          title: [task.title],
+          priority: [task.priority],
+          effort: [task.effort],
+          evidenceState: [task.evidenceState],
+          status: [task.status],
+          tags: task.tags,
           finding: [task.finding],
           description: [task.description],
           manualBlocker:
@@ -868,8 +904,13 @@ function taskHistoryPage(
           files: task.files.length,
         },
   };
+  if (input.fields) {
+    for (const field of historyFieldSchema.options) {
+      if (!input.fields.includes(field)) delete values[field];
+    }
+  }
   const contentHash = createHash("sha256")
-    .update(JSON.stringify({ metadata, values }))
+    .update(JSON.stringify({ metadata, fields: input.fields, values }))
     .digest("hex");
   if (input.contentHash && input.contentHash !== contentHash) {
     throw new AgentTaskClaimError(
@@ -883,6 +924,33 @@ function taskHistoryPage(
     ...metadata,
     contentHash,
     ...readableItemsPage(taskHistoryItems(values), input.offset),
+  });
+}
+
+function taskContextPage(
+  task: ActionableDetail,
+  input: Pick<
+    z.infer<typeof getSelectedTaskContextSchema>,
+    "version" | "offset" | "contentHash" | "fields"
+  >,
+): TaskContextPage {
+  const fields = historyFieldSchema.options.filter(
+    (field) => input.fields?.includes(field) ?? true,
+  );
+  const page = taskHistoryPage(task, { ...input, fields }, true);
+  return selectedTaskContextPageSchema.parse({
+    ...page,
+    fields,
+    nextRead:
+      page.nextOffset === null
+        ? null
+        : {
+            id: task.id,
+            version: task.version,
+            fields,
+            offset: page.nextOffset,
+            contentHash: page.contentHash,
+          },
   });
 }
 
@@ -1709,19 +1777,18 @@ function createActionablesMcpServer(
   server.registerTool(
     "actionables.get_task_context",
     {
-      title: "Read complete active Actionable context",
+      title: "Read active Actionable context",
       description:
-        "Read finding, description, manualBlocker, research, plannedValidation, Resolution, validationRecords, files, userSources, sourceThread, parent, subtasks and blockedBy together using a valid claimToken and exact task version. Native values and labeled plain-text chunks use the get_task_history format: at most 40 items and 8,000 serialized item characters per page. fieldCounts includes empty fields; complete, remainingItems and nextOffset make continuation explicit. Start at offset 0, then keep the same version and contentHash with every nextOffset until null. No JSON-fragment reconstruction is needed. Every page revalidates the claim; stale versions, changed relationship content and invalid claims stop retrieval. Discard partial context on failure and reconcile. Existing claim-expiry cleanup applies; a successful read never renews or changes the task.",
-      inputSchema: getTaskContextSchema,
-      outputSchema: taskContextPageSchema,
+        "Read complete active context, or only requested fields, using a valid claimToken and exact version. Native values/text chunks are bounded to 40 items and 8,000 serialized item characters. fields identifies the selected content; fieldCounts includes all stored counts. Start at offset 0; continue with nextRead plus the same claimToken until complete. Never log that credential. Initial scope reconciliation must include every required field. Each page validates ownership, version, selection and contentHash; discard partial results on failure. Successful reads never renew claims.",
+      inputSchema: getSelectedTaskContextSchema,
+      outputSchema: selectedTaskContextPageSchema,
       annotations: readOnly,
     },
     ({ id, claimToken, ...input }) =>
       runMutationTool("actionables.get_task_context", async () =>
-        taskHistoryPage(
+        taskContextPage(
           await getClaimedAgentTask(prisma, id, { claimToken }),
           input,
-          true,
         ),
       ),
   );
@@ -1935,9 +2002,9 @@ function createActionablesMcpServer(
     {
       title: "Update claimed Actionable",
       description:
-        "Update only supplied user-authored task fields using the claim token and latest version. Set Resolution to describe completed changes and important implementation decisions before transitioning to Done. Prefer append fields when adding research, planned checks, or sources. The receipt reports changedFields, reconciliationFields, persisted and duplicate-ignored counts, readiness, and permitted transitions. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
+        "Update only supplied user-authored fields using the claim token and latest version. Prefer append fields for additions. The receipt reports changedFields, reconciliationFields, counts, readiness, permitted transitions and bounded canonical changedContext. When changedContext is complete it verifies those fields; otherwise call get_task_context with nextRead plus the existing claimToken. Stop on isError before dependent operations. Set Resolution before Done.",
       inputSchema: updateTaskSchema,
-      outputSchema: mutationReceiptSchema,
+      outputSchema: updateTaskReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
     ({ id, ...input }) =>
@@ -1947,10 +2014,22 @@ function createActionablesMcpServer(
           id,
           input,
           (result) =>
-            mutationReceipt(result.task, {
-              changedFields: result.changedFields,
-              claimReleased: false,
-              counts: result.counts,
+            updateTaskReceiptSchema.parse({
+              ...mutationReceipt(result.task, {
+                changedFields: result.changedFields,
+                claimReleased: false,
+                counts: result.counts,
+              }),
+              changedContext:
+                result.changedFields.length === 0
+                  ? undefined
+                  : taskContextPage(result.task, {
+                      version: result.task.version,
+                      offset: 0,
+                      fields: result.changedFields.map((field) =>
+                        historyFieldSchema.parse(field),
+                      ),
+                    }),
             }),
         );
       }),

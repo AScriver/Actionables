@@ -742,7 +742,6 @@ describe("Actionables MCP", () => {
       );
       const receiptTools = [
         "actionables.renew_task_claim",
-        "actionables.update_task",
         "actionables.transition_task",
         "actionables.dismiss_task",
         "actionables.record_task_validation",
@@ -755,6 +754,14 @@ describe("Actionables MCP", () => {
       for (const schema of receiptSchemas.slice(1)) {
         expect(schema).toEqual(receiptSchemas[0]);
       }
+      const updateSchema = tools.find(
+        (tool) => tool.name === "actionables.update_task",
+      )!.outputSchema!;
+      expect(updateSchema.required).toEqual(receiptSchemas[0]!.required);
+      expect(updateSchema.properties).toMatchObject(
+        receiptSchemas[0]!.properties!,
+      );
+      expect(updateSchema.properties).toHaveProperty("changedContext");
       expect(
         (receiptSchemas[0] as { required?: string[] }).required?.sort(),
       ).toEqual(
@@ -6967,6 +6974,218 @@ describe("Actionables MCP", () => {
           }),
         ).recordedValidationId,
       ).toBeNull();
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("returns exact changed context without rereading unrelated fields and pages overflow safely", async () => {
+    const notes = Array.from(
+      { length: 14 },
+      (_, index) => `Existing research ${index}`,
+    );
+    const task = await createTask({
+      description: "unchanged scope ".repeat(1600),
+      research: notes,
+    });
+    await prisma.actionable.update({
+      where: { id: task.id },
+      data: {
+        filesJson: json(
+          Array.from({ length: 29 }, (_, index) => ({
+            path: `src/unchanged-${index}.ts`,
+          })),
+        ),
+      },
+    });
+    await prisma.userSourceReference.createMany({
+      data: Array.from({ length: 13 }, (_, index) => ({
+        actionableId: task.id,
+        type: "File",
+        locator: `evidence/unchanged-${index}.md`,
+      })),
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claimed = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      const read = async (args: Record<string, unknown>) =>
+        output<TaskContextPage>(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: { ...credentials, ...args },
+          }),
+        );
+      let full = await read({ version: claimed.task.version });
+      let fullPages = 1;
+      let fullCharacters = JSON.stringify(full).length;
+      while (full.nextRead) {
+        full = await read(full.nextRead);
+        fullPages += 1;
+        fullCharacters += JSON.stringify(full).length;
+      }
+      expect(fullPages).toBeGreaterThanOrEqual(4);
+      const changed = output<{
+        version: number;
+        changedContext: TaskContextPage;
+      }>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: claimed.task.version,
+            appendResearch: ["One new finding"],
+            tags: ["context", "verified"],
+          },
+        }),
+      );
+      expect(changed.changedContext).toMatchObject({
+        fields: ["tags", "research"],
+        complete: true,
+        nextRead: null,
+      });
+      expect(changed.changedContext.items).toEqual([
+        { field: "tags", index: 0, kind: "value", value: "context" },
+        { field: "tags", index: 1, kind: "value", value: "verified" },
+        ...[...notes, "One new finding"].map((value, index) => ({
+          field: "research",
+          index,
+          kind: "value",
+          value,
+        })),
+      ]);
+      expect(changed.changedContext.fieldCounts).toMatchObject({
+        files: 29,
+        userSources: 13,
+      });
+      expect(JSON.stringify(changed.changedContext).length).toBeLessThan(
+        fullCharacters / 4,
+      );
+      expect(JSON.stringify(changed.changedContext)).not.toContain(
+        claimed.claim.claimToken,
+      );
+      expect(
+        await read({
+          version: changed.version,
+          fields: ["research", "tags", "research"],
+        }),
+      ).toEqual(changed.changedContext);
+      const empty = await read({
+        version: changed.version,
+        fields: ["subtasks"],
+      });
+      expect(empty).toMatchObject({
+        fields: ["subtasks"],
+        items: [],
+        complete: true,
+        totalItems: 0,
+        nextRead: null,
+      });
+      for (const fields of [[], ["unknown"]]) {
+        expect(
+          (
+            await client.callTool({
+              name: "actionables.get_task_context",
+              arguments: { ...credentials, version: changed.version, fields },
+            })
+          ).isError,
+        ).toBe(true);
+      }
+
+      const longText = "Long evidence 🛠️\r\n".repeat(600);
+      const large = output<{
+        version: number;
+        changedContext: TaskContextPage;
+      }>(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: changed.version,
+            finding: longText,
+            description: longText,
+          },
+        }),
+      );
+      let page = large.changedContext;
+      expect(page.complete).toBe(false);
+      const firstContinuation = page.nextRead!;
+      const items: TaskContextPage["items"] = [];
+      do {
+        expect(page.fields).toEqual(["finding", "description"]);
+        expect(page.items.length).toBeLessThanOrEqual(40);
+        expect(JSON.stringify(page.items).length).toBeLessThanOrEqual(8000);
+        expect(
+          page.items.every((item) => page.fields.includes(item.field)),
+        ).toBe(true);
+        items.push(...page.items);
+        if (!page.nextRead) break;
+        page = await read(page.nextRead);
+      } while (true);
+      const stored = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+      });
+      expect(stored.finding).toBe(longText.trim());
+      for (const field of ["finding", "description"] as const) {
+        expect(
+          items
+            .filter((item) => item.field === field)
+            .map((item) => (item.kind === "text" ? item.text : item.value))
+            .join(""),
+        ).toBe(stored[field]);
+      }
+      for (const override of [
+        { fields: ["research"] },
+        { contentHash: "0".repeat(64) },
+        { version: changed.version },
+      ]) {
+        expect(
+          errorOutput(
+            await client.callTool({
+              name: "actionables.get_task_context",
+              arguments: { ...credentials, ...firstContinuation, ...override },
+            }),
+          ).code,
+        ).toBe("VERSION_CONFLICT");
+      }
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.get_task_context",
+            arguments: {
+              ...credentials,
+              ...firstContinuation,
+              claimToken: "invalid-token-with-sufficient-length",
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_CLAIM_TOKEN");
+      const noOp = output(
+        await client.callTool({
+          name: "actionables.update_task",
+          arguments: {
+            ...credentials,
+            version: large.version,
+            title: task.title,
+          },
+        }),
+      );
+      expect(noOp).not.toHaveProperty("changedContext");
     } finally {
       await transport.close();
     }
