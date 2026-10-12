@@ -1232,7 +1232,8 @@ type MutationReceiptTask = Pick<
   ActionableDetail | AgentTaskSummary,
   "id" | "version" | "status" | "readiness"
 > &
-  Partial<Pick<ActionableDetail, "permittedTransitions">>;
+  Partial<Pick<ActionableDetail, "permittedTransitions" | "agentClaim">> &
+  Partial<Pick<AgentTaskSummary, "claim">>;
 
 function mutationReceipt(
   task: MutationReceiptTask,
@@ -1244,10 +1245,6 @@ function mutationReceipt(
       persisted: number;
       duplicatesIgnored: number;
     }>;
-    claimLease?: {
-      renewedAt: string;
-      leaseExpiresAt: string;
-    };
     validation?: {
       id: string;
       qualifiesForCompletion: boolean;
@@ -1273,6 +1270,7 @@ function mutationReceipt(
     (field) => reconciliationFieldSchema.safeParse(field).success,
   );
   const missing = task.readiness.requiredForReady;
+  const claim = task.agentClaim ?? task.claim;
   return mutationReceiptSchema.parse({
     id: task.id,
     version: task.version,
@@ -1293,7 +1291,14 @@ function mutationReceipt(
               : "All persisted Ready prerequisites are satisfied. Keep this task Researching and record remaining questions while investigation remains; otherwise Ready is now permitted. Do not force a transition solely because a turn ended.",
         }
       : {}),
-    ...(options.claimLease ? { claimLease: options.claimLease } : {}),
+    ...(!options.claimReleased && claim
+      ? {
+          claimLease: {
+            renewedAt: claim.renewedAt,
+            leaseExpiresAt: claim.leaseExpiresAt,
+          },
+        }
+      : {}),
     ...(options.validation ? { validation: options.validation } : {}),
   });
 }
@@ -1888,25 +1893,19 @@ function createActionablesMcpServer(
     {
       title: "Renew Actionable claim",
       description:
-        "Extend a valid claim during long read-only work. Successful mutations already renew the lease.",
+        "Extend a valid claim during long read-only work. Omitted duration and automatic renewal preserve a later existing expiry. Explicit leaseMinutes sets a new duration. Renewing mutation receipts report claimLease.",
       inputSchema: renewTaskSchema,
       outputSchema: mutationReceiptSchema,
       annotations: mutation,
     },
     ({ id, ...input }) =>
       runMutationTool("actionables.renew_task_claim", () =>
-        renewAgentTaskClaimWithProjection(prisma, id, input, (response) => {
-          const claim = response.task.claim;
-          if (!claim) throw new Error("Renewed claim could not be read.");
-          return mutationReceipt(response.task, {
+        renewAgentTaskClaimWithProjection(prisma, id, input, (response) =>
+          mutationReceipt(response.task, {
             changedFields: [],
             claimReleased: false,
-            claimLease: {
-              renewedAt: claim.renewedAt,
-              leaseExpiresAt: claim.leaseExpiresAt,
-            },
-          });
-        }),
+          }),
+        ),
       ),
   );
   server.registerTool(

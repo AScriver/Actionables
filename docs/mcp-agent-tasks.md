@@ -323,7 +323,11 @@ the recovery operation.
 After claim, the token identifies the stored agent claim. Active get and detail
 reads, plus update, transition, validation, and release calls, do not repeat
 `agentId`; only explicit renewal accepts a new `leaseMinutes`. Successful
-mutations use the server's default renewal period.
+mutations extend to at least the server's default renewal deadline without
+shortening a later existing expiry. Omitted-duration renewal and credential
+recovery follow the same rule. Explicit `leaseMinutes` sets a new duration,
+including a deliberately shorter one. Leases remain finite; successful reads
+do not renew them.
 
 `actionables.get_task` and `actionables.get_task_detail` accept exactly one read
 authorization. Active work uses its valid `claimToken`. Read-only inspection of
@@ -511,7 +515,9 @@ Routine mutations (`renew_task_claim`, `update_task`, `transition_task`,
 return one lean authoritative receipt with `id`, latest `version`, current
 `status`, `changedFields`, `claimReleased`, `reconciliationFields`, `readiness`,
 `permittedTransitions`, and `counts`. Counts identify the field plus persisted
-and duplicate-ignored additions. Renewal also reports `claimLease`; validation
+and duplicate-ignored additions. Every renewing mutation reports the persisted
+`claimLease` (`renewedAt` and `leaseExpiresAt`); use its deadline to schedule the
+next renewal. Released claims omit this field. Validation
 reports the created record ID and whether it qualifies for completion. When a
 result remains `Researching`, `lifecycleGuidance` names any persisted Ready
 prerequisites that remain. Only fetch implementation-critical fields named by

@@ -276,8 +276,13 @@ function tokenMatches(token: string, expectedHash: string) {
   );
 }
 
-function leaseExpiry(now: Date, leaseMinutes: number) {
-  return new Date(now.getTime() + leaseMinutes * 60_000);
+function leaseExpiry(now: Date, leaseMinutes: number, currentExpiry?: Date) {
+  return new Date(
+    Math.max(
+      now.getTime() + leaseMinutes * 60_000,
+      currentExpiry?.getTime() ?? 0,
+    ),
+  );
 }
 
 async function withClaimLock<T>(
@@ -693,7 +698,12 @@ async function renewClaimAfterMutation(
   await tx.agentTaskClaim.update({
     where: { actionableId: row.id },
     data: {
-      leaseExpiresAt: leaseExpiry(now, agentClaimLeaseMinutes),
+      leaseExpiresAt: leaseExpiry(
+        now,
+        agentClaimLeaseMinutes,
+        row.agentTaskClaim?.leaseExpiresAt,
+      ),
+      renewedAt: now,
     },
   });
 }
@@ -2533,6 +2543,7 @@ async function updateClaimedAgentTaskResult<T = never>(
         tags: request.tags ?? persistedStringArray(row.tagsJson),
         userSources: nextSources,
       });
+      await renewClaimAfterMutation(tx, row, now);
       const saved = await updateActionable(
         prisma,
         sourceOrdinal,
@@ -2619,7 +2630,6 @@ async function updateClaimedAgentTaskResult<T = never>(
           occurredAt: now,
         },
       });
-      await renewClaimAfterMutation(tx, row, now);
       return {
         task: saved,
         changedFields,
@@ -2688,6 +2698,9 @@ async function transitionClaimedAgentTaskResult<T = never>(
           true,
         );
       }
+      if (request.status !== "Done" && request.status !== "Dismissed") {
+        await renewClaimAfterMutation(tx, row, now);
+      }
       const saved = await transitionActionable(
         prisma,
         sourceOrdinal,
@@ -2710,8 +2723,6 @@ async function transitionClaimedAgentTaskResult<T = never>(
           request.status,
           now,
         );
-      } else {
-        await renewClaimAfterMutation(tx, row, now);
       }
       return saved;
     },
@@ -2860,6 +2871,7 @@ async function recordClaimedAgentTaskValidationResult<T = never>(
     request,
     now,
     async (tx, row, claim) => {
+      await renewClaimAfterMutation(tx, row, now);
       const recorded = await recordValidationWithRecord(
         prisma,
         sourceOrdinal,
@@ -2877,7 +2889,6 @@ async function recordClaimedAgentTaskValidationResult<T = never>(
       const saved = recorded.task;
       if (!saved)
         throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
-      await renewClaimAfterMutation(tx, row, now);
       const validation = saved.validationRecords.find(
         (candidate) => candidate.id === recorded.validationRecordId,
       );
@@ -3613,7 +3624,13 @@ async function recoverAgentTaskClaimResult<T = never>(
         where: { actionableId: row.id },
         data: {
           claimTokenHash,
-          leaseExpiresAt: leaseExpiry(now, leaseMinutes),
+          leaseExpiresAt: leaseExpiry(
+            now,
+            leaseMinutes,
+            request.leaseMinutes === undefined
+              ? claim.leaseExpiresAt
+              : undefined,
+          ),
           renewedAt: now,
         },
       });
@@ -3704,7 +3721,14 @@ async function renewAgentTaskClaimResult<T = never>(
       (await getAgentCoordinationSettings(tx)).agentClaimLeaseMinutes;
     await tx.agentTaskClaim.update({
       where: { actionableId: row!.id },
-      data: { leaseExpiresAt: leaseExpiry(now, leaseMinutes) },
+      data: {
+        leaseExpiresAt: leaseExpiry(
+          now,
+          leaseMinutes,
+          request.leaseMinutes === undefined ? claim.leaseExpiresAt : undefined,
+        ),
+        renewedAt: now,
+      },
     });
     const task = await findTask(tx, sourceOrdinal);
     if (!task) throw new Error("Renewed agent task could not be read.");

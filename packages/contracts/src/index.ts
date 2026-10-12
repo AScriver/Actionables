@@ -1067,7 +1067,7 @@ export const recoverAgentTaskClaimRequestSchema = z
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
-        "Optional recovered-claim lease duration; omit to use the saved default.",
+        "Optional recovered-claim lease duration; omit to use the saved default without shortening a later existing expiry.",
       ),
   })
   .strict();
@@ -1082,7 +1082,7 @@ export const renewAgentTaskClaimRequestSchema = z
     leaseMinutes: agentTaskLeaseMinutesSchema
       .optional()
       .describe(
-        "Optional renewal lease duration; omit to use the saved default.",
+        "Optional renewal lease duration; omit to use the saved default without shortening a later existing expiry. An explicit value sets a new duration.",
       ),
   })
   .strict();

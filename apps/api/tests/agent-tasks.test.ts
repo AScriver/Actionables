@@ -23,6 +23,7 @@ import {
   forceReleaseAgentTaskClaim,
   handoffClaimedAgentTask,
   handoffClaimedAgentTaskWithProjection,
+  getClaimedAgentTask,
   getScopedTerminalAgentTask,
   listAgentTasks,
   recoverAgentTaskClaim,
@@ -1534,6 +1535,78 @@ describe("agent task claims", () => {
         data: { agentClaimLeaseMinutes: 30 },
       });
     }
+  });
+
+  it("preserves a longer lease through mutations, quiet work, renewal, and recovery", async () => {
+    const task = await createTask();
+    const threadId = "019fa45f-581d-7bc0-afe3-a2b65171df63";
+    const claimed = await claimAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        agentId: `codex:${threadId}`,
+        workItemId: task.sourceOrdinal,
+        version: task.version,
+        leaseMinutes: 120,
+      },
+      new Date("2026-07-25T12:00:00.000Z"),
+    );
+    const updated = await updateClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: claimed.task.version,
+        appendResearch: ["Long investigation still running."],
+      },
+      new Date("2026-07-25T12:05:00.000Z"),
+    );
+    expect(updated.agentClaim).toMatchObject({
+      renewedAt: "2026-07-25T12:05:00.000Z",
+      leaseExpiresAt: "2026-07-25T14:00:00.000Z",
+    });
+    const resumed = await getClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      { claimToken: claimed.claim.claimToken },
+      new Date("2026-07-25T13:05:00.000Z"),
+    );
+    expect(resumed.version).toBe(updated.version);
+    expect(resumed.agentClaim).toEqual(updated.agentClaim);
+    const renewed = await renewAgentTaskClaim(
+      prisma,
+      task.sourceOrdinal,
+      { claimToken: claimed.claim.claimToken },
+      new Date("2026-07-25T13:10:00.000Z"),
+    );
+    expect(renewed.task.claim?.leaseExpiresAt).toBe(
+      claimed.claim.leaseExpiresAt,
+    );
+    const recovered = await recoverAgentTaskClaim(
+      prisma,
+      task.sourceOrdinal,
+      { version: updated.version },
+      { threadId },
+      new Date("2026-07-25T13:15:00.000Z"),
+    );
+    expect(recovered.claim.leaseExpiresAt).toBe(claimed.claim.leaseExpiresAt);
+    const extended = await renewAgentTaskClaim(
+      prisma,
+      task.sourceOrdinal,
+      { claimToken: recovered.claim.claimToken },
+      new Date("2026-07-25T13:50:00.000Z"),
+    );
+    expect(extended.task.claim?.leaseExpiresAt).toBe(
+      "2026-07-25T14:20:00.000Z",
+    );
+    await expect(
+      renewAgentTaskClaim(
+        prisma,
+        task.sourceOrdinal,
+        { claimToken: recovered.claim.claimToken },
+        new Date("2026-07-25T14:20:00.000Z"),
+      ),
+    ).rejects.toMatchObject({ code: "CLAIM_EXPIRED" });
   });
 
   it("force releases the confirmed claim without changing lifecycle state", async () => {

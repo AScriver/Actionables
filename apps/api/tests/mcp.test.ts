@@ -3523,6 +3523,20 @@ describe("Actionables MCP", () => {
       expect(Date.parse(renewed.claimLease.leaseExpiresAt)).toBeGreaterThan(
         Date.parse(renewed.claimLease.renewedAt),
       );
+      async function expectPersistedLease(receipt: unknown) {
+        const stored = await prisma.agentTaskClaim.findUniqueOrThrow({
+          where: { actionableId: task.id },
+        });
+        expect(stored.leaseExpiresAt.toISOString()).toBe(
+          renewed.claimLease.leaseExpiresAt,
+        );
+        expect(receipt).toMatchObject({
+          claimLease: {
+            renewedAt: stored.renewedAt.toISOString(),
+            leaseExpiresAt: stored.leaseExpiresAt.toISOString(),
+          },
+        });
+      }
 
       const skippedResearch = errorOutput(
         await client.callTool({
@@ -3551,6 +3565,7 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(researching.status).toBe("Researching");
+      await expectPersistedLease(researching);
       expect(researching).toMatchObject({
         changedFields: ["status"],
         reconciliationFields: [],
@@ -3611,6 +3626,7 @@ describe("Actionables MCP", () => {
         permittedTransitions: expect.arrayContaining(["Ready"]),
         lifecycleGuidance: expect.stringContaining("Ready is now permitted"),
       });
+      await expectPersistedLease(researched);
 
       const ready = output<{ status: string; version: number }>(
         await client.callTool({
@@ -3640,6 +3656,7 @@ describe("Actionables MCP", () => {
         }),
       );
       expect(inProgress.status).toBe("In progress");
+      await expectPersistedLease(inProgress);
 
       const missingRollbackReason = errorOutput(
         await client.callTool({
@@ -3767,6 +3784,7 @@ describe("Actionables MCP", () => {
         id: expect.any(String),
         qualifiesForCompletion: true,
       });
+      await expectPersistedLease(validated);
       expect(
         await prisma.validationRecord.findUniqueOrThrow({
           where: { id: validated.validation.id },
@@ -3790,6 +3808,7 @@ describe("Actionables MCP", () => {
         version: validated.version + 1,
         claimReleased: true,
       });
+      expect(released).not.toHaveProperty("claimLease");
     } finally {
       await transport.close();
     }
