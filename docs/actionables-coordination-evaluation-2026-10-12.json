@@ -1,0 +1,229 @@
+{
+  "recordedAtUtc": "2026-10-12T18:13:01Z",
+  "outcome": "Blocked: lifecycle writes require approval but CLI policy is never. No successful control/narrow comparison or uncached-input reduction is established.",
+  "discoveryExample": {
+    "client": "Codex Desktop functions.exec",
+    "advertisedNames": 23,
+    "fullInspectDefinitionCharacters": 5894,
+    "selectedInputDeclarationCharacters": 534,
+    "generatedReturnSchemaPrinted": false
+  },
+  "measurement": "Actual native CLI tool calls and turn.completed input/cache/output counters. Fresh Inbox and prior-research Ready fixtures each ran in a new ephemeral session, with an isolated database. No same-session resume or model-request capture. Setup means list/inspect/claim.",
+  "control": {
+    "discovery": "control",
+    "controlRef": "a5d4e14aee4c75a5a45e36149c4abc9b2fec5330",
+    "controlWorkflow": {
+      "utf8Bytes": 31954,
+      "sha256": "a05119e0e86aa48f8f5458512fbd413b817c6c3196f578d88e43dc74aea50b01"
+    },
+    "model": "gpt-5.6-terra",
+    "reasoningEffort": "medium",
+    "catalogFingerprint": {
+      "utf8Bytes": 184256,
+      "sha256": "e74ea4591d3f403a066a9cf4d4d56965ad117a0b4a47ee9a57cc6124f8f13d88"
+    },
+    "source": {
+      "head": "a5d4e14aee4c75a5a45e36149c4abc9b2fec5330",
+      "files": {
+        "apps/api/src/actionable-transitions.ts": "a13c594c5731ba6801a34b19fbd4b6cb69d15b02066badffd0dc481f0902f2a3",
+        "apps/api/src/agent-integration.ts": "46fa4293cd9c9ffde998e5662ade787df6bf6dd2d23aaff76652d75e4f02823e",
+        "apps/api/src/agent-tasks.ts": "cfb13ccfdf9513cb973b2e795db9798e8e8f63f16d2c90b4de54f6ffa43df5a4",
+        "apps/api/src/app.ts": "b41dcb372f089db8b89b7af4e0f6500603cc146579c14ca0c3cf44c986b6c661",
+        "apps/api/src/assistant-prompts.ts": "a3ab350a814257df3f8d4597f86a5ee95bc938c7472f9aca7f3aba3b3f855cc9",
+        "apps/api/src/assistant-runner.ts": "6f3136dc956c78a56d729613a1e084d06d565a62b08a3578fb750303834ebe89",
+        "apps/api/src/chatgpt-mcp.ts": "1aa37b7463fa51606c4481262463c9969da639642be66009241ece96bdc03688",
+        "apps/api/src/chatgpt-server.ts": "4f6a9225921c9f365167fc828d0ec2856166549e8b13be149f5829b2cbbf8e6b",
+        "apps/api/src/data-import.ts": "8b8cb637d1c5fbe3865a9e171b634141a500aca28cb95f058e5d9f11642276f0",
+        "apps/api/src/database.ts": "4de6b606d74722d32711054604c5cac26514c897fdbf8d3229cd4c3c3df8da5b",
+        "apps/api/src/helper-agent-settings.ts": "f82de620b3f135639c259d93f9bebc0f31f884ab4127a1e4d529d28a9b3379c8",
+        "apps/api/src/hierarchy.ts": "f02664952990be80c0e4c29fbfaac79b8fe1cdb1583d6953c40be01db5a08e22",
+        "apps/api/src/import-seed.ts": "b86a78dd30b1fd446ada5478f7cec57a7fbe86f8899c93c276a5b50049990cf6",
+        "apps/api/src/inbox-triager.ts": "52eea078ecaf2326583f3193e7a4653b2683b70ca3de090ff34a85655dcc3634",
+        "apps/api/src/mcp.ts": "dcb93bccad79694bfa0717b763803cff67959ce3f496949a04938605ce0fb0ab",
+        "apps/api/src/native-folder-picker.ts": "b7c10524fe60f2a2cdccf2f193d46133bba8f475f7ea444cfa3fcbcce4d192fb",
+        "apps/api/src/note-groomer.ts": "89ede1ffb4c29953cc406b6fdb6f00779a09488f59c3ceb8fe42f76a5f258105",
+        "apps/api/src/portable-format.ts": "a290ae8612e6b182c764cb474823e45d3ea6bd65917f7864e1aaeaaa66d73d28",
+        "apps/api/src/project-workspace.ts": "7b97ab22db98a74282808d49ec80060c0a8d77266fc93beadf71952b5876309e",
+        "apps/api/src/relationship-auditor.ts": "197a5513894d235e1b706072b2360e380f1926a7bebb682c149c661581bd175f",
+        "apps/api/src/relationships.ts": "e71ea03499aaf662331c607b707a18431b1fd6e5aa15cd4b6bef871800cb4080",
+        "apps/api/src/repository.ts": "42a4885b1360c7644c96c0f1088a96a1d6ee39100682f6104f62285b6458296f",
+        "apps/api/src/seed.ts": "300514045036a95a5f1ac160f9a08ba1df26fb738d7813a721fd3bedafe8476c",
+        "apps/api/src/server.ts": "16998f6a7a174eb3cfc678ea8a86b5ee4481dfd1a809ec7fc11d14faf84b97ea",
+        "apps/api/tests/completed-history.eval.ts": "77eb3d01fcc5bea16fd431b08d6f18ae3f48372ef3263f75a6e38a57099a9b29",
+        "package.json": "97b55811de88f9430a09621e2eb8208d7c016cd74d9843c805653ed787398bc5",
+        "packages/contracts/dist/chatgpt.js": "8b9b4c9aad30d67958391a7dc418d33b86d2b0e4987d63689248254006f757b1",
+        "packages/contracts/dist/codex-prompts.js": "38298fb18f1a81c197485a7d65e3d7225e5030753105035f03d31616bd8e0b8a",
+        "packages/contracts/dist/index.js": "2a7daf49150e7af087a6066046cf6957a189cb1e8d203f1f555ddf6d40448a4c",
+        "packages/contracts/src/chatgpt.ts": "733d2a458cf46d81b524d6844cdf3ca9e7556f0949dde059338099d04c290a8d",
+        "packages/contracts/src/codex-prompts.ts": "5ad6b9ed32a75d4a61d46349dd17678568cb212b9434b1b0939f9590b1aa3380",
+        "packages/contracts/src/index.ts": "117f781c409cf0ff893b87c2dba33621212fa47d096717e11e2c8bc28ead36e6",
+        "pnpm-lock.yaml": "081e21d9e16650d278eb861cd9bae77bc117a553649bb33c01ffa847b7eaed58",
+        "prisma/migrations/20260724230742_init/migration.sql": "677718ea2dd16e8520d7b7c272c563312b93f5351c63c18b1f56b34249f71f1c",
+        "prisma/migrations/20260724235000_capture_triage/migration.sql": "f688b03155e1d59d1cd7870aa4daccf26163419955f3a69a11c3651912ca41d3",
+        "prisma/migrations/20260725004000_lifecycle_validation/migration.sql": "f3cf9c43dd95d1902ecb3325a4b4af6ec23f9d336c8c7262c3d55733d8ba2e29",
+        "prisma/migrations/20260725010000_backfill_initial_activity/migration.sql": "cf48f214e884cb5ebaa22914eca14687599f3fc4bfc399dc4e3b67a24bcdea02",
+        "prisma/migrations/20260725012500_hierarchy_dependencies/migration.sql": "337ae06522ed38721f5a6a422c6ae59f5eda0d5f5aea8d33337f4f2093dd4020",
+        "prisma/migrations/20260725020000_daily_use_shell/migration.sql": "0d41a80586941d83ba87f2a65e3a2bf27474a1cced9cac71c7093072760373de",
+        "prisma/migrations/20260725030000_portable_import_export/migration.sql": "d53bffb198aeb2e3f2e96ae3bdb039ca85ffe364a55f8fbf18dec1316c686f70",
+        "prisma/migrations/20260725190000_agent_task_claims/migration.sql": "59581a83478629bc6fcc1abca710f0d1e4eec890929232bb509d436fc3d1e683",
+        "prisma/migrations/20260727212300_helper_agent_settings/migration.sql": "0c9ddf189b662631cbee7dba1f0b2c45d57b2e1a60f6d5556a8318d37d27c385",
+        "prisma/migrations/20260728224800_helper_agent_enabled_settings/migration.sql": "a2c7ec9941b69d441f2837217a428300f5dd0625586e4230e2ce1fe054340f21",
+        "prisma/migrations/20260728231200_note_groomer_runtime_settings/migration.sql": "6d25202d6de49cfc2591f3c53029fb899130be793172bef9a3ce426f9adf9af1",
+        "prisma/migrations/20260729010700_relationship_auditor_runtime_settings/migration.sql": "57a3b8157fd8e158690bbde7fa94f437fba51fbc9ccd8fd2f61f6410e7e78dab",
+        "prisma/migrations/20260729170000_agent_coordination_settings/migration.sql": "51bf1996ccec82ea49f8346bc62f963e49420d53e71ab9d0f5c84c5c7ecd1a60",
+        "prisma/migrations/20260729173300_local_codex_timeout_settings/migration.sql": "af64f06dc9418609c4e466c649070379f80fa01281505aef96918c3e5d74f22d",
+        "prisma/migrations/20260730155500_actionable_resolution/migration.sql": "88c969198536c50e55d6f69d9d25d40299ac28dc1b1d77ba3f79c69d3da9629d",
+        "prisma/migrations/20260731210000_inbox_triager_settings/migration.sql": "974bcb903046b8212835d8e1bbddfe7efc04fb925472b0844e617b334bfb2fc2",
+        "prisma/migrations/20260731220000_strengthen_inbox_triage_no_research_prompt/migration.sql": "7fc285ddfd21c78dd7f5b1db7a13a73988ab23832fded779a44b71c0ccad3a60",
+        "prisma/migrations/20260911230000_codex_start_prompts/migration.sql": "fe5ce379da96dcaa40add8d61a1822af005eeddf0912dca823e6c33bf938b0da",
+        "prisma/migrations/20260911235100_repository_project_roots/migration.sql": "48e98be59a79d2a0fe32d0bc16113e29cda70be253169ddd12eaf56a4685681e",
+        "prisma/migrations/20260915180000_nested_relationship_auditor_prompt/migration.sql": "f4313c19cdc9a38747abd083ef8f45b48133932d4115c4a373542ba272dbc375",
+        "prisma/migrations/migration_lock.toml": "3389dbaf2a3cf4b413275867ac6f550b27f79efe85ee9c12082cdd8c5b8239c4",
+        "prisma/schema.prisma": "7f95373c83ece3f208df2c168db702f97cdade4ef23ff2e09c6057ac429033fd",
+        "resources/agent-integration/AGENTS.fragment.md": "e71d66bc191bca86de517027003de4bf2168d981ebc95c5d3e303af57d03a0fc",
+        "resources/agent-integration/actionables-workflow/SKILL.md": "95940263107730b9876751e6406ef45c54c1ac230d7dc9a9b226bb01403ea1d4"
+      }
+    },
+    "note": "Two ephemeral CLI sessions exercise fresh Inbox and resumed Ready work. This is not a same-session resume or a Desktop model-request capture. Catalog is unchanged; usage totals are whole-turn counters, not isolated tool-schema costs.",
+    "cases": [
+      {
+        "scenario": "fresh",
+        "pass": false,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 121520,
+        "status": "Inbox",
+        "claimReleased": false,
+        "requiredToolsObserved": false,
+        "versionConflictInjected": false,
+        "calls": [
+          {
+            "name": "actionables.list_tasks",
+            "responseBytes": 261
+          },
+          {
+            "name": "actionables.inspect_task",
+            "id": 1,
+            "responseBytes": 1429
+          },
+          {
+            "name": "actionables.list_tasks",
+            "responseBytes": 1224
+          },
+          {
+            "name": "actionables.claim_task",
+            "id": 1,
+            "responseBytes": 4390
+          },
+          {
+            "name": "actionables.get_task_context",
+            "id": 1,
+            "responseBytes": 4329
+          },
+          {
+            "name": "actionables.inspect_task",
+            "id": 1,
+            "responseBytes": 1613
+          }
+        ],
+        "toolCalls": 6,
+        "setupCalls": 5,
+        "catalogRequests": 1,
+        "resourceReads": 1,
+        "nonMcpActions": 0,
+        "outputTruncated": false,
+        "accounting": {
+          "source": "exec JSONL turn.completed; sum of paired turns",
+          "complete": true,
+          "issues": [],
+          "turnRecords": 1,
+          "totals": {
+            "inputTokens": 401077,
+            "cachedInputTokens": 356608,
+            "uncachedInputTokens": 44469,
+            "outputTokens": 1929,
+            "reasoningOutputTokens": 925
+          },
+          "reasoningNote": "Reasoning is an optional reported subset of output; missing values remain null."
+        },
+        "clientToolErrors": [
+          {
+            "tool": "actionables.transition_task",
+            "message": "MCP tool call requires approval, but approval policy is never"
+          },
+          {
+            "tool": "actionables.transition_task",
+            "message": "MCP tool call requires approval, but approval policy is never"
+          }
+        ]
+      },
+      {
+        "scenario": "resumed",
+        "pass": false,
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 34174,
+        "status": "Ready",
+        "claimReleased": false,
+        "requiredToolsObserved": false,
+        "versionConflictInjected": false,
+        "calls": [
+          {
+            "name": "actionables.list_tasks",
+            "responseBytes": 223
+          },
+          {
+            "name": "actionables.inspect_task",
+            "id": 2,
+            "responseBytes": 1234
+          },
+          {
+            "name": "actionables.list_tasks",
+            "responseBytes": 997
+          },
+          {
+            "name": "actionables.claim_task",
+            "id": 2,
+            "responseBytes": 4274
+          },
+          {
+            "name": "actionables.inspect_task",
+            "id": 2,
+            "responseBytes": 1418
+          }
+        ],
+        "toolCalls": 5,
+        "setupCalls": 5,
+        "catalogRequests": 1,
+        "resourceReads": 1,
+        "nonMcpActions": 0,
+        "outputTruncated": false,
+        "accounting": {
+          "source": "exec JSONL turn.completed; sum of paired turns",
+          "complete": true,
+          "issues": [],
+          "turnRecords": 1,
+          "totals": {
+            "inputTokens": 435199,
+            "cachedInputTokens": 389888,
+            "uncachedInputTokens": 45311,
+            "outputTokens": 1747,
+            "reasoningOutputTokens": 801
+          },
+          "reasoningNote": "Reasoning is an optional reported subset of output; missing values remain null."
+        },
+        "clientToolErrors": [
+          {
+            "tool": "actionables.transition_task",
+            "message": "MCP tool call requires approval, but approval policy is never"
+          },
+          {
+            "tool": "actionables.transition_task",
+            "message": "MCP tool call requires approval, but approval policy is never"
+          }
+        ]
+      }
+    ]
+  },
+  "followUp": "Run control and narrow under an environment that permits explicitly authorized isolated MCP lifecycle writes, keeping the catalog/model/scenarios fixed. Do not change approval policy as a workaround. The harness now records client-side tool errors and stops after this gate."
+}

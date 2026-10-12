@@ -7,6 +7,58 @@ It does not test deployment or change production behavior.
 
 ## Reproduce
 
+### Active coordination companion
+
+`--run --coordination` exercises the active workflow through the real MCP
+handlers. Each run requires a new directory directly inside the Windows user
+TEMP directory (or the platform temp directory), with an explicit database URL.
+It creates two synthetic tasks: fresh Inbox work and researched Ready work
+resumed in a new ephemeral session. The latter receives one injected version
+conflict on its first update. This does not test same-session CLI resume.
+
+```powershell
+$evaluationDirectory = Join-Path ([IO.Path]::GetTempPath()) ('actionables-coordination-' + [guid]::NewGuid())
+$env:DATABASE_URL = 'file:' + (Join-Path $evaluationDirectory 'coordination.db').Replace('\', '/')
+corepack pnpm exec tsx apps/api/tests/completed-history.eval.ts --run --coordination --discovery control --control-ref a5d4e14aee4c75a5a45e36149c4abc9b2fec5330
+# Repeat with a new directory and --discovery narrow, retaining the same control ref.
+```
+
+The control serves the workflow at the supplied Git revision and its previous
+discovery hint. Narrow uses the current workflow and native-tool hint. Both
+retain the same full advertised catalog, model, reasoning effort, task data,
+scope guard and server implementation. The proxy allows only the named task's
+coordination calls, caps calls at 40, and rejects other tools. Each process has
+a four-minute deadline. The default is the existing assistant runner's model,
+with medium reasoning effort and the existing auto credential store.
+
+Pass requires observed inspect/claim/context/update/complete calls, persisted
+Done state, a released claim, passed validation, the correct arithmetic result,
+complete usage accounting, no truncation or non-MCP actions, and no unexpected
+errors. Claim and bearer credentials are redacted before saving event logs;
+protocol summaries retain only tool names, task IDs, errors and byte counts.
+
+`coordination-results.json` records setup calls (list/inspect/claim), catalog
+requests, workflow reads, total tool calls, whole-turn input/cache/output
+counters, source fingerprints and the catalog fingerprint. Uncached input is
+input minus cached input. These are actual CLI counters, not a measurement of
+internal thinking or isolated schema cost. Native CLI adoption and the
+executable Desktop code-mode example are separate checks. A small comparison
+can expose regressions but cannot establish broad reliability.
+
+October 12 result: the Desktop example printed 534 characters of the selected
+input declaration instead of the 5,894-character full definition. The actual
+control CLI sessions each made five setup calls; fresh/resumed uncached input
+was 44,469/45,311 tokens. Both stopped because `transition_task` required approval
+while CLI approval policy was `never`. Neither completed; the second did not
+reach the injected conflict. Narrow was not run after that gate, so these
+results establish no input reduction or successful end-to-end adoption. The
+harness now records client-side denials and stops further cases at this gate.
+See the [recorded measurements](actionables-coordination-evaluation-2026-10-12.json).
+The remaining acceptance requires an environment permitted to execute these
+isolated lifecycle writes; this evaluation does not alter approval policy.
+
+### Completed history
+
 Use the repository's installed dependencies and existing Codex login. No API
 key, service, plugin, or credential setup is performed by the evaluation.
 

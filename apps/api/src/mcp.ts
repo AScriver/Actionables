@@ -1559,7 +1559,7 @@ function createActionablesMcpServer(
     { name: "actionables", version: "0.1.0" },
     {
       instructions:
-        "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Discover names first, then only needed schemas. " +
+        "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Use advertised tools directly; in code mode discover names, then only missing input declarations, not generated return schemas. " +
         "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId, or inspect an explicitly authorized blocked task to resume it; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
         "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
         "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +

@@ -9,7 +9,28 @@ Use Actionables as the coordination record for substantive work without letting 
 
 ## Discover tools
 
-For history-only reads, `actionables://completed-history` is sufficient: read it through MCP `resources/read` on the connected Actionables server. It contains the canonical Scope and tool results and Read completed research sections below; the full lifecycle workflow is unnecessary for those reads. For task coordination, read this full workflow once from `actionables://workflow` through MCP `resources/read`, or the installed skill when filesystem reads are allowed. MCP resource URIs are not file paths. Discover tool names first and request only the schemas needed for the current operation. Do not dump every tool description or repeat this workflow beside each schema.
+For history-only reads, `actionables://completed-history` is sufficient: read it through MCP `resources/read` on the connected Actionables server. It contains the canonical Scope and tool results and Read completed research sections below; the full lifecycle workflow is unnecessary for those reads. For task coordination, read this full workflow once from `actionables://workflow` through MCP `resources/read`, or the installed skill when filesystem reads are allowed. MCP resource URIs are not file paths. Use advertised native tools directly. In code mode, discover names once and read only missing input declarations. Do not dump generated return schemas or repeat this workflow beside each schema.
+
+Code-mode example (replace the selected name for the next operation):
+
+```javascript
+const names = ALL_TOOLS.filter((tool) =>
+  tool.name.startsWith("mcp__actionables__"),
+);
+text(names.map((tool) => tool.name));
+const tool = names.find((tool) =>
+  tool.name.endsWith("actionables_inspect_task"),
+);
+const start = tool.description.indexOf("exec tool declaration:");
+const end = tool.description.indexOf("): Promise<", start);
+if (start < 0 || end < 0)
+  throw new Error(
+    "Input declaration unavailable; request this tool's schema directly.",
+  );
+text(tool.description.slice(start, end + 1));
+```
+
+Read runtime errors and successful fields from the actual response. Keep claim credentials in tool context, never in logs or saved artifacts.
 
 ## Scope and tool results
 

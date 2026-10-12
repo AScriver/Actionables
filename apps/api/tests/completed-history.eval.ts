@@ -10,6 +10,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -1976,7 +1977,476 @@ async function sourceIdentity() {
   };
 }
 
+/** Active-work companion to the history evaluation; no raw claim data is persisted. */
+async function runCoordinationEvaluation() {
+  const option = (name: string, fallback: string) => {
+    const index = process.argv.indexOf(name);
+    return index < 0 ? fallback : process.argv[index + 1]!;
+  };
+  const discovery = z
+    .enum(["control", "narrow"])
+    .parse(option("--discovery", "narrow"));
+  const databaseUrl = process.env.DATABASE_URL;
+  assert(
+    databaseUrl !== undefined && databaseUrl.startsWith("file:"),
+    "An explicit isolated DATABASE_URL is required.",
+  );
+  const databasePath = databaseUrl.slice(5);
+  const outputDirectory = dirname(databasePath);
+  assert(
+    isAbsolute(databasePath) &&
+      (await realpath(dirname(outputDirectory))) === (await realpath(tmpdir())),
+    "Coordination evaluation requires a new database under the user TEMP directory.",
+  );
+  await mkdir(outputDirectory);
+  await writeFile(databasePath, "", { flag: "wx" });
+  execFileSync(
+    process.execPath,
+    [join(root, "node_modules/prisma/build/index.js"), "migrate", "deploy"],
+    {
+      cwd: root,
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "pipe",
+    },
+  );
+  const identity = await sourceIdentity();
+  const executable = process.env.ACTIONABLES_CODEX_PATH?.trim() || "codex";
+  const model =
+    process.env.ACTIONABLES_ASSISTANT_MODEL?.trim() ||
+    defaultCodexAssistantModel;
+  const reasoningEffort = assistantReasoningEffortSchema.parse(
+    process.env.ACTIONABLES_EVAL_REASONING_EFFORT?.trim() || "medium",
+  );
+  const controlRef = option("--control-ref", "HEAD");
+  const controlWorkflow = execFileSync(
+    "git",
+    [
+      "show",
+      `${controlRef}:resources/agent-integration/actionables-workflow/SKILL.md`,
+    ],
+    { cwd: root, encoding: "utf8" },
+  )
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/u, "")
+    .trim();
+  const prisma = createPrismaClient(databaseUrl);
+  const bearerToken = randomUUID();
+  const secrets = new Set<string>([bearerToken]);
+  const redact = (value: string) => {
+    for (const secret of secrets)
+      value = value.replaceAll(secret, "[REDACTED]");
+    return value;
+  };
+  const writeJson = (name: string, value: unknown) =>
+    writeFile(
+      join(outputDirectory, name),
+      redact(JSON.stringify(value, null, 2)) + "\n",
+    );
+  const app = buildApp({
+    prisma,
+    mcpBearerToken: bearerToken,
+    agentHomeDirectory: join(outputDirectory, "unused-agent-home"),
+  });
+  const upstream = await app.listen({ host: "127.0.0.1", port: 0 });
+  const allowed = new Set(
+    [
+      "list_tasks",
+      "inspect_task",
+      "claim_task",
+      "get_task",
+      "get_task_context",
+      "update_task",
+      "transition_task",
+      "renew_task_claim",
+      "recover_task_claim",
+      "record_task_validation",
+      "get_completion_view",
+      "complete_task",
+    ].map((name) => `actionables.${name}`),
+  );
+  let activeId = 0;
+  let injected = false;
+  let calls: Array<{
+    name: string;
+    id?: number;
+    error?: string;
+    responseBytes: number;
+  }> = [];
+  let methods: string[] = [];
+  let catalogFingerprint: ReturnType<typeof fingerprint> | undefined;
+  const server = createServer(async (request, response) => {
+    try {
+      assert.equal(request.url, "/mcp");
+      assert.equal(request.headers.authorization, `Bearer ${bearerToken}`);
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const payload = Buffer.concat(chunks);
+      const rpc = JSON.parse(payload.toString("utf8"));
+      methods.push(rpc.method);
+      const call = rpc.method === "tools/call" ? rpc.params : null;
+      const args = call?.arguments ?? {};
+      if (call) {
+        assert(
+          allowed.has(call.name) && calls.length < 40,
+          "Only scoped coordination tools are allowed.",
+        );
+        assert(
+          args.id === undefined || args.id === activeId,
+          "Wrong task scope.",
+        );
+        assert(
+          args.workItemId === undefined || args.workItemId === activeId,
+          "Wrong work-item scope.",
+        );
+        if (call.name === "actionables.list_tasks" && args.view === "available")
+          assert.equal(args.workItemId, activeId);
+        if (
+          activeId === 2 &&
+          !injected &&
+          call.name === "actionables.update_task"
+        ) {
+          await prisma.actionable.update({
+            where: { sourceOrdinal: activeId },
+            data: { version: { increment: 1 } },
+          });
+          injected = true;
+        }
+      }
+      const result = await fetch(`${upstream}/mcp`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`,
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: payload,
+      });
+      let body = await result.text();
+      if (body) {
+        const parsed = JSON.parse(body);
+        if (rpc.method === "tools/list")
+          catalogFingerprint = fingerprint(JSON.stringify(parsed.result.tools));
+        const token = parsed.result?.structuredContent?.claim?.claimToken;
+        if (typeof token === "string") secrets.add(token);
+        if (discovery === "control" && rpc.method === "initialize") {
+          parsed.result.instructions = parsed.result.instructions.replace(
+            "Use advertised tools directly; in code mode discover names, then only missing input declarations, not generated return schemas.",
+            "Discover names first, then only needed schemas.",
+          );
+          body = JSON.stringify(parsed);
+        }
+        if (
+          discovery === "control" &&
+          rpc.method === "resources/read" &&
+          rpc.params?.uri === "actionables://workflow"
+        ) {
+          parsed.result.contents[0].text = controlWorkflow;
+          body = JSON.stringify(parsed);
+        }
+        if (call)
+          calls.push({
+            name: call.name,
+            id: args.id,
+            error: parsed.result?.isError
+              ? (parsed.result?.structuredContent?.code ?? "UNSTRUCTURED_ERROR")
+              : undefined,
+            responseBytes: Buffer.byteLength(body),
+          });
+      }
+      response.writeHead(result.status, { "content-type": "application/json" });
+      response.end(body);
+    } catch (error) {
+      calls.push({
+        name: "rejected",
+        error: redact(String(error)),
+        responseBytes: 0,
+      });
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: "Evaluation request rejected by scope guard.",
+        }),
+      );
+    }
+  });
+  const summaries: unknown[] = [];
+  try {
+    const project = await prisma.project.create({
+      data: {
+        externalKey: "coordination-project",
+        name: "Isolated coordination",
+      },
+    });
+    const repository = await prisma.repository.create({
+      data: {
+        externalKey: "coordination-repository",
+        name: "Synthetic repository",
+        projectId: project.id,
+      },
+    });
+    const worktree = await prisma.worktree.create({
+      data: {
+        externalKey: "coordination-worktree",
+        name: "Isolated fixture",
+        projectId: project.id,
+        repositoryId: repository.id,
+      },
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+    for (const [id, scenario] of [
+      [1, "fresh"],
+      [2, "resumed"],
+    ] as const) {
+      activeId = id;
+      injected = false;
+      calls = [];
+      methods = [];
+      const task = await prisma.actionable.create({
+        data: {
+          externalKey: `coordination-${id}`,
+          sourceOrdinal: id,
+          title: `Verify arithmetic (${scenario})`,
+          priority: "Medium",
+          effort: "XS",
+          status: id === 1 ? "Inbox" : "Ready",
+          statusProvenance: "Synthetic coordination fixture",
+          evidenceState: "Confirmed",
+          updatedLabel: "fixture",
+          finding:
+            id === 1
+              ? ""
+              : "Prior research identified the authoritative inputs.",
+          description:
+            "Synthetic context; preserve this evidence. ".repeat(50) +
+            "Authoritative inputs: six groups of seven. Calculate total and record the actual arithmetic check. This is a coordination exercise, with no application code or deployment to change.",
+          researchJson:
+            id === 1
+              ? []
+              : [
+                  "Previous investigation identified six groups of seven; verify before closing.",
+                ],
+          validationJson: [
+            "Independently calculate the total from stored inputs and record Review evidence.",
+          ],
+          filesJson: [],
+          tagsJson: ["evaluation"],
+          userSourcesJson: [],
+          blockedByOrdinalsJson: [],
+          blocksOrdinalsJson: [],
+          childOrdinalsJson: [],
+          importProvider: "MANUAL",
+          sourceContainerId: "",
+          sourceThread: "",
+          contentHash: "",
+          rawFragmentJson: {},
+          projectId: project.id,
+          repositoryId: repository.id,
+          worktreeId: worktree.id,
+        },
+      });
+      const directory = join(outputDirectory, scenario);
+      await mkdir(directory, { recursive: true });
+      const schemaPath = join(directory, "answer.schema.json");
+      await writeFile(
+        schemaPath,
+        JSON.stringify(
+          z.toJSONSchema(
+            z.object({
+              taskId: z.number(),
+              status: z.literal("Done"),
+              summary: z.string(),
+            }),
+          ),
+        ),
+      );
+      const prompt = `Complete the explicitly authorized synthetic Actionable ${id}, workItemId ${id}, using only the isolated MCP server named coordination_evaluation. Read actionables://workflow once with MCP resources/read. Inspect the named task and follow claims, full-context reconciliation, research, readiness, validation and completion rules. Perform the arithmetic review described by its data, record actual Review evidence and Resolution, and finish Done with no claim. No shell, files, web, other applications, other tasks, invented tests, or deployment claims. Never print or persist claim credentials. This is ${scenario === "fresh" ? "new Inbox work" : "previously researched work resumed by a new session; reconcile stale versions if encountered"}.${discovery === "narrow" ? " Native MCP tools are already advertised: call the needed tool directly. Do not dump the full catalog or generated return schemas. Fetch only an exact missing input contract. Use complete changedContext as update readback." : ""}`;
+      const args = buildCodexAssistantArguments({
+        model,
+        reasoningEffort,
+        schemaPath,
+        outputPath: join(directory, "unused-answer.json"),
+      });
+      args.splice(args.indexOf("--output-last-message"), 2);
+      args.splice(
+        -1,
+        0,
+        "--json",
+        "--config",
+        "skills.include_instructions=false",
+        "--config",
+        'cli_auth_credentials_store="auto"',
+        "--config",
+        `mcp_servers.coordination_evaluation={url=${JSON.stringify(url)},bearer_token_env_var="ACTIONABLES_COORDINATION_EVAL_TOKEN",required=true}`,
+        "--config",
+        'otel.exporter="none"',
+        "--config",
+        'otel.trace_exporter="none"',
+        "--config",
+        'otel.metrics_exporter="none"',
+      );
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      const started = Date.now();
+      console.log(`Running coordination ${discovery}/${scenario}`);
+      const child = spawn(executable, args, {
+        cwd: directory,
+        env: {
+          ...process.env,
+          ACTIONABLES_COORDINATION_EVAL_TOKEN: bearerToken,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      child.stdin.on("error", () => {});
+      child.stdin.end(prompt);
+      let timedOut = false;
+      const exitCode = await new Promise<number | null>((done, reject) => {
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, 240_000);
+        child.once("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          done(code);
+        });
+      });
+      const raw = Buffer.concat(stdout).toString("utf8");
+      const events = parseEvents(raw);
+      const accounting = usageAccounting(events);
+      const nonMcpActions = events.events.filter(
+        (event) =>
+          event.type === "item.completed" &&
+          ["command_execution", "file_change", "web_search"].includes(
+            event.item?.type,
+          ),
+      );
+      const saved = await prisma.actionable.findUniqueOrThrow({
+        where: { id: task.id },
+        include: {
+          agentTaskClaim: true,
+          validationRecords: true,
+          statusHistory: true,
+        },
+      });
+      const required = [
+        "inspect_task",
+        "claim_task",
+        "get_task_context",
+        "update_task",
+        "complete_task",
+      ].map((name) => `actionables.${name}`);
+      const errors = calls.filter((call) => call.error);
+      const clientToolErrors = events.events
+        .filter((event) => event.type === "item.completed" && event.item?.error)
+        .map((event) => ({
+          tool: event.item.tool,
+          message: String(event.item.error.message),
+        }));
+      const approvalBlocked = clientToolErrors.some((error) =>
+        error.message.includes("approval policy is never"),
+      );
+      const outputTruncated = /truncated output|output too large/iu.test(raw);
+      const pass =
+        exitCode === 0 &&
+        !timedOut &&
+        accounting.complete &&
+        !outputTruncated &&
+        clientToolErrors.length === 0 &&
+        saved.status === "Done" &&
+        saved.agentTaskClaim === null &&
+        saved.validationRecords.some((record) => record.outcome === "Passed") &&
+        saved.resolution.includes("42") &&
+        required.every((name) => calls.some((call) => call.name === name)) &&
+        nonMcpActions.length === 0 &&
+        (id === 1
+          ? errors.length === 0
+          : errors.length === 1 && errors[0]!.error === "VERSION_CONFLICT");
+      const summary = {
+        scenario,
+        pass,
+        exitCode,
+        timedOut,
+        durationMs: Date.now() - started,
+        status: saved.status,
+        claimReleased: saved.agentTaskClaim === null,
+        requiredToolsObserved: required.every((name) =>
+          calls.some((call) => call.name === name),
+        ),
+        versionConflictInjected: injected,
+        calls,
+        toolCalls: calls.length,
+        setupCalls: calls.filter((call) =>
+          [
+            "actionables.list_tasks",
+            "actionables.inspect_task",
+            "actionables.claim_task",
+          ].includes(call.name),
+        ).length,
+        catalogRequests: methods.filter((method) => method === "tools/list")
+          .length,
+        resourceReads: methods.filter((method) => method === "resources/read")
+          .length,
+        nonMcpActions: nonMcpActions.length,
+        outputTruncated,
+        clientToolErrors,
+        approvalBlocked,
+        accounting,
+      };
+      summaries.push(summary);
+      await writeFile(join(directory, "events.jsonl"), redact(raw));
+      await writeFile(
+        join(directory, "stderr.txt"),
+        redact(Buffer.concat(stderr).toString("utf8")),
+      );
+      await writeJson("coordination-results.json", {
+        discovery,
+        controlRef,
+        controlWorkflow: fingerprint(controlWorkflow),
+        model,
+        reasoningEffort,
+        catalogFingerprint,
+        source: identity,
+        note: "Two ephemeral CLI sessions exercise fresh Inbox and resumed Ready work. This is not a same-session resume or a Desktop model-request capture. Catalog is unchanged; usage totals are whole-turn counters, not isolated tool-schema costs.",
+        cases: summaries,
+      });
+      console.log(JSON.stringify(summary));
+      assert.deepEqual(
+        await sourceIdentity(),
+        identity,
+        "Tested source changed during evaluation.",
+      );
+      if (!pass) process.exitCode = 1;
+      if (timedOut || exitCode !== 0 || approvalBlocked) break;
+    }
+    console.log(
+      `Results: ${join(outputDirectory, "coordination-results.json")}`,
+    );
+  } finally {
+    server.closeAllConnections();
+    if (server.listening)
+      await new Promise<void>((done) => server.close(() => done()));
+    await app.close();
+    await prisma.$disconnect();
+  }
+}
+
 async function main() {
+  if (process.argv.includes("--coordination")) {
+    assert(
+      process.argv.includes("--run"),
+      "Coordination evaluation requires --run.",
+    );
+    checkUsage();
+    await runCoordinationEvaluation();
+    return;
+  }
   checkScorer();
   checkProtocol();
   await checkConfiguration();
