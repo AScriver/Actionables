@@ -554,6 +554,7 @@ async function validateScope(
       "The selected scope is invalid.",
     );
   }
+  return { project, repository, worktree };
 }
 
 async function findActionableRow(
@@ -2011,7 +2012,20 @@ export async function createActionable(
   existingTransaction?: TransactionClient,
 ): Promise<ActionableDetail> {
   const operation = async (transaction: TransactionClient) => {
-    await validateScope(transaction, input);
+    const scope = await validateScope(transaction, input);
+    for (const [kind, record] of Object.entries(scope)) {
+      if (record?.archivedAt) {
+        throw new DomainValidationError(
+          "ARCHIVED",
+          {
+            [`${kind}Id`]: [
+              `The ${kind} ${record.id} is archived. Restore it or select an active scope before creating work.`,
+            ],
+          },
+          "New Actionables require an active project, repository and worktree.",
+        );
+      }
+    }
     const highest = await transaction.actionable.aggregate({
       _max: { sourceOrdinal: true },
     });

@@ -1,6 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -67,11 +76,13 @@ const folderPicker: NativeFolderPicker = async () => {
 };
 
 beforeAll(async () => {
-  const databaseName = `test-${randomUUID()}.db`;
-  databasePath = resolve(repoRoot, "data", databaseName);
-  agentHomeDirectory = resolve(repoRoot, "data", `agent-home-${randomUUID()}`);
+  const testDirectory = await realpath(
+    await mkdtemp(resolve(tmpdir(), "actionables-api-")),
+  );
+  databasePath = resolve(testDirectory, "test.db");
+  agentHomeDirectory = resolve(testDirectory, "agent-home");
   await mkdir(agentHomeDirectory, { recursive: true });
-  const databaseUrl = `file:./data/${databaseName}`;
+  const databaseUrl = `file:${databasePath.replace(/\\/g, "/")}`;
   const databaseFile = await open(databasePath, "a");
   await databaseFile.close();
 
@@ -2871,6 +2882,57 @@ describe("Actionables API", () => {
     expect(await prisma!.project.count()).toBe(beforeRollback.projects);
     expect(await prisma!.repository.count()).toBe(beforeRollback.repositories);
     expect(await prisma!.worktree.count()).toBe(beforeRollback.worktrees);
+  });
+
+  it("rejects ordinary creation in each archived scope before allocating a task", async () => {
+    const database = prisma!;
+    const before = await prisma!.actionable.aggregate({
+      _count: true,
+      _max: { sourceOrdinal: true },
+    });
+    for (const [kind, model, id] of [
+      ["project", prisma!.project, scope.projectId],
+      ["repository", prisma!.repository, scope.repositoryId],
+      ["worktree", prisma!.worktree, scope.worktreeId],
+    ] as const) {
+      // All three scope models share the fields used by this fixture.
+      const update = (archivedAt: Date | null) =>
+        (model.update as typeof database.project.update)({
+          where: { id },
+          data: { archivedAt },
+        });
+      await update(new Date());
+      try {
+        const response = await app!.inject({
+          method: "POST",
+          url: "/api/actionables",
+          payload: createBody(`Hidden ${kind} task`),
+        });
+        expect(response.statusCode).toBe(422);
+        expect(response.json()).toMatchObject({
+          code: "ARCHIVED",
+          errors: { [`${kind}Id`]: [expect.stringContaining(id)] },
+        });
+        expect(response.json().errors[`${kind}Id`][0]).toContain(
+          "Restore it or select an active scope",
+        );
+        expect(
+          await prisma!.actionable.aggregate({
+            _count: true,
+            _max: { sourceOrdinal: true },
+          }),
+        ).toEqual(before);
+      } finally {
+        await update(null);
+      }
+    }
+    const active = await app!.inject({
+      method: "POST",
+      url: "/api/actionables",
+      payload: createBody("Visible after restoring scope"),
+    });
+    expect(active.statusCode).toBe(201);
+    expect(active.json().item.id).toBe(before._max.sourceOrdinal! + 1);
   });
 
   it("creates a minimally valid manual actionable with neutral values and a stable location", async () => {

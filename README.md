@@ -19,6 +19,8 @@ built-in Codex handoff._
   file locations, research notes, and planned validation.
 - Organize work by project, repository, and worktree, with nested
   scoped subtasks so Codex only discovers work from the selected feature or bug.
+  New tasks require an active scope; an archived project, repository, or
+  worktree must be restored or replaced before creation.
 - An explicit lifecycle—`Inbox` → `Researching` → `Ready` → `In progress` →
   `Done`—with blocked and dismissed states.
 - Ownership claims, dependencies, validation requirements, handoff context, and
