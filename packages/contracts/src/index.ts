@@ -2734,6 +2734,13 @@ export const healthResponseSchema = z.object({
   database: z.literal("ok"),
   schema: z.literal("current"),
   requestId: z.string().min(1),
+  testRun: z
+    .object({
+      id: z.string().uuid(),
+      databaseHash: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict()
+    .optional(),
 });
 
 const seedScopeSchema = z.object({

@@ -165,7 +165,8 @@ export function* runtimePortCandidates({
 }
 
 function listen(port) {
-  const server = createServer();
+  // A reserved port is not ready to serve requests; do not hold health probes open.
+  const server = createServer((socket) => socket.destroy());
   server.unref();
   return new Promise((resolvePromise, reject) => {
     const onError = (error) => {

@@ -1,4 +1,5 @@
-import { readdir } from "node:fs/promises";
+import { readdir, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "./generated/prisma/client.js";
 
@@ -58,6 +59,19 @@ export function createPrismaClient(
 }
 
 export type AppPrismaClient = ReturnType<typeof createPrismaClient>;
+
+/** Fingerprint the connected SQLite file for explicit isolated test runs only. */
+export async function databaseFingerprint(prisma: AppPrismaClient) {
+  const databases = await prisma.$queryRaw<
+    Array<{ name: string; file: string }>
+  >`PRAGMA database_list`;
+  const database = databases.find((row) => row.name === "main");
+  if (!database?.file)
+    throw new Error("Test runtime requires a file-backed main database.");
+  let path = (await realpath(database.file)).replace(/\\/g, "/");
+  if (process.platform === "win32") path = path.toLowerCase();
+  return createHash("sha256").update(path).digest("hex");
+}
 
 export async function assertDatabaseSchemaReady(prisma: AppPrismaClient) {
   const expected = await expectedMigrationNames();

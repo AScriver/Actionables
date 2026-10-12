@@ -49,6 +49,7 @@ import Fastify, {
 } from "fastify";
 import {
   assertDatabaseSchemaReady,
+  databaseFingerprint,
   SchemaMigrationRequiredError,
   type AppPrismaClient,
 } from "./database.js";
@@ -119,6 +120,7 @@ type BuildAppOptions = {
   runtimeConfig?: ApiRuntimeConfig;
   assistantRunner?: AssistantRunner;
   agentHomeDirectory?: string;
+  testRunId?: string;
   folderPicker?: NativeFolderPicker;
 };
 
@@ -221,6 +223,7 @@ export function buildApp({
   runtimeConfig = resolveApiRuntimeConfig(undefined),
   assistantRunner,
   agentHomeDirectory,
+  testRunId,
   folderPicker = selectNativeFolder,
 }: BuildAppOptions) {
   const agentIntegration = new AgentIntegrationInstaller({
@@ -443,6 +446,14 @@ export function buildApp({
       database: "ok",
       schema: "current",
       requestId: request.id,
+      ...(testRunId
+        ? {
+            testRun: {
+              id: testRunId,
+              databaseHash: await databaseFingerprint(prisma),
+            },
+          }
+        : {}),
     });
   });
 

@@ -21,6 +21,7 @@ const app = buildApp({
   runtimeConfig,
   assistantRunner,
   agentHomeDirectory: process.env.ACTIONABLES_AGENT_HOME,
+  testRunId: process.env.ACTIONABLES_E2E_RUN_ID,
 });
 
 async function close() {

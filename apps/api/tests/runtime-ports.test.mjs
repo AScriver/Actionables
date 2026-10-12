@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -146,6 +146,23 @@ describe("runtime port candidates", () => {
 });
 
 describe("runtime port selection and persistence", () => {
+  it("closes health probes while ports are reserved so shutdown cannot wait on them", async () => {
+    const [webPort, apiPort] = await freeSequence(2);
+    const selection = await select({
+      statePath: await temporaryStatePath(),
+      webPort: String(webPort),
+      apiPort: String(apiPort),
+    });
+    const socket = createConnection({ host: "127.0.0.1", port: webPort });
+    socket.on("error", () => {});
+    try {
+      await expect.poll(() => socket.destroyed).toBe(true);
+    } finally {
+      socket.destroy();
+      await selection.reservations.releaseAll();
+    }
+  });
+
   it("selects and persists a free default pair, then reuses it", async () => {
     const [webPort, apiPort] = await freeSequence(2);
     const statePath = await temporaryStatePath();

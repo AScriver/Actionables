@@ -30,7 +30,7 @@
     "typecheck": "tsc -p packages/contracts/tsconfig.json && prisma generate && tsc -b --pretty false && tsc -p apps/api/tsconfig.json --noEmit && tsc -p apps/api/tsconfig.test.json --noEmit",
     "verify:living-plan": "pwsh -NoProfile -File scripts/validate-living-plan.ps1 -Path .agents/plans/COMPLETE.2026-07-24-personal-actionables-dashboard.md",
     "verify:migrations": "pwsh -NoProfile -File scripts/verify-migrations.ps1",
-    "verify:release": "pnpm run format:check && pnpm run typecheck && pnpm test && pnpm run test:e2e && pnpm run test:a11y && pnpm run build && pnpm run verify:migrations && pnpm run verify:living-plan"
+    "verify:release": "pnpm run format:check && pnpm run typecheck && pnpm test && pnpm exec playwright test && pnpm run build && pnpm run verify:migrations && pnpm run verify:living-plan"
   },
   "dependencies": {
     "@actionables/contracts": "workspace:*",

@@ -241,16 +241,16 @@ PowerShell session for these overrides so later normal launches do not inherit
 test settings:
 
 ```powershell
-$env:DATABASE_URL = 'file:./data/actionables-e2e.db'
-$env:WEB_PORT = '4273'
-$env:API_PORT = '4274'
-$env:ACTIONABLES_AGENT_HOME = Join-Path $env:TEMP 'actionables-test-profile'
-$env:ACTIONABLES_RUNTIME_PORT_STATE_PATH = Join-Path $env:ACTIONABLES_AGENT_HOME 'runtime-ports.json'
+$testDirectory = Join-Path ([IO.Path]::GetTempPath()) ('actionables-check-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $testDirectory | Out-Null
+$env:DATABASE_URL = 'file:' + (Join-Path $testDirectory 'browser.db').Replace('\', '/')
+$env:WEB_PORT = '4973'
+$env:API_PORT = '4974'
 Remove-Item Env:PLAYWRIGHT_REUSE_EXISTING_SERVER -ErrorAction SilentlyContinue
 pnpm exec playwright install chromium
 ```
 
-Choose another dedicated pair if 4273/4274 is occupied. Do not stop the installed
+Choose another dedicated pair if 4973/4974 is occupied. Do not stop the installed
 app to free test ports.
 
 Run the following checks, stopping to resolve any failure before continuing:
@@ -260,14 +260,14 @@ pnpm run format:check
 pnpm run typecheck
 pnpm test
 pnpm exec vitest run src
-pnpm run test:e2e
-pnpm run test:a11y
+pnpm exec playwright test
 pnpm run build
 pnpm run verify:migrations
 ```
 
 `pnpm test` runs `apps/api/tests`; the separate Vitest command covers frontend
-tests in `src`. Migration verification uses a temporary database to check fresh
+tests in `src`. The Playwright command includes browser and accessibility tests
+in one fresh run. Migration verification uses a temporary database to check fresh
 migrations, native SQLite loading, and seed idempotence.
 
 The existing `pnpm run verify:release` aggregates formatting, types, API tests,
@@ -280,20 +280,41 @@ report the unavailable plan check separately. Do not fabricate a plan to make
 the gate pass. Historical results are in the
 [release report](release-verification.md).
 
-By default, Playwright starts its own server. Its configuration passes
-`file:./data/actionables-e2e.db` to the launcher regardless of the parent
-shell's database override; the launcher deletes that file and its SQLite
-sidecars, migrates it, and seeds it before starting the API and Vite. That file
-must remain disposable. Interruption or a child failure closes both services.
+By default, Playwright starts its own server. Configuration and the launcher use
+`scripts/e2e-run.mjs` to resolve the same explicit database, ports and run ID.
+Without overrides, each run gets a unique directory under the user's TEMP
+directory and ports 4973/4974. Profiles, port state and browser output also stay
+in a unique TEMP directory; MCP is disabled for these test servers. An explicit
+database override must be an absolute `file:` path under TEMP and must not be
+named `actionables.db`. Relative paths, live ports 4173/4174, occupied ports,
+existing databases and orphaned SQLite sidecars are rejected before migration
+or seeding. No database is reset or deleted. Use a fresh path for each subsequent
+run, including separate `test:e2e` or `test:a11y` invocations. Interruption or a
+child failure closes both services; disposable artifacts remain in TEMP.
 
 `PLAYWRIGHT_CHANNEL=msedge` or `chrome` selects an installed browser; otherwise
 the suite uses Playwright Chromium. Browser runs use one worker.
 
-Set `PLAYWRIGHT_REUSE_EXISTING_SERVER=1` only after verifying that the running
-server uses an isolated test database and the expected source runtime. The test
-process must also set explicit nondefault `WEB_PORT`, `API_PORT`, and an isolated
-`DATABASE_URL`; configuration rejects unsafe reuse. Setting `DATABASE_URL` in
-the test process cannot change the database of an already running server.
+For deliberate reuse, start `pnpm exec tsx scripts/start-e2e.mjs` in a separate shell
+with fresh test settings. It prints the location of a `run.json` containing only
+the four identifiers needed by the test process. In the test shell:
+
+```powershell
+$testRun = Get-Content -LiteralPath '<printed TEMP path>\run.json' -Raw | ConvertFrom-Json
+$env:DATABASE_URL = $testRun.DATABASE_URL
+$env:WEB_PORT = $testRun.WEB_PORT
+$env:API_PORT = $testRun.API_PORT
+$env:ACTIONABLES_E2E_RUN_ID = $testRun.ACTIONABLES_E2E_RUN_ID
+$env:PLAYWRIGHT_REUSE_EXISTING_SERVER = '1'
+pnpm exec playwright test --grep '<focused test>'
+```
+
+Before any test, preflight requires both web and API health to match the run ID
+and a hash of the connected SQLite file's canonical path. Ordinary runtimes omit
+this test-only health metadata. A mismatch stops execution without test writes;
+setting `DATABASE_URL` in a client cannot change a running server's database.
+Reuse preserves all existing fixtures, so tests requiring clean seed data need
+a fresh run. Stop the test-owned launcher with Ctrl+C when finished.
 
 ## Troubleshooting
 

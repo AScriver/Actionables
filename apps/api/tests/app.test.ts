@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -277,6 +277,35 @@ describe("Actionables API", () => {
     const recovered = await app!.inject({ method: "GET", url: "/api/health" });
     expect(recovered.statusCode).toBe(200);
     expect(recovered.json()).toMatchObject({ schema: "current" });
+  });
+
+  it("fingerprints the connected database only for an explicit isolated test run", async () => {
+    const testRunId = randomUUID();
+    const testApp = buildApp({
+      prisma: prisma!,
+      agentHomeDirectory,
+      testRunId,
+    });
+    try {
+      const response = await testApp.inject({
+        method: "GET",
+        url: "/api/health",
+      });
+      let canonical = (await realpath(databasePath)).replace(/\\/g, "/");
+      if (process.platform === "win32") canonical = canonical.toLowerCase();
+      expect(response.statusCode).toBe(200);
+      expect(response.json().testRun).toEqual({
+        id: testRunId,
+        databaseHash: createHash("sha256").update(canonical).digest("hex"),
+      });
+      expect(response.body).not.toContain(databasePath);
+      expect(
+        (await app!.inject({ method: "GET", url: "/api/health" })).json()
+          .testRun,
+      ).toBeUndefined();
+    } finally {
+      await testApp.close();
+    }
   });
 
   it("lists all 32 findings and labels the 28 collapsed top-level rows", async () => {
@@ -1533,6 +1562,12 @@ describe("Actionables API", () => {
         endpoint: "http://127.0.0.1:4274/mcp",
         enabled: true,
         bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+        runtime: {
+          build: null,
+          contractHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          workflowHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          serverVersion: expect.stringMatching(/^0\.1\.0\+unpackaged\./),
+        },
       });
       expect(response.body).not.toContain("test-secret-token");
     } finally {
