@@ -93,12 +93,15 @@ import {
 import {
   bundledActionablesHistoryInstructions,
   bundledActionablesWorkflowInstructions,
+  bundledActionablesWorkflowSkill,
 } from "./agent-integration.js";
 import {
   DomainValidationError,
   searchCompletedTasks,
   VersionConflictError,
 } from "./repository.js";
+
+import { createRuntimeIdentity } from "./runtime-identity.js";
 
 const idSchema = z
   .number()
@@ -1597,21 +1600,21 @@ export async function runTool(
   }
 }
 
+let cachedToolCatalog: unknown[] | undefined;
+
 function createActionablesMcpServer(
   prisma: AppPrismaClient,
   requestContext: { correlationId: string; logger: FastifyBaseLogger },
 ) {
-  const server = new McpServer(
-    { name: "actionables", version: "0.1.0" },
-    {
-      instructions:
-        "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Use advertised tools directly; in code mode discover names, then only missing input declarations, not generated return schemas. " +
-        "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId, or inspect an explicitly authorized blocked task to resume it; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
-        "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
-        "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +
-        "structuredContent is authoritative. Check isError before dependent calls and follow retryMode/recovery; reconcile uncertain mutation delivery instead of blindly replaying. Use handoff to save unfinished work before releasing ownership.",
-    },
-  );
+  const serverInfo = { name: "actionables", version: "0.1.0", description: "" };
+  const server = new McpServer(serverInfo, {
+    instructions:
+      "History-only reads: actionables://completed-history is sufficient. Task coordination: read actionables://workflow once, or the installed skill if filesystem reads are allowed. Read these resources with MCP resources/read on this server, never as files. Use advertised tools directly; in code mode discover names, then only missing input declarations, not generated return schemas. " +
+      "Stay within user-authorized scope. For active work, list mine then available with the explicit top-level workItemId, or inspect an explicitly authorized blocked task to resume it; never discover unrelated work. Create only when authorized, using stable idempotency keys. " +
+      "Claims use host-supplied thread identity. Keep claim.claimToken secret and use task.version from the claim, then the latest mutation receipt version. Reconcile critical truncated detail before advancing or editing. " +
+      "Research before implementation, satisfy readiness and permittedTransitions, and enter In progress before edits. Done requires Resolution and qualifying validation; inspect terminal work read-only. " +
+      "structuredContent is authoritative. Check isError before dependent calls and follow retryMode/recovery; reconcile uncertain mutation delivery instead of blindly replaying. Use handoff to save unfinished work before releasing ownership.",
+  });
   server.registerResource(
     "actionables-workflow",
     "actionables://workflow",
@@ -1698,7 +1701,22 @@ function createActionablesMcpServer(
     },
   });
 
-  server.registerTool(
+  const catalog: unknown[] = [];
+  const registerTool: typeof server.registerTool = (name, config, callback) => {
+    if (!cachedToolCatalog)
+      catalog.push({
+        name,
+        ...config,
+        // This endpoint registers only Zod 4 schemas, matching the SDK catalog.
+        inputSchema: z.toJSONSchema(config.inputSchema as z.ZodType, {
+          io: "input",
+        }),
+        outputSchema: z.toJSONSchema(config.outputSchema as z.ZodType),
+      });
+    return server.registerTool(name, config, callback);
+  };
+
+  registerTool(
     "actionables.create_task",
     {
       title: "Create Actionable",
@@ -1716,7 +1734,7 @@ function createActionablesMcpServer(
         return compactTask(created.task, created.scopeProvisioning);
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.bulk_create_tasks",
     {
       title: "Preview or create Actionables in bulk",
@@ -1736,7 +1754,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.bulk_prepare_tasks",
     {
       title: "Preview or prepare Actionables in bulk",
@@ -1760,7 +1778,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.list_tasks",
     {
       title: "List Actionables",
@@ -1779,7 +1797,7 @@ function createActionablesMcpServer(
         });
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.inspect_task",
     {
       title: "Inspect an explicit Actionable",
@@ -1794,7 +1812,7 @@ function createActionablesMcpServer(
         inspectAgentTask(prisma, input),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.reopen_task",
     {
       title: "Reopen explicitly authorized terminal work",
@@ -1809,7 +1827,7 @@ function createActionablesMcpServer(
         reopenAgentTask(prisma, input, { threadId: requestThreadId(extra) }),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.create_dependency",
     {
       title: "Record an Actionable prerequisite",
@@ -1824,7 +1842,7 @@ function createActionablesMcpServer(
         manageClaimedAgentDependency(prisma, input, "create"),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.remove_dependency",
     {
       title: "Remove an Actionable prerequisite",
@@ -1839,7 +1857,7 @@ function createActionablesMcpServer(
         manageClaimedAgentDependency(prisma, input, "remove"),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.search_completed_tasks",
     {
       title: "Search completed Actionables",
@@ -1877,7 +1895,7 @@ function createActionablesMcpServer(
         });
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.get_task_context",
     {
       title: "Read active Actionable context",
@@ -1895,7 +1913,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.get_completion_view",
     {
       title: "Review parent and descendant completion evidence",
@@ -1913,7 +1931,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.complete_task",
     {
       title: "Complete an Actionable atomically",
@@ -1938,7 +1956,7 @@ function createActionablesMcpServer(
         },
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.get_task_history",
     {
       title: "Read completed Actionable history",
@@ -1976,7 +1994,7 @@ function createActionablesMcpServer(
         });
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.get_task",
     {
       title: "Get Actionable",
@@ -2003,7 +2021,7 @@ function createActionablesMcpServer(
           ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.get_task_detail",
     {
       title: "Get exact Actionable detail",
@@ -2031,7 +2049,7 @@ function createActionablesMcpServer(
           ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.claim_task",
     {
       title: "Claim Actionable",
@@ -2056,7 +2074,7 @@ function createActionablesMcpServer(
         );
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.renew_task_claim",
     {
       title: "Renew Actionable claim",
@@ -2076,7 +2094,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.recover_task_claim",
     {
       title: "Recover Actionable claim credentials",
@@ -2098,7 +2116,7 @@ function createActionablesMcpServer(
         );
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.update_task",
     {
       title: "Update claimed Actionable",
@@ -2136,7 +2154,7 @@ function createActionablesMcpServer(
         );
       }),
   );
-  server.registerTool(
+  registerTool(
     "actionables.transition_task",
     {
       title: "Transition claimed Actionable",
@@ -2157,7 +2175,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.dismiss_task",
     {
       title: "Dismiss unclaimed Actionable",
@@ -2184,7 +2202,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.record_task_validation",
     {
       title: "Record Actionable validation",
@@ -2210,7 +2228,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.handoff_task",
     {
       title: "Handoff claimed Actionable",
@@ -2231,7 +2249,7 @@ function createActionablesMcpServer(
         ),
       ),
   );
-  server.registerTool(
+  registerTool(
     "actionables.release_task",
     {
       title: "Release Actionable claim",
@@ -2255,7 +2273,24 @@ function createActionablesMcpServer(
       ),
   );
 
-  return server;
+  cachedToolCatalog ??= catalog;
+  const runtimeIdentity = createRuntimeIdentity(
+    cachedToolCatalog,
+    bundledActionablesWorkflowSkill(),
+  );
+  serverInfo.version = runtimeIdentity.serverVersion;
+  serverInfo.description = JSON.stringify(runtimeIdentity);
+  return Object.assign(server, { runtimeIdentity });
+}
+
+export function actionablesRuntimeIdentity(
+  prisma: AppPrismaClient,
+  logger: FastifyBaseLogger,
+) {
+  return createActionablesMcpServer(prisma, {
+    correlationId: "runtime-identity",
+    logger,
+  }).runtimeIdentity;
 }
 
 function safeTokenMatches(candidate: string, expected: string) {
@@ -2320,7 +2355,10 @@ export function registerMcpRoutes(
   app: FastifyInstance,
   prisma: AppPrismaClient,
   bearerToken: string,
-  createServer = createActionablesMcpServer,
+  createServer: (
+    prisma: AppPrismaClient,
+    context: { correlationId: string; logger: FastifyBaseLogger },
+  ) => McpServer = createActionablesMcpServer,
 ) {
   const onRequest = (request: FastifyRequest, reply: FastifyReply) =>
     authorizeMcpRequest(request, reply, bearerToken);

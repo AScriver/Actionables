@@ -630,9 +630,9 @@ uncertain. Re-list or fetch the scoped task before another mutation. Reuse the
 same caller-stable idempotency UUID for an exact create or bulk retry; do not
 invent a new key merely because the response was lost.
 
-Input rejected by the MCP SDK before a tool handler runs remains text-only with
-targeted field wording. It does not carry the handled-error envelope; clients
-must correct the reported schema input instead of assuming a retry mode.
+Known task-tool argument failures are normalized before SDK dispatch into the
+bounded `INVALID_REQUEST` envelope with `after_input_change` recovery. Malformed
+JSON-RPC envelopes and unknown tools still follow the MCP protocol's errors.
 
 Before a tool that can mutate Actionables runs, the server verifies that the
 active database has exactly the repository's completed migration set. Drift
@@ -671,6 +671,22 @@ agent or another process from editing files outside the MCP. A hard filesystem
 write gate requires orchestration support and is outside this endpoint.
 
 ## Tool inventory
+
+Integration status (`GET /api/settings/agent-integration`, `mcp.runtime`) and
+MCP initialization identify the running contract. `serverInfo.version` contains
+the release name and shortened contract/workflow fingerprints;
+`serverInfo.description` contains the same runtime identity as compact JSON.
+`contractHash` covers the registered public tool definitions, including input
+and output schemas, descriptions and annotations. `workflowHash` is SHA-256 of
+the bundled skill after line-ending normalization and trimming.
+
+The optional build identity reuses Local Apps' `release.json` source commit and
+release directory name. Missing or invalid evidence reports `build: null`;
+the current checkout's Git HEAD is never presented as an installed release.
+Use this status and MCP metadata for deployment verification at the same URL.
+If a client still advertises an older contract, reconnect it or restart Codex
+and start a new chat. Actionables cannot invalidate an existing chat's cached
+catalog. These identifiers contain no bearer token, claim or database path.
 
 The endpoint registers 24 tools. The names below are MCP names; a client may
 display them with its own server prefix.

@@ -7,6 +7,12 @@ const missingIntegration = {
     endpoint: "http://127.0.0.1:4274/mcp",
     enabled: false,
     bearerTokenEnvironmentVariable: "ACTIONABLES_MCP_TOKEN",
+    runtime: {
+      build: { releaseId: "20261012-120840", sourceCommit: "a".repeat(40) },
+      contractHash: "b".repeat(64),
+      workflowHash: "c".repeat(64),
+      serverVersion: "0.1.0+fixture",
+    },
   },
   mcpServer: {
     id: "mcpServer",
@@ -54,6 +60,13 @@ test("@a11y agent integration onboarding and settings pass axe", async ({
     page.getByText(/Create a strong local token.*ACTIONABLES_MCP_TOKEN/),
   ).toBeVisible();
   await expect(page.getByText(/Restart Codex after registering/)).toBeVisible();
+  await expect(
+    page.getByText("20261012-120840", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("b".repeat(64), { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(/cached tool definitions automatically/),
+  ).toBeVisible();
   await expect(
     page.getByText("Generate and save a token on Windows"),
   ).toBeVisible();

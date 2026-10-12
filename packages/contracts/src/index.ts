@@ -1327,6 +1327,24 @@ export const agentIntegrationComponentSchema = z
   })
   .strict();
 
+export const actionablesRuntimeIdentitySchema = z
+  .object({
+    build: z
+      .object({
+        releaseId: z.string().min(1).max(80),
+        sourceCommit: z.string().regex(/^[0-9a-f]{40}$/),
+      })
+      .strict()
+      .nullable(),
+    contractHash: z.string().regex(/^[0-9a-f]{64}$/),
+    workflowHash: z.string().regex(/^[0-9a-f]{64}$/),
+    serverVersion: z.string().min(1).max(200),
+  })
+  .strict();
+export type ActionablesRuntimeIdentity = z.infer<
+  typeof actionablesRuntimeIdentitySchema
+>;
+
 export const agentIntegrationSettingsSchema = z
   .object({
     mcp: z
@@ -1335,6 +1353,7 @@ export const agentIntegrationSettingsSchema = z
         endpoint: z.string().url(),
         enabled: z.boolean(),
         bearerTokenEnvironmentVariable: z.literal("ACTIONABLES_MCP_TOKEN"),
+        runtime: actionablesRuntimeIdentitySchema.optional(),
       })
       .strict(),
     mcpServer: agentIntegrationComponentSchema,

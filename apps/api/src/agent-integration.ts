@@ -10,6 +10,7 @@ import type {
   AgentIntegrationComponent,
   AgentIntegrationInstallResponse,
   AgentIntegrationSettings,
+  ActionablesRuntimeIdentity,
   InstallAgentIntegrationRequest,
 } from "@actionables/contracts";
 import { resolveApiRuntimeConfig } from "@actionables/contracts";
@@ -87,6 +88,7 @@ type InstallerOptions = {
   resourcesDirectory?: string;
   runtimeConfig?: ApiRuntimeConfig;
   mcpEnabled?: boolean;
+  runtimeIdentity?: () => ActionablesRuntimeIdentity;
 };
 
 type CodexMcpConfigState = "missing" | "outdated" | "installed" | "modified";
@@ -471,6 +473,7 @@ export class AgentIntegrationInstaller {
   readonly codexConfigPath: string;
   readonly runtimeConfig: ApiRuntimeConfig;
   readonly mcpEnabled: boolean;
+  readonly runtimeIdentity?: () => ActionablesRuntimeIdentity;
 
   constructor(options: InstallerOptions = {}) {
     this.homeDirectory = resolve(options.homeDirectory ?? homedir());
@@ -489,6 +492,7 @@ export class AgentIntegrationInstaller {
     this.runtimeConfig =
       options.runtimeConfig ?? resolveApiRuntimeConfig(undefined);
     this.mcpEnabled = options.mcpEnabled ?? false;
+    this.runtimeIdentity = options.runtimeIdentity;
   }
 
   private async sources() {
@@ -525,6 +529,7 @@ export class AgentIntegrationInstaller {
         endpoint: this.runtimeConfig.mcpEndpoint,
         enabled: this.mcpEnabled,
         bearerTokenEnvironmentVariable: mcpBearerTokenEnvironmentVariable,
+        runtime: this.runtimeIdentity?.(),
       },
       mcpServer: mcpServerComponent(this.codexConfigPath, mcpReconciliation),
       agentInstructions: instructionsComponent(

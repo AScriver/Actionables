@@ -81,7 +81,7 @@ import {
   setParent,
   waiveDependency,
 } from "./relationships.js";
-import { registerMcpRoutes } from "./mcp.js";
+import { registerMcpRoutes, actionablesRuntimeIdentity } from "./mcp.js";
 import {
   AgentTaskClaimError,
   inspectAgentTask,
@@ -227,6 +227,7 @@ export function buildApp({
     homeDirectory: agentHomeDirectory,
     runtimeConfig,
     mcpEnabled: Boolean(mcpBearerToken?.trim()),
+    runtimeIdentity: () => actionablesRuntimeIdentity(prisma, app.log),
   });
   const assistantDefaultModel =
     assistantRunner?.defaultModel ?? defaultCodexAssistantModel;

@@ -460,6 +460,22 @@ describe("Actionables MCP", () => {
         "Move a research-complete split task to Ready as the coordination record",
       );
       const tools = (await client.listTools()).tools;
+      const status = (
+        await app.inject({
+          method: "GET",
+          url: "/api/settings/agent-integration",
+        })
+      ).json();
+      const identity = status.mcp.runtime;
+      expect(identity).toMatchObject({
+        contractHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        workflowHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      });
+      expect(client.getServerVersion()?.version).toBe(identity.serverVersion);
+      expect(JSON.parse(client.getServerVersion()!.description!)).toEqual(
+        identity,
+      );
+      expect(JSON.stringify(identity)).not.toContain(bearerToken);
       for (const tool of tools) {
         expect(tool.description?.length ?? 0).toBeLessThan(1_500);
         expect(tool.description).not.toContain(workflow);

@@ -3749,6 +3749,36 @@ function AgentMcpStatus({ mcp }: { mcp: AgentIntegrationSettings["mcp"] }) {
             <code>{mcp.endpoint}</code>
           </dd>
         </div>
+        {mcp.runtime && (
+          <>
+            <div>
+              <dt>Running release</dt>
+              <dd>
+                {mcp.runtime.build?.releaseId ?? "Unpackaged or unavailable"}
+              </dd>
+            </div>
+            {mcp.runtime.build && (
+              <div>
+                <dt>Source commit</dt>
+                <dd>
+                  <code>{mcp.runtime.build.sourceCommit}</code>
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Tool contract</dt>
+              <dd>
+                <code>{mcp.runtime.contractHash}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Workflow</dt>
+              <dd>
+                <code>{mcp.runtime.workflowHash}</code>
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
       <p>
         {mcp.enabled
@@ -3759,6 +3789,13 @@ function AgentMcpStatus({ mcp }: { mcp: AgentIntegrationSettings["mcp"] }) {
         Actionables never displays the token. Restart Codex after registering
         the server or changing its configuration so it reloads both the
         configuration and user environment.
+      </p>
+      <p>
+        After an Actionables update, compare these fingerprints with MCP
+        initialization metadata even when the endpoint is unchanged. If Codex
+        still shows an older contract, reconnect the server or restart Codex and
+        open a new chat. Actionables cannot refresh an existing chat's cached
+        tool definitions automatically.
       </p>
       <details>
         <summary>Generate and save a token on Windows</summary>
