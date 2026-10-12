@@ -1,17 +1,17 @@
 # October 12 friction improvements: delivery status
 
-All five children are Done. The evaluator approval blocker is resolved and its
+Root #969 and all five children (#970–#974) are Done. The evaluator approval blocker is resolved and its
 real-agent comparison is complete, including the negative efficiency result.
-Aggregate source and isolated-runtime acceptance is complete. The installed-app
-update remains a separate operation, recorded below when verified.
+Aggregate acceptance is complete. Local Apps now runs the verified October 12
+release with the installed database preserved.
 
-| Task | Result                                                                                                                   | Commit                                                                            |
-| ---- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| #970 | Done: automatic renewal preserves longer claim deadlines; renewing receipts show persisted expiry.                       | `ecb7bbefdb169543161fc7b3d2636c02e34c37a4`                                        |
-| #971 | Done: bounded changed-field readback and selected context reads reuse native value/text pages.                           | `4ec8871d6b5183230fbc18e3ce386153633d93fc`                                        |
-| #972 | Done: bounded append batches preserve retained research/source overflow and expose evidence capacity.                    | `a5d4e14aee4c75a5a45e36149c4abc9b2fec5330`                                        |
-| #973 | Done: narrow discovery and actual-agent evaluation delivered; isolated invocation permissions resolve the approval gate. | `0d9d23c7a88d0fee0174e33511ce6239c6bc3306` plus the approval/evaluation follow-up |
-| #974 | Done: parent acceptance shows remaining checks and waiting dependents, with a scoped Codex prompt.                       | `3a7648fe81a3cd62e49d19f55c46a0be9a8ecf5f`                                        |
+| Task | Result                                                                                                                   | Commit                                                                                 |
+| ---- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| #970 | Done: automatic renewal preserves longer claim deadlines; renewing receipts show persisted expiry.                       | `ecb7bbefdb169543161fc7b3d2636c02e34c37a4`                                             |
+| #971 | Done: bounded changed-field readback and selected context reads reuse native value/text pages.                           | `4ec8871d6b5183230fbc18e3ce386153633d93fc`                                             |
+| #972 | Done: bounded append batches preserve retained research/source overflow and expose evidence capacity.                    | `a5d4e14aee4c75a5a45e36149c4abc9b2fec5330`                                             |
+| #973 | Done: narrow discovery and actual-agent evaluation delivered; isolated invocation permissions resolve the approval gate. | `0d9d23c7a88d0fee0174e33511ce6239c6bc3306`, `c5bf7b2ce606f557b2bfe3d9cbd4d07e9ba688c0` |
+| #974 | Done: parent acceptance shows remaining checks and waiting dependents, with a scoped Codex prompt.                       | `3a7648fe81a3cd62e49d19f55c46a0be9a8ecf5f`                                             |
 
 The original [review](actionables-friction-review-2026-10-12.md) and its
 [evidence manifest](actionables-friction-review-2026-10-12.json) describe the
@@ -45,8 +45,8 @@ The five changes are independent; their order does not establish dependencies.
   and [reproduction instructions](completed-history-agent-evaluation.md#active-coordination-companion)
   preserve both historical failures and final results. The review accepted the
   completed experiment without changing its strict failure scores.
-- No installed-runtime update or restart was performed by this implementation
-  run. Source and isolated-server verification do not prove deployed behavior.
+- The initial implementation run did not deploy. The separately authorized
+  update and restart are verified in the installed-runtime section below.
 
 ## Aggregate acceptance follow-up
 
@@ -72,6 +72,38 @@ Browser data lived under Windows TEMP with explicit `DATABASE_URL`,
 execution. No fixture writes targeted the installed database. Fresh migration
 and native SQLite checks passed; repeating the 32-item sample seed changed no
 records.
+
+## Installed-runtime verification
+
+On October 12 at 19:10 UTC, Local Apps switched Actionables from
+`20261006-133516` to `20261012-120840`, built from
+`a119aee43c469bbb0f98ef69a60d13f967f6f606`. The frozen-lock package build passed
+for both dashboard and review assets. The manager reports Running with five
+owned processes; previous Actionables processes exited. Ports 4173/4174,
+startup/recovery preferences, the database path and sibling apps were preserved.
+
+Health reports `status=ok`, `database=ok`, `schema=current`. No migration was
+required. All 23 MCP tools are advertised, including selected context fields,
+changed-context receipts, claim expiry, evidence capacity and parent acceptance
+contracts. Both MCP resources are present; workflow text matches the package.
+Served HTML, JavaScript and CSS match the packaged bytes. Read-only inspection
+confirmed #969–#974 are Done and unclaimed. Reloading the in-app browser showed
+the parent as Done and Unclaimed on the updated dashboard.
+
+Consistent SQLite backups before and after the switch have identical logical
+SHA-256 `25278a59f9dac0c9ade7eede9462a587a46020b643ca4a42277035c6764b009f`,
+with integrity checks passing across all 14 tables. The unmodified older
+workflow skill was backed up and updated through the existing installer;
+normalized contents now match the package. Global Codex configuration and
+instructions hashes stayed unchanged. No missing instruction component was
+installed. All task-owned browser-test servers have stopped; TEMP artifacts
+remain for Windows.
+
+[Local deployment evidence](C:/Users/AustinScriver/Apps/LocalApps/backups/actionables-update-20261012-120840/release-verification.json)
+records release identity, contracts, assets, terminal states and data preservation.
+The active Codex turn still has its earlier input schema cached. The new server
+contracts are verified; automatic refresh of existing chats is not established.
+A refreshed tool catalog or new chat may be needed to expose the new inputs.
 
 ## Baseline
 
