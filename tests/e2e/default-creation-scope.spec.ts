@@ -1,3 +1,4 @@
+import { scopeOptionsResponseSchema } from "@actionables/contracts";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
@@ -96,26 +97,40 @@ test("saves, applies, overrides and clears a default scope while preserving neut
     { data: { version: 1 } },
   );
   expect(archived.ok()).toBe(true);
-  await page.goto("/settings");
-  await expect(
-    section.getByText("Saved scope is unavailable.", { exact: false }),
-  ).toBeVisible();
-  await page.goto("/");
-  await page.getByRole("button", { name: "New actionable" }).click();
-  await expect(
-    dialog.getByRole("combobox", { name: "Worktree", exact: true }),
-  ).not.toHaveValue(preferred.worktreeId);
-  await expect(
-    dialog.getByRole("combobox", { name: "Worktree", exact: true }),
-  ).not.toHaveValue("");
-  await dialog.getByRole("button", { name: "Close actionable form" }).click();
-  await page.goto("/settings");
-  await section.getByRole("button", { name: "Clear default scope" }).click();
-  await expect(section.getByRole("status")).toHaveText(
-    "Default scope cleared.",
-  );
-  await page.reload();
-  await expect(selector).toHaveValue("");
+  const archivedWorktree = scopeOptionsResponseSchema
+    .parse(await archived.json())
+    .projects.flatMap((project) => project.repositories)
+    .flatMap((repository) => repository.worktrees)
+    .find((worktree) => worktree.id === preferred.worktreeId)!;
+  try {
+    await page.goto("/settings");
+    await expect(
+      section.getByText("Saved scope is unavailable.", { exact: false }),
+    ).toBeVisible();
+    await page.goto("/");
+    await page.getByRole("button", { name: "New actionable" }).click();
+    await expect(
+      dialog.getByRole("combobox", { name: "Worktree", exact: true }),
+    ).not.toHaveValue(preferred.worktreeId);
+    await expect(
+      dialog.getByRole("combobox", { name: "Worktree", exact: true }),
+    ).not.toHaveValue("");
+    await dialog.getByRole("button", { name: "Close actionable form" }).click();
+    await page.goto("/settings");
+    await section.getByRole("button", { name: "Clear default scope" }).click();
+    await expect(section.getByRole("status")).toHaveText(
+      "Default scope cleared.",
+    );
+    await page.reload();
+    await expect(selector).toHaveValue("");
+  } finally {
+    // Later browser fixtures reuse this scope; do not leave it archived.
+    const restored = await page.request.post(
+      `/api/scopes/worktree/${preferred.worktreeId}/restore`,
+      { data: { version: archivedWorktree.version } },
+    );
+    expect(restored.ok()).toBe(true);
+  }
 });
 
 test("reports unavailable browser storage without claiming a preference was saved", async ({

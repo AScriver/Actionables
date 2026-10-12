@@ -2,8 +2,8 @@
 
 All five children are Done. The evaluator approval blocker is resolved and its
 real-agent comparison is complete, including the negative efficiency result.
-Root #969 is completing aggregate release acceptance before the installed app
-is updated.
+Aggregate source and isolated-runtime acceptance is complete. The installed-app
+update remains a separate operation, recorded below when verified.
 
 | Task | Result                                                                                                                   | Commit                                                                            |
 | ---- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
@@ -47,6 +47,31 @@ The five changes are independent; their order does not establish dependencies.
   completed experiment without changing its strict failure scores.
 - No installed-runtime update or restart was performed by this implementation
   run. Source and isolated-server verification do not prove deployed behavior.
+
+## Aggregate acceptance follow-up
+
+The completion view was reconciled through all four current pages: all five
+children are Done, each has its own qualifying acceptance, and no unfinished
+descendant or dependency remains. Parent review separately checked the original
+scope, long-evidence/request measurements, lifecycle guards and documentation.
+The source changes were accepted with the real-agent efficiency and strict-score
+limits above intact.
+
+Full API validation passed 304 tests; frontend validation passed 29. Formatting,
+frontend/API/test TypeScript and evaluator self-checks passed. The initial full
+browser suite passed 75/82. Six failures inherited an archived worktree from the
+default-scope fixture; its archive exercise now restores that worktree in
+`finally`. The seventh asserted an unsupported tag pixel width; visibility and
+actual filtering assertions remain. A fresh isolated 15-test rerun passed,
+covering every initially failed case plus the surrounding default-scope,
+capture and layout flows. An intermediate reused-database rerun encountered
+duplicate fixture titles; it is not counted as the fresh rerun.
+
+Browser data lived under Windows TEMP with explicit `DATABASE_URL`,
+`WEB_PORT=4973` and `API_PORT=4974`; the served sample scope was checked before
+execution. No fixture writes targeted the installed database. Fresh migration
+and native SQLite checks passed; repeating the 32-item sample seed changed no
+records.
 
 ## Baseline
 

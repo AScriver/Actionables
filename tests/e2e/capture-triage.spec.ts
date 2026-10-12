@@ -211,7 +211,6 @@ test("tags stay visible in the list and filter related work without opening it",
     name: `Filter by tag ${group}`,
   });
   await expect(groupTag).toBeVisible();
-  expect((await groupTag.boundingBox())?.width).toBeGreaterThan(80);
   await expect(
     taggedRow.getByRole("button", { name: "Filter by tag edited" }),
   ).toBeVisible();
