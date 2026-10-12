@@ -811,6 +811,7 @@ const completionTaskReferenceSchema = z
     isArchived: z.boolean(),
     plannedValidationCount: z.number().int().nonnegative(),
     qualifyingValidationCount: z.number().int().nonnegative(),
+    nonpassingValidationCount: z.number().int().nonnegative(),
   })
   .strict();
 const completionItemSchema = z.discriminatedUnion("kind", [
@@ -1080,14 +1081,15 @@ function completionView(
       qualifyingValidationCount: node.validationRecords.filter(
         (record) => record.qualifiesForCompletion,
       ).length,
+      nonpassingValidationCount: node.validationRecords.filter(
+        (record) => record.outcome === "Failed" || record.outcome === "Partial",
+      ).length,
     },
     values: {
       resolution: [node.resolution],
       plannedValidation: node.validation,
       blocks: node.id === task.id ? affectedDependents : [],
-      validationRecords: node.validationRecords.filter(
-        (record) => record.qualifiesForCompletion,
-      ),
+      validationRecords: [...node.validationRecords].reverse(),
     } satisfies HistoryValues,
   }));
   const metadata = {
@@ -1107,7 +1109,7 @@ function completionView(
       (child) => child.archiveState.isArchived && !input.includeArchived,
     ).length,
     acceptanceGuidance:
-      "Review this parent's plannedValidation and record actual aggregate evidence. Child Resolution and qualifying results do not prove parent acceptance, deployment or other live checks. complete_task enforces the existing Done rules atomically; no completion override is supplied.",
+      "Review this parent's plannedValidation and record actual aggregate evidence. Child results do not prove parent acceptance or live checks. Validation is newest first, including Failed/Partial history and supersession IDs. Check recordedAt and qualifiesForCompletion; historical failures alone do not change completion eligibility. complete_task enforces existing Done rules without an override.",
   };
   const contentHash = createHash("sha256")
     .update(
@@ -1918,7 +1920,7 @@ function createActionablesMcpServer(
     {
       title: "Review parent and descendant completion evidence",
       description:
-        "Read a claimed task's own completion requirements, planned checks, descendant status, Resolution and qualifying validation together. Native values/text chunks are labeled with task metadata and use the context/history format, capped at 40 items and 8,000 serialized item characters. Start at offset 0; follow nextOffset with the same claimToken, version, contentHash and includeArchived until complete. Archived descendant evidence requires explicit opt-in; unfinished archived descendants still count as blockers. Changed evidence invalidates paging. This read never cleans up or renews claims. Child evidence does not prove parent acceptance: review the parent's own planned validation and perform required aggregate/live checks.",
+        "Read a claimed task's own completion requirements, planned checks, descendant status, Resolution and all retained validation newest first, including Failed/Partial outcomes and supersession IDs. Historical outcomes do not change completion eligibility. Native values/text chunks are labeled with task metadata and use the context/history format, capped at 40 items and 8,000 serialized item characters. Start at offset 0; follow nextOffset with the same claimToken, version, contentHash and includeArchived until complete. Archived descendant evidence requires explicit opt-in; unfinished archived descendants still count as blockers. Changed evidence invalidates paging. This read never cleans up or renews claims. Child evidence does not prove parent acceptance: review the parent's own planned validation and perform required aggregate/live checks.",
       inputSchema: toolInputSchemas["actionables.get_completion_view"],
       outputSchema: completionViewSchema,
       annotations: readOnly,

@@ -7088,6 +7088,29 @@ describe("Actionables MCP", () => {
       };
       const parentCredentials = await begin(parent);
       const childCredentials = await begin(child);
+      const failed = await prisma.validationRecord.create({
+        data: {
+          actionableId: child.id,
+          type: "Automated test",
+          outcome: "Failed",
+          notesMd: "Original automation result",
+          evidenceMd: "Initial run",
+          origin: "fixture",
+          recordedAt: new Date(Date.now() - 2000),
+        },
+      });
+      const partial = await prisma.validationRecord.create({
+        data: {
+          actionableId: child.id,
+          type: "Automated test",
+          outcome: "Partial",
+          notesMd: "Experiment delivered; efficiency gain not demonstrated.",
+          evidenceMd: "Corrected scoring",
+          supersedesId: failed.id,
+          origin: "fixture",
+          recordedAt: new Date(Date.now() - 1000),
+        },
+      });
       const resolution = "Verified child 🛠️ evidence\r\n".repeat(900);
       const notes = "Actual child validation ".repeat(650);
       output<AgentTaskCompletionReceipt>(
@@ -7097,7 +7120,7 @@ describe("Actionables MCP", () => {
             ...childCredentials,
             idempotencyKey: randomUUID(),
             resolution,
-            validation: { type: "Automated test", outcome: "Passed", notes },
+            validation: { type: "Review", outcome: "Passed", notes },
           },
         }),
       );
@@ -7176,6 +7199,37 @@ describe("Actionables MCP", () => {
       );
       expect(text("resolution")).toBe(resolution.trim());
       expect(text("validationRecords", "notes")).toBe(notes.trim());
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          field: "validationRecords",
+          kind: "value",
+          index: 1,
+          value: expect.objectContaining({
+            id: partial.id,
+            outcome: "Partial",
+            supersedesId: failed.id,
+            qualifiesForCompletion: false,
+          }),
+        }),
+      );
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          field: "validationRecords",
+          kind: "value",
+          index: 2,
+          value: expect.objectContaining({
+            id: failed.id,
+            outcome: "Failed",
+            supersededById: partial.id,
+            qualifiesForCompletion: false,
+          }),
+        }),
+      );
+      expect(
+        items
+          .filter((item) => item.task.id === child.sourceOrdinal)
+          .every((item) => item.task.nonpassingValidationCount === 2),
+      ).toBe(true);
       expect(text("plannedValidation")).toBe(childPlan);
       expect(
         items.some(

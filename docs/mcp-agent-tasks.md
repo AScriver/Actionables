@@ -107,7 +107,10 @@ null. Each page reflects current state. Archive inclusion is explicit through
 
 `actionables.get_completion_view` combines the claimed task's outstanding
 machine requirements and planned checks with descendant status, Resolution and
-qualifying validation. Pages contain task-labeled native values or text chunks,
+all retained validation, newest first. Each record preserves its outcome,
+qualification, timestamp and explicit supersession IDs; a nonpassing count
+keeps Failed/Partial history visible alongside accepted reviews. Historical
+failures alone do not change completion eligibility. Pages contain task-labeled native values or text chunks,
 at most 40 items and 8,000 serialized item characters. Keep version, claim token,
 contentHash and archive option across nextOffset pages. Related evidence changes
 invalidate partial results. Archived descendant evidence needs includeArchived;
