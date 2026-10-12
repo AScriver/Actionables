@@ -1,0 +1,2139 @@
+{
+  "purpose": "Second October 12 pass over Actionables use in active and archived Codex chats; proposals only.",
+  "counting_caveat": "Named invocation-containing code blocks can contain loops, conditionals, quoted expressions or multiple calls. They are not executed-request totals. SDK rejection counts are manually inspected output blocks, not an error-rate denominator.",
+  "coverage_limit": "Local Codex sessions and archived_sessions only; later turns included by event time. No remote/cloud chat bodies. No ordinary post-deployment named coordination calls in the fixed review window.",
+  "summary": {
+    "start_exclusive": "2026-09-23T00:04:15.004Z",
+    "prior_end_inclusive": "2026-10-12T16:56:54.000Z",
+    "end_inclusive": "2026-10-12T19:17:46.702Z",
+    "candidate_files_with_actionables_text": 704,
+    "invalid_json_lines": 0,
+    "user_chats": 106,
+    "archived_user_chats": 104,
+    "subagent_chats": 14,
+    "call_blocks": 3267,
+    "incremental_call_blocks": 54,
+    "incremental_chats": [
+      {
+        "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+        "title": "Find Actionables chat friction",
+        "archived_at_scan": false,
+        "subagent": false,
+        "incremental_call_blocks": 41,
+        "paths": [
+          "C:\\Users\\AustinScriver\\.codex\\sessions\\2026\\09\\22\\rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl"
+        ]
+      },
+      {
+        "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+        "title": "Research Actionable #574",
+        "archived_at_scan": false,
+        "subagent": false,
+        "incremental_call_blocks": 13,
+        "paths": [
+          "C:\\Users\\AustinScriver\\.codex\\sessions\\2026\\10\\12\\rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl"
+        ]
+      }
+    ],
+    "user_call_blocks": 2454,
+    "subagent_call_blocks": 813,
+    "schema_error_output_blocks": {
+      "user": 9,
+      "subagent": 4,
+      "excluded_quoted_error_blocks": 1
+    }
+  },
+  "comparison": {
+    "previous_review": "docs/actionables-friction-review-2026-10-12.md",
+    "baseline_sha256": "723fabac7a4ef434c3bb6aa15b8c329343dc05c4dfd70482ed31a8b219d2fb27",
+    "read_only_runtime_check": "Local Apps running release 20261012-120840, API health ok/database ok/schema current, packaged mcp.ts equals checkout",
+    "checked_source_head": "ce231f82a2e24c2972c2c166b1af03425a5a2b74",
+    "deployed_source_commit": "a119aee43c469bbb0f98ef69a60d13f967f6f606",
+    "client_catalog_check": "This chat still advertises get_task_context without fields; verified during review after event cutoff.",
+    "tracking": "No task mutations or new Actionables. No new top-level workItemId supplied."
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Structured recovery for MCP input-validation errors",
+      "priority": "High",
+      "evidence_class": "Archived ordinary work and isolated evaluation"
+    },
+    {
+      "id": "F2",
+      "title": "Native audited reopening for explicitly authorized terminal work",
+      "priority": "High",
+      "evidence_class": "New ordinary work"
+    },
+    {
+      "id": "F3",
+      "title": "Reject ordinary creation into an archived scope",
+      "priority": "Medium",
+      "evidence_class": "Isolated developer validation and source"
+    },
+    {
+      "id": "F4",
+      "title": "Expose running build and contract identity",
+      "priority": "Medium",
+      "evidence_class": "Persistent client adoption and deployment verification"
+    },
+    {
+      "id": "F5",
+      "title": "Retain nonpassing evidence in the completion view",
+      "priority": "Medium",
+      "evidence_class": "Parent completion review; limitation already retained in prose"
+    },
+    {
+      "id": "F6",
+      "title": "Honor one isolated browser-run configuration",
+      "priority": "Medium for development",
+      "evidence_class": "Developer validation and source"
+    }
+  ],
+  "selected_evidence": [
+    {
+      "finding": "F1",
+      "thread_id": "01a0ef0d-a854-7df0-a608-150d4b6efbfb",
+      "thread_title": "Research Actionables task 591",
+      "subagent": false,
+      "timestamp": "2026-09-30T23:42:54.389Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T14-24-04-01a0ef0d-a854-7df0-a608-150d4b6efbfb.jsonl",
+      "call_line": 5107,
+      "result_line": 5111,
+      "methods": ["update_task"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "thread_title": "Research Actionable #591",
+      "subagent": false,
+      "timestamp": "2026-10-02T20:47:59.690Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl",
+      "call_line": 1126,
+      "result_line": 1129,
+      "methods": ["get_task_context"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-03T15:33:52.719Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 7926,
+      "result_line": 7929,
+      "methods": ["get_task_context"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-03T20:09:24.307Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 12236,
+      "result_line": 12241,
+      "methods": ["get_task"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-04T19:14:52.335Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 33480,
+      "result_line": 33485,
+      "methods": ["get_task"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-05T07:28:28.323Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 42938,
+      "result_line": 42941,
+      "methods": ["get_task"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-05T11:00:37.970Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 45600,
+      "result_line": 45603,
+      "methods": ["renew_task_claim"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "subagent": false,
+      "timestamp": "2026-10-05T15:40:30.522Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "call_line": 49547,
+      "result_line": 49550,
+      "methods": ["get_task_detail"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a102db-91c2-71a1-851e-88d70358a816",
+      "thread_title": "",
+      "subagent": true,
+      "timestamp": "2026-10-04T13:17:31.655Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-41-46-01a102db-91c2-71a1-851e-88d70358a816.jsonl",
+      "call_line": 5596,
+      "result_line": 5605,
+      "methods": ["update_task", "renew_task_claim"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a102ec-e416-7e53-89d8-1b1eb191788c",
+      "thread_title": "",
+      "subagent": true,
+      "timestamp": "2026-10-03T20:24:00.799Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-00-42-01a102ec-e416-7e53-89d8-1b1eb191788c.jsonl",
+      "call_line": 2056,
+      "result_line": 2060,
+      "methods": ["update_task"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a1033d-0e47-79a0-b4e3-1abe0e361922",
+      "thread_title": "",
+      "subagent": true,
+      "timestamp": "2026-10-04T03:17:01.837Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T12-28-15-01a1033d-0e47-79a0-b4e3-1abe0e361922.jsonl",
+      "call_line": 3312,
+      "result_line": 3315,
+      "methods": ["get_task_detail", "get_task_context"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a105e1-6b32-7f21-97e6-fbdef01239f3",
+      "thread_title": "",
+      "subagent": true,
+      "timestamp": "2026-10-04T09:30:12.157Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T00-47-01-01a105e1-6b32-7f21-97e6-fbdef01239f3.jsonl",
+      "call_line": 1439,
+      "result_line": 1442,
+      "methods": ["update_task", "get_task_context"],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F1",
+      "thread_id": "01a10d20-2362-7390-b059-ced08d729553",
+      "thread_title": "Research ChatGPT App integration",
+      "subagent": false,
+      "timestamp": "2026-10-05T21:16:37.906Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T10-32-53-01a10d20-2362-7390-b059-ced08d729553.jsonl",
+      "call_line": 1171,
+      "result_line": 1176,
+      "methods": [
+        "record_task_validation",
+        "transition_task",
+        "handoff_task",
+        "inspect_task",
+        "get_task"
+      ],
+      "observation": "Manually inspected actual MCP input-validation rejection, not a quoted historical error."
+    },
+    {
+      "finding": "F2",
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "timestamp": "2026-10-12T18:45:43.963Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/10/12/rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl",
+      "line": 583,
+      "observation": "User requests additional DEV acceptance after Done."
+    },
+    {
+      "finding": "F2",
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "timestamp": "2026-10-12T18:50:08.423Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/10/12/rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl",
+      "line": 632,
+      "observation": "Agent opens Actionables in the in-app browser for additional acceptance."
+    },
+    {
+      "finding": "F2",
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "timestamp": "2026-10-12T19:00:22.340Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/10/12/rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl",
+      "line": 740,
+      "observation": "Agent selects Ready in the dashboard."
+    },
+    {
+      "finding": "F2",
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "timestamp": "2026-10-12T19:00:48.047Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/10/12/rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl",
+      "line": 748,
+      "observation": "Agent fills the audited reopening reason and confirms Ready."
+    },
+    {
+      "finding": "F2",
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "timestamp": "2026-10-12T19:01:48.236Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/10/12/rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl",
+      "line": 758,
+      "observation": "MCP list, claim, context and transition resume after dashboard reopening."
+    },
+    {
+      "finding": "F3",
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "timestamp": "2026-10-12T18:57:34.926Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/09/22/rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl",
+      "line": 3641,
+      "observation": "Isolated fixture 93 is Inbox but effectively archived through its worktree; this ID is not an installed-database finding."
+    },
+    {
+      "finding": "F5",
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "timestamp": "2026-10-12T19:04:12.509Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/09/22/rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl",
+      "line": 3744,
+      "observation": "Agent records Partial automation and completes with Passed Review preserving the negative benchmark."
+    },
+    {
+      "finding": "F5",
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "timestamp": "2026-10-12T19:05:00.507Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/09/22/rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl",
+      "line": 3756,
+      "observation": "Completion view begins at offset 0."
+    },
+    {
+      "finding": "F5",
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "timestamp": "2026-10-12T19:05:34.350Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/09/22/rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl",
+      "line": 3773,
+      "observation": "Continuation pages at 15, 27 and 39 expose qualifying validation; the review prose retains the Partial limitation."
+    },
+    {
+      "finding": "F6",
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "timestamp": "2026-10-12T19:05:34.350Z",
+      "path": "C:/Users/AustinScriver/.codex/sessions/2026/09/22/rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl",
+      "line": 3773,
+      "observation": "Fresh isolated browser rerun returns 15 passed; prior fixture failures and reused-data failure are documented separately."
+    }
+  ],
+  "evaluation": {
+    "path": "docs/actionables-coordination-evaluation-2026-10-12.json",
+    "section": "followUp.finalComparison",
+    "model": "gpt-5.6-terra",
+    "totals": {
+      "control": {
+        "strictPasses": 1,
+        "completedAndUnclaimed": 2,
+        "toolCalls": 24,
+        "setupCalls": 9,
+        "responseBytes": 42833,
+        "uncachedInputTokens": 67308,
+        "approvalBlocks": 0
+      },
+      "narrow": {
+        "strictPasses": 1,
+        "completedAndUnclaimed": 2,
+        "toolCalls": 26,
+        "setupCalls": 10,
+        "responseBytes": 43537,
+        "uncachedInputTokens": 89923,
+        "approvalBlocks": 0
+      }
+    },
+    "malformed_request_results": [
+      {
+        "variant": "control",
+        "scenario": "fresh",
+        "tool": "actionables.get_task_context",
+        "recorded_error": "UNSTRUCTURED_ERROR"
+      },
+      {
+        "variant": "control",
+        "scenario": "fresh",
+        "tool": "actionables.transition_task",
+        "recorded_error": "UNSTRUCTURED_ERROR"
+      },
+      {
+        "variant": "narrow",
+        "scenario": "resumed",
+        "tool": "actionables.inspect_task",
+        "recorded_error": "UNSTRUCTURED_ERROR"
+      },
+      {
+        "variant": "narrow",
+        "scenario": "resumed",
+        "tool": "actionables.get_task_context",
+        "recorded_error": "UNSTRUCTURED_ERROR"
+      }
+    ],
+    "caveat": "Isolated four-case evaluation. Separate from user-chat counts. No reasoning-time or causal efficiency estimate."
+  },
+  "source_checks": [
+    {
+      "observation": "SDK input validation precedes tool handler",
+      "path": "C:\\Code\\Actionables\\node_modules\\.pnpm\\@modelcontextprotocol+sdk@1.29.0_zod@4.4.3\\node_modules\\@modelcontextprotocol\\sdk\\dist\\esm\\server\\mcp.js",
+      "line": 125,
+      "sha256": "a5caaddfa0f6aadea64604aa57136bab6540298b846bbe861a80bf7392ae5aad"
+    },
+    {
+      "observation": "Actionables structured failure wrapper",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\mcp.ts",
+      "line": 1546,
+      "sha256": "8622d47edbe6b85bd6d733a544faf3aed46872248e85af7a0c864d52146b9bd4"
+    },
+    {
+      "observation": "Required audited dashboard reopen",
+      "path": "C:\\Code\\Actionables\\resources\\agent-integration\\actionables-workflow\\SKILL.md",
+      "line": 166,
+      "sha256": "c6a0f38f99e7322a9c81c980f21d25241efa1317facedfa8eb0f8e8abc82272f"
+    },
+    {
+      "observation": "Archived scope accepted by ordinary creation validation",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\repository.ts",
+      "line": 524,
+      "sha256": "42a4885b1360c7644c96c0f1088a96a1d6ee39100682f6104f62285b6458296f"
+    },
+    {
+      "observation": "MCP creation rejects archived scope",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\agent-tasks.ts",
+      "line": 1327,
+      "sha256": "cfb13ccfdf9513cb973b2e795db9798e8e8f63f16d2c90b4de54f6ffa43df5a4"
+    },
+    {
+      "observation": "Health omits build identity",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\app.ts",
+      "line": 437,
+      "sha256": "b41dcb372f089db8b89b7af4e0f6500603cc146579c14ca0c3cf44c986b6c661"
+    },
+    {
+      "observation": "MCP static version",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\mcp.ts",
+      "line": 1562,
+      "sha256": "8622d47edbe6b85bd6d733a544faf3aed46872248e85af7a0c864d52146b9bd4"
+    },
+    {
+      "observation": "Completion view filters qualifying validation",
+      "path": "C:\\Code\\Actionables\\apps\\api\\src\\mcp.ts",
+      "line": 1042,
+      "sha256": "8622d47edbe6b85bd6d733a544faf3aed46872248e85af7a0c864d52146b9bd4"
+    },
+    {
+      "observation": "Playwright hardcoded database",
+      "path": "C:\\Code\\Actionables\\playwright.config.ts",
+      "line": 70,
+      "sha256": "40e0439d5e1a434ed1f8ec87167b3c690aa8085cf9821738afe46762a6d8da54"
+    },
+    {
+      "observation": "Fixed browser-test database reset",
+      "path": "C:\\Code\\Actionables\\scripts\\start-e2e.mjs",
+      "line": 5,
+      "sha256": "dc131b3cc325a2bf56ced093a3938c9c7c3948dbf1c69f45e7f4684ffc5256ff"
+    }
+  ],
+  "chat_inventory": [
+    {
+      "thread_id": "01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc",
+      "title": "Find Actionables chat friction",
+      "archived_at_scan": false,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\sessions\\2026\\09\\22\\rollout-2026-09-22T14-51-19-01a0cb1a-162d-7e41-9a8a-1dd75bf25ccc.jsonl"
+      ],
+      "first_event": "2026-10-12T17:23:12.784Z",
+      "last_event": "2026-10-12T19:08:38.117Z",
+      "call_blocks": 41,
+      "incremental_call_blocks": 41
+    },
+    {
+      "thread_id": "01a0cb1b-e684-77a3-8ca1-694ac649ede2",
+      "title": "Protect private task content",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-22T14-53-18-01a0cb1b-e684-77a3-8ca1-694ac649ede2.jsonl"
+      ],
+      "first_event": "2026-09-23T00:04:26.689Z",
+      "last_event": "2026-09-23T00:19:39.301Z",
+      "call_blocks": 17,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0cf01-e43a-79f3-b69c-5694f2d6ad7f",
+      "title": "Review private feature architecture",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T09-03-23-01a0cf01-e43a-79f3-b69c-5694f2d6ad7f.jsonl"
+      ],
+      "first_event": "2026-09-23T16:26:04.181Z",
+      "last_event": "2026-09-23T16:27:04.224Z",
+      "call_blocks": 4,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0cf4f-8900-7fc2-96b0-116a2441c018",
+      "title": "Fix VS Code debug startup",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-28-11-01a0cf4f-8900-7fc2-96b0-116a2441c018.jsonl"
+      ],
+      "first_event": "2026-09-23T17:29:32.798Z",
+      "last_event": "2026-09-23T17:29:32.798Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0cf5b-0ab6-76c0-b449-e7ae3031dc41",
+      "title": "Claim and work on 538",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-40-46-01a0cf5b-0ab6-76c0-b449-e7ae3031dc41.jsonl"
+      ],
+      "first_event": "2026-09-23T17:41:43.242Z",
+      "last_event": "2026-09-23T18:06:45.883Z",
+      "call_blocks": 15,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0cf5b-fce5-7a22-b69e-5bbd7c5f507d",
+      "title": "Add private task checkbox",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-41-47-01a0cf5b-fce5-7a22-b69e-5bbd7c5f507d.jsonl"
+      ],
+      "first_event": "2026-09-23T17:42:53.854Z",
+      "last_event": "2026-09-23T17:43:28.087Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d04a-5491-78f1-8171-c9049305e582",
+      "title": "Claim Actionable 539",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T15-02-07-01a0d04a-5491-78f1-8171-c9049305e582.jsonl"
+      ],
+      "first_event": "2026-09-23T22:02:48.339Z",
+      "last_event": "2026-09-24T00:35:36.131Z",
+      "call_blocks": 71,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d3fb-cd42-7ba1-94b0-eef0dc7eb0ee",
+      "title": "Map Stotz technology connections",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Codex\\2026-09-24\\i-w",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T08-14-49-01a0d3fb-cd42-7ba1-94b0-eef0dc7eb0ee.jsonl"
+      ],
+      "first_event": "2026-09-24T15:19:12.306Z",
+      "last_event": "2026-09-24T15:19:12.306Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d40b-f6bf-71c1-ae52-49c5766121e2",
+      "title": "Assess WWW architecture cleanup",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T08-32-29-01a0d40b-f6bf-71c1-ae52-49c5766121e2.jsonl"
+      ],
+      "first_event": "2026-09-24T15:54:27.679Z",
+      "last_event": "2026-09-24T17:35:06.754Z",
+      "call_blocks": 7,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d42d-6304-75b0-8ff2-d528b5ebb76f",
+      "title": "Check Actionable 541 blocker",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T09-08-59-01a0d42d-6304-75b0-8ff2-d528b5ebb76f.jsonl"
+      ],
+      "first_event": "2026-09-24T16:09:49.441Z",
+      "last_event": "2026-09-24T16:21:58.473Z",
+      "call_blocks": 5,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d42d-fcff-7bf2-bc69-22050d110b17",
+      "title": "Update documentation and README",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T09-09-39-01a0d42d-fcff-7bf2-bc69-22050d110b17.jsonl"
+      ],
+      "first_event": "2026-09-24T16:12:02.616Z",
+      "last_event": "2026-09-24T16:12:02.616Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d473-9548-7193-a8de-4cd4fa8a57bc",
+      "title": "Add app to LocalApps",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\LocalApps",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T10-25-39-01a0d473-9548-7193-a8de-4cd4fa8a57bc.jsonl"
+      ],
+      "first_event": "2026-09-24T17:27:54.123Z",
+      "last_event": "2026-09-24T17:27:54.123Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d476-925f-7973-8f08-dc06e9dc77fc",
+      "title": "Verify TaskDetails privacy boundary",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T10-28-55-01a0d476-925f-7973-8f08-dc06e9dc77fc.jsonl"
+      ],
+      "first_event": "2026-09-24T17:29:51.168Z",
+      "last_event": "2026-09-24T17:59:24.327Z",
+      "call_blocks": 22,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d493-b6fb-7e70-bd64-4b61cf096a78",
+      "title": "Prepare DEV privacy rollout plan",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-00-45-01a0d493-b6fb-7e70-bd64-4b61cf096a78.jsonl"
+      ],
+      "first_event": "2026-09-24T18:01:30.149Z",
+      "last_event": "2026-09-24T18:29:05.046Z",
+      "call_blocks": 20,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d499-185b-7b02-a8f2-f9964e72893c",
+      "title": "Review Actionables 534 563 556",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-06-38-01a0d499-185b-7b02-a8f2-f9964e72893c.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-29-54-01a0d499-185b-7b02-a8f2-f9964e72893c_01a0d4ae-6710-7c51-a69f-6575b0aa885f.jsonl"
+      ],
+      "first_event": "2026-09-24T18:08:33.430Z",
+      "last_event": "2026-09-24T18:38:04.085Z",
+      "call_blocks": 23,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d4aa-f6e6-7ad2-9cf3-f1c1e1c591c3",
+      "title": "Normalize tag formatting",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-26-09-01a0d4aa-f6e6-7ad2-9cf3-f1c1e1c591c3.jsonl"
+      ],
+      "first_event": "2026-09-24T18:27:51.264Z",
+      "last_event": "2026-09-24T18:57:22.840Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d4b7-eff1-7b90-b6ca-46452f45b4c2",
+      "title": "Implement Actionable #564",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-40-19-01a0d4b7-eff1-7b90-b6ca-46452f45b4c2.jsonl"
+      ],
+      "first_event": "2026-09-24T18:41:08.806Z",
+      "last_event": "2026-09-24T18:56:25.470Z",
+      "call_blocks": 14,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d4c7-9a80-7593-887f-91b774f4445e",
+      "title": "Resume task 565 research",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-57-26-01a0d4c7-9a80-7593-887f-91b774f4445e.jsonl"
+      ],
+      "first_event": "2026-09-24T18:58:14.220Z",
+      "last_event": "2026-09-24T19:54:31.171Z",
+      "call_blocks": 23,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d4fe-46bc-7370-9f2b-d6fe958bbf42",
+      "title": "Complete Actionable #534",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T12-57-09-01a0d4fe-46bc-7370-9f2b-d6fe958bbf42.jsonl"
+      ],
+      "first_event": "2026-09-24T19:57:51.711Z",
+      "last_event": "2026-09-24T20:10:44.030Z",
+      "call_blocks": 13,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d50a-b1d3-7662-b974-372c5c6029cc",
+      "title": "Reuse Task Queue reads in saves",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-11-01-01a0d50a-b1d3-7662-b974-372c5c6029cc_01a0d50a-f8d2-79b0-b4e7-f2742d0266d1.jsonl"
+      ],
+      "first_event": "2026-09-24T20:11:50.552Z",
+      "last_event": "2026-09-24T20:29:34.545Z",
+      "call_blocks": 11,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d522-53fe-7111-a39a-7473362dcca5",
+      "title": "Implement Actionables task 553",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-36-32-01a0d522-53fe-7111-a39a-7473362dcca5.jsonl"
+      ],
+      "first_event": "2026-09-24T20:37:22.171Z",
+      "last_event": "2026-09-24T20:45:39.575Z",
+      "call_blocks": 5,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d525-747c-7f32-9873-2c7738f6d255",
+      "title": "Hide bulk toolbar until 2 selected",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-39-57-01a0d525-747c-7f32-9873-2c7738f6d255.jsonl"
+      ],
+      "first_event": "2026-09-24T20:41:35.207Z",
+      "last_event": "2026-09-24T20:41:35.207Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d52c-37f9-7b02-8125-6f8bcbb7bed1",
+      "title": "Resume research for #554",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-47-20-01a0d52c-37f9-7b02-8125-6f8bcbb7bed1.jsonl"
+      ],
+      "first_event": "2026-09-24T20:48:21.091Z",
+      "last_event": "2026-09-24T21:10:02.969Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d544-67b1-77c3-949a-ec2e6ba482c8",
+      "title": "Review task privacy toggle",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T14-13-45-01a0d544-67b1-77c3-949a-ec2e6ba482c8.jsonl"
+      ],
+      "first_event": "2026-09-24T21:32:04.271Z",
+      "last_event": "2026-09-24T21:33:29.504Z",
+      "call_blocks": 3,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d557-46fb-7531-8ea4-8c96047e6d9d",
+      "title": "Research Actionables task 575",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T14-34-22-01a0d557-46fb-7531-8ea4-8c96047e6d9d.jsonl"
+      ],
+      "first_event": "2026-09-24T21:35:06.308Z",
+      "last_event": "2026-09-24T21:56:19.051Z",
+      "call_blocks": 13,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d571-ce45-7e23-a4a4-01a5210a2d30",
+      "title": "Use Actionables work item #576. Claim task #576 and begin t…",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T15-03-20-01a0d571-ce45-7e23-a4a4-01a5210a2d30.jsonl"
+      ],
+      "first_event": "2026-09-24T22:04:20.200Z",
+      "last_event": "2026-09-24T22:44:53.280Z",
+      "call_blocks": 30,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d58d-fd46-75a2-b163-01ae66685dbd",
+      "title": "Find biggest project pain points",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T15-34-07-01a0d58d-fd46-75a2-b163-01ae66685dbd.jsonl"
+      ],
+      "first_event": "2026-09-24T22:37:00.335Z",
+      "last_event": "2026-09-24T22:52:40.793Z",
+      "call_blocks": 4,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d5a6-d194-7b41-8933-dcb9f7db0cf0",
+      "title": "Research Actionable 578",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-01-15-01a0d5a6-d194-7b41-8933-dcb9f7db0cf0.jsonl"
+      ],
+      "first_event": "2026-09-24T23:02:07.659Z",
+      "last_event": "2026-09-25T15:27:40.423Z",
+      "call_blocks": 26,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d5a7-35b5-7f00-8b2b-9c200e40552b",
+      "title": "Consolidate reference-data actionals",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-01-40-01a0d5a7-35b5-7f00-8b2b-9c200e40552b.jsonl"
+      ],
+      "first_event": "2026-09-24T23:02:41.257Z",
+      "last_event": "2026-09-24T23:07:04.000Z",
+      "call_blocks": 4,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d5b9-2a45-72f3-9084-de726b7e220a",
+      "title": "Research Actionable 584",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-21-17-01a0d5b9-2a45-72f3-9084-de726b7e220a.jsonl"
+      ],
+      "first_event": "2026-09-24T23:22:04.816Z",
+      "last_event": "2026-09-24T23:55:30.367Z",
+      "call_blocks": 17,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d5d3-4191-7bf0-abb1-6542ab8a17f5",
+      "title": "Add rolling average trend line",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\Code\\repo-stats",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-49-47-01a0d5d3-4191-7bf0-abb1-6542ab8a17f5.jsonl"
+      ],
+      "first_event": "2026-09-24T23:51:15.875Z",
+      "last_event": "2026-09-24T23:51:15.875Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d5db-f8b6-7e81-bb17-fa270601e59c",
+      "title": "Research Actionable 585",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-59-18-01a0d5db-f8b6-7e81-bb17-fa270601e59c.jsonl"
+      ],
+      "first_event": "2026-09-25T00:00:19.341Z",
+      "last_event": "2026-09-25T00:31:16.675Z",
+      "call_blocks": 15,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d910-6827-7611-a0ce-3b79c34ec456",
+      "title": "Add circuit board canvas view",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\StotzTechnologyMap",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T07-55-26-01a0d910-6827-7611-a0ce-3b79c34ec456.jsonl"
+      ],
+      "first_event": "2026-09-25T14:59:20.689Z",
+      "last_event": "2026-09-25T14:59:20.689Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d928-3ed1-7bb1-8d06-35fe897a3f9f",
+      "title": "Break down Actionable 579",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-21-28-01a0d928-3ed1-7bb1-8d06-35fe897a3f9f.jsonl"
+      ],
+      "first_event": "2026-09-25T15:22:22.453Z",
+      "last_event": "2026-09-25T15:31:50.343Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d931-1a6b-7e40-86ba-52c7aaa9da54",
+      "title": "Break up Actionable 582",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-31-09-01a0d931-1a6b-7e40-86ba-52c7aaa9da54.jsonl"
+      ],
+      "first_event": "2026-09-25T15:32:18.940Z",
+      "last_event": "2026-09-25T15:47:10.925Z",
+      "call_blocks": 11,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d936-c2fd-7c13-a120-52b311c7faae",
+      "title": "Break down Actionable 581",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-37-20-01a0d936-c2fd-7c13-a120-52b311c7faae.jsonl"
+      ],
+      "first_event": "2026-09-25T15:38:10.353Z",
+      "last_event": "2026-09-25T15:48:15.773Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d94b-9fce-71a0-9db5-7194ad60e1ea",
+      "title": "Ignore generated docs-proof shims",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-00-07-01a0d94b-9fce-71a0-9db5-7194ad60e1ea.jsonl"
+      ],
+      "first_event": "2026-09-25T16:01:26.771Z",
+      "last_event": "2026-09-25T16:01:26.771Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d952-c9ad-7482-9c97-4a95b8d511f3",
+      "title": "Research Actionable #586",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-07-56-01a0d952-c9ad-7482-9c97-4a95b8d511f3.jsonl"
+      ],
+      "first_event": "2026-09-25T16:08:39.723Z",
+      "last_event": "2026-09-25T16:32:38.118Z",
+      "call_blocks": 14,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d955-f2c9-7f90-ab18-ab378130efc8",
+      "title": "Research Actionable #550",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-11-23-01a0d955-f2c9-7f90-ab18-ab378130efc8.jsonl"
+      ],
+      "first_event": "2026-09-25T16:12:10.137Z",
+      "last_event": "2026-09-25T16:27:29.246Z",
+      "call_blocks": 14,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d968-3471-7032-bc66-5eeead69f4cc",
+      "title": "Research Actionables #551",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-31-20-01a0d968-3471-7032-bc66-5eeead69f4cc.jsonl"
+      ],
+      "first_event": "2026-09-25T16:32:01.795Z",
+      "last_event": "2026-09-25T16:54:02.327Z",
+      "call_blocks": 9,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d974-8d6d-7082-9c23-0dccfe7555d8",
+      "title": "Research Actionables task 587",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-44-49-01a0d974-8d6d-7082-9c23-0dccfe7555d8.jsonl"
+      ],
+      "first_event": "2026-09-25T16:48:37.521Z",
+      "last_event": "2026-09-25T17:38:03.550Z",
+      "call_blocks": 19,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d97d-ee65-79b0-bd12-7c46ae29758b",
+      "title": "Research Actionable #552",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-55-04-01a0d97d-ee65-79b0-bd12-7c46ae29758b.jsonl"
+      ],
+      "first_event": "2026-09-25T16:55:45.501Z",
+      "last_event": "2026-09-25T17:29:02.542Z",
+      "call_blocks": 13,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9a7-cf70-77e0-bbf7-d28d68563509",
+      "title": "Test commit in browser",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T10-40-48-01a0d9a7-cf70-77e0-bbf7-d28d68563509.jsonl"
+      ],
+      "first_event": "2026-09-25T17:42:19.927Z",
+      "last_event": "2026-09-25T18:21:10.996Z",
+      "call_blocks": 3,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9b0-a044-7541-8f5e-52d32d78f0be",
+      "title": "Create Sales Delivery Process Map",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T10-50-26-01a0d9b0-a044-7541-8f5e-52d32d78f0be.jsonl"
+      ],
+      "first_event": "2026-09-25T17:52:01.373Z",
+      "last_event": "2026-09-25T17:55:27.510Z",
+      "call_blocks": 5,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9ba-63e8-7632-b288-c78892b54806",
+      "title": "Research Actionable #588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-01-06-01a0d9ba-63e8-7632-b288-c78892b54806.jsonl"
+      ],
+      "first_event": "2026-09-25T18:02:06.032Z",
+      "last_event": "2026-09-25T18:15:16.111Z",
+      "call_blocks": 7,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9d0-1e84-7e90-9229-a4b05a1bcd29",
+      "title": "Debug changes in commit 9b52c3bd",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-24-50-01a0d9d0-1e84-7e90-9229-a4b05a1bcd29.jsonl"
+      ],
+      "first_event": "2026-09-25T18:26:28.448Z",
+      "last_event": "2026-09-25T19:14:43.858Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9de-e3e9-7ea1-b070-edb34139f6b3",
+      "title": "Continue Actionables task #588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-40-58-01a0d9de-e3e9-7ea1-b070-edb34139f6b3.jsonl"
+      ],
+      "first_event": "2026-09-25T18:41:39.138Z",
+      "last_event": "2026-09-25T19:15:58.865Z",
+      "call_blocks": 13,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0d9df-2dae-7633-bf14-e96ac250ff17",
+      "title": "Find Actionable 588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-41-17-01a0d9df-2dae-7633-bf14-e96ac250ff17.jsonl"
+      ],
+      "first_event": "2026-09-25T18:42:07.489Z",
+      "last_event": "2026-09-25T18:42:07.489Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0da31-7f34-7a60-a1c6-66c0f4c92289",
+      "title": "Research Actionable #572",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T13-11-12-01a0da31-7f34-7a60-a1c6-66c0f4c92289.jsonl"
+      ],
+      "first_event": "2026-09-25T20:11:53.248Z",
+      "last_event": "2026-09-25T20:35:59.468Z",
+      "call_blocks": 20,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0da60-dc44-7250-9541-65ab8ea43698",
+      "title": "Research Actionable #602",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T14-02-56-01a0da60-dc44-7250-9541-65ab8ea43698.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T17-25-23-01a0da60-dc44-7250-9541-65ab8ea43698_01a0db1a-3748-7862-9360-ce671f0ee645.jsonl"
+      ],
+      "first_event": "2026-09-25T21:03:40.563Z",
+      "last_event": "2026-09-26T03:55:40.122Z",
+      "call_blocks": 105,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0dbdb-55b3-7733-8a97-449a71ed3981",
+      "title": "Research Actionable #601",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T20-56-19-01a0dbdb-55b3-7733-8a97-449a71ed3981.jsonl"
+      ],
+      "first_event": "2026-09-26T03:57:52.521Z",
+      "last_event": "2026-09-26T05:20:24.062Z",
+      "call_blocks": 38,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0dbdd-83bf-73d0-bf93-a99a523b4b17",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T20-58-42-01a0dbdd-83bf-73d0-bf93-a99a523b4b17.jsonl"
+      ],
+      "first_event": "2026-09-26T03:59:23.721Z",
+      "last_event": "2026-09-26T04:00:08.581Z",
+      "call_blocks": 6,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0dec8-7063-7561-ada2-9c7b95b676e1",
+      "title": "Find Microsoft record links",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T10-34-33-01a0dec8-7063-7561-ada2-9c7b95b676e1.jsonl"
+      ],
+      "first_event": "2026-09-26T17:35:52.474Z",
+      "last_event": "2026-09-26T18:19:21.891Z",
+      "call_blocks": 12,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0def3-00d9-7c51-b7d4-5bc8f916aa84",
+      "title": "Research Actionable #606",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T11-21-02-01a0def3-00d9-7c51-b7d4-5bc8f916aa84.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T15-32-47-01a0def3-00d9-7c51-b7d4-5bc8f916aa84_01a0dfd9-7b91-7892-8af6-47759a2e420a.jsonl"
+      ],
+      "first_event": "2026-09-26T18:21:40.571Z",
+      "last_event": "2026-09-27T16:14:33.750Z",
+      "call_blocks": 93,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3a7-6241-7ff2-82ad-137685178b86",
+      "title": "Analyze history evaluation token",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-16-33-01a0e3a7-6241-7ff2-82ad-137685178b86.jsonl"
+      ],
+      "first_event": "2026-09-27T16:31:20.731Z",
+      "last_event": "2026-09-27T16:35:14.431Z",
+      "call_blocks": 9,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3ad-5079-7ec1-80a2-e270dd3ed651",
+      "title": "Create service workflow Actionables",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-23-01-01a0e3ad-5079-7ec1-80a2-e270dd3ed651.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-00-57-01a0e3ad-5079-7ec1-80a2-e270dd3ed651_01a0e3d0-0bb7-7662-91c3-14fca0e57e4b.jsonl"
+      ],
+      "first_event": "2026-09-27T16:25:12.550Z",
+      "last_event": "2026-09-27T17:08:33.845Z",
+      "call_blocks": 30,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3af-ea09-7e41-a0ff-3d1562fee068",
+      "title": "Fix Open Work navigation behavior",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-25-52-01a0e3af-ea09-7e41-a0ff-3d1562fee068.jsonl"
+      ],
+      "first_event": "2026-09-27T16:28:58.432Z",
+      "last_event": "2026-09-27T16:30:47.575Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3ba-cf1e-7fe3-8310-b57487fc2c9c",
+      "title": "Research task #613",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-37-46-01a0e3ba-cf1e-7fe3-8310-b57487fc2c9c.jsonl"
+      ],
+      "first_event": "2026-09-27T16:38:32.537Z",
+      "last_event": "2026-09-27T17:38:44.823Z",
+      "call_blocks": 32,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3d7-f10b-71b2-86aa-805d4bbdfbdd",
+      "title": "Research Actionable #610",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-09-35-01a0e3d7-f10b-71b2-86aa-805d4bbdfbdd.jsonl"
+      ],
+      "first_event": "2026-09-27T17:10:12.952Z",
+      "last_event": "2026-09-28T15:58:24.573Z",
+      "call_blocks": 104,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e3f4-3a32-7ba2-b090-0f165c6423cd",
+      "title": "Research Actionable #617",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-40-29-01a0e3f4-3a32-7ba2-b090-0f165c6423cd.jsonl"
+      ],
+      "first_event": "2026-09-27T17:41:14.424Z",
+      "last_event": "2026-09-27T20:44:06.204Z",
+      "call_blocks": 46,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e4d1-090e-7b22-a4c5-907010de2497",
+      "title": "Fix Codex configuration errors",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\.codex",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T14-41-39-01a0e4d1-090e-7b22-a4c5-907010de2497.jsonl"
+      ],
+      "first_event": "2026-09-27T21:44:21.604Z",
+      "last_event": "2026-09-27T21:44:21.604Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e8df-9f82-7613-89b4-9241546c069a",
+      "title": "Review awkward UI",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T09-36-04-01a0e8df-9f82-7613-89b4-9241546c069a.jsonl"
+      ],
+      "first_event": "2026-09-28T16:47:18.520Z",
+      "last_event": "2026-09-28T16:47:18.520Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0e8fa-65d5-7311-8039-c83a1950efe2",
+      "title": "Check financial report refresh",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T10-05-19-01a0e8fa-65d5-7311-8039-c83a1950efe2.jsonl"
+      ],
+      "first_event": "2026-09-28T17:14:23.050Z",
+      "last_event": "2026-09-28T18:02:11.356Z",
+      "call_blocks": 7,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0ea78-daa1-7dd0-a8f2-7de9df73ddde",
+      "title": "Validate financial summary script",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\database",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T17-03-04-01a0ea78-daa1-7dd0-a8f2-7de9df73ddde.jsonl"
+      ],
+      "first_event": "2026-09-29T17:22:13.363Z",
+      "last_event": "2026-09-29T17:22:13.363Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0eddb-f688-78a2-9003-8128dbb48c45",
+      "title": "Draft commissions how-to",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T08-50-10-01a0eddb-f688-78a2-9003-8128dbb48c45.jsonl"
+      ],
+      "first_event": "2026-09-29T15:51:56.760Z",
+      "last_event": "2026-09-29T15:51:56.760Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0edde-023b-7210-a6c5-ab49e2572068",
+      "title": "Document Scott’s commission email",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\OneDrive - stotzeq.com\\Documents\\Obsidian Vault",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T08-52-25-01a0edde-023b-7210-a6c5-ab49e2572068.jsonl"
+      ],
+      "first_event": "2026-09-29T16:12:41.035Z",
+      "last_event": "2026-09-29T16:12:41.035Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0ee8d-5bd4-7120-a955-7225227e1ab9",
+      "title": "Research Actionable #589",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T12-03-56-01a0ee8d-5bd4-7120-a955-7225227e1ab9.jsonl"
+      ],
+      "first_event": "2026-09-29T19:04:38.272Z",
+      "last_event": "2026-09-29T20:22:46.632Z",
+      "call_blocks": 17,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0eeda-9868-70d3-b2b7-3651b22d3c1f",
+      "title": "Draft reply to Wendy",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T13-28-18-01a0eeda-9868-70d3-b2b7-3651b22d3c1f.jsonl"
+      ],
+      "first_event": "2026-09-29T20:40:10.866Z",
+      "last_event": "2026-09-29T20:40:10.866Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0eee3-d529-7f60-bef2-d32731ea6722",
+      "title": "Research Actionable #590",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T13-38-23-01a0eee3-d529-7f60-bef2-d32731ea6722.jsonl"
+      ],
+      "first_event": "2026-09-29T20:39:05.668Z",
+      "last_event": "2026-09-29T21:11:26.714Z",
+      "call_blocks": 17,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0ef0d-a854-7df0-a608-150d4b6efbfb",
+      "title": "Research Actionables task 591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T14-24-04-01a0ef0d-a854-7df0-a608-150d4b6efbfb.jsonl"
+      ],
+      "first_event": "2026-09-29T21:24:47.935Z",
+      "last_event": "2026-10-01T00:07:22.936Z",
+      "call_blocks": 131,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f337-a29a-7ac3-bd85-19c9281ae5f4",
+      "title": "Find complex procedure logic",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\database",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-30T09-48-24-01a0f337-a29a-7ac3-bd85-19c9281ae5f4.jsonl"
+      ],
+      "first_event": "2026-09-30T16:51:27.429Z",
+      "last_event": "2026-09-30T16:51:27.429Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f850-3a18-7de1-ab2b-dc0d9a192de5",
+      "title": "Review Actionable 579",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T09-33-22-01a0f850-3a18-7de1-ab2b-dc0d9a192de5.jsonl"
+      ],
+      "first_event": "2026-10-01T16:34:14.873Z",
+      "last_event": "2026-10-01T17:13:12.906Z",
+      "call_blocks": 19,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f875-355e-7630-a9ec-bc34503a9805",
+      "title": "Research Actionable #649",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T10-13-46-01a0f875-355e-7630-a9ec-bc34503a9805.jsonl"
+      ],
+      "first_event": "2026-10-01T17:14:41.473Z",
+      "last_event": "2026-10-01T18:10:03.002Z",
+      "call_blocks": 22,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f8aa-28cc-7a00-89c1-0243a098a066",
+      "title": "Research Actionable #648",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T11-11-36-01a0f8aa-28cc-7a00-89c1-0243a098a066.jsonl"
+      ],
+      "first_event": "2026-10-01T18:12:27.508Z",
+      "last_event": "2026-10-01T18:21:57.106Z",
+      "call_blocks": 8,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f8af-3065-7783-a847-9cbde029b933",
+      "title": "Review Layne Richins’s email (2)",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T11-17-06-01a0f8af-3065-7783-a847-9cbde029b933.jsonl"
+      ],
+      "first_event": "2026-10-01T18:22:10.347Z",
+      "last_event": "2026-10-01T20:23:56.824Z",
+      "call_blocks": 37,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f924-142d-79c3-96cf-530de19f393b",
+      "title": "Continue Actionables task 648",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T13-24-46-01a0f924-142d-79c3-96cf-530de19f393b.jsonl"
+      ],
+      "first_event": "2026-10-01T20:25:31.273Z",
+      "last_event": "2026-10-01T20:47:08.528Z",
+      "call_blocks": 9,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f96c-1739-73f1-affd-c844689f7f5c",
+      "title": "Validate Actionable #641 in browser",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T14-43-26-01a0f96c-1739-73f1-affd-c844689f7f5c.jsonl"
+      ],
+      "first_event": "2026-10-01T21:44:16.386Z",
+      "last_event": "2026-10-01T22:05:55.243Z",
+      "call_blocks": 12,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f9a6-740c-74e1-a0eb-dec3094e2d63",
+      "title": "Commit repository changes",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T15-47-10-01a0f9a6-740c-74e1-a0eb-dec3094e2d63.jsonl"
+      ],
+      "first_event": "2026-10-01T23:31:15.628Z",
+      "last_event": "2026-10-01T23:31:15.628Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0f9cf-7000-73d3-8a8f-c852b256e496",
+      "title": "Research Actionable task 647",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T16-31-56-01a0f9cf-7000-73d3-8a8f-c852b256e496.jsonl"
+      ],
+      "first_event": "2026-10-01T23:32:52.065Z",
+      "last_event": "2026-10-02T15:26:36.773Z",
+      "call_blocks": 25,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6",
+      "title": "Add agent task unblocking",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T07-56-16-01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6.jsonl"
+      ],
+      "first_event": "2026-10-02T14:57:47.566Z",
+      "last_event": "2026-10-02T14:58:15.091Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fd3b-4c10-7aa0-8417-ea415709ac14",
+      "title": "Research Actionable #646",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T08-28-37-01a0fd3b-4c10-7aa0-8417-ea415709ac14.jsonl"
+      ],
+      "first_event": "2026-10-02T15:29:40.419Z",
+      "last_event": "2026-10-02T16:24:06.892Z",
+      "call_blocks": 20,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fd7f-4735-7c33-9303-f8c27dc19057",
+      "title": "Research Actionable #645",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T09-42-52-01a0fd7f-4735-7c33-9303-f8c27dc19057.jsonl"
+      ],
+      "first_event": "2026-10-02T16:48:02.814Z",
+      "last_event": "2026-10-02T19:27:39.450Z",
+      "call_blocks": 62,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "title": "Research Actionable #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl"
+      ],
+      "first_event": "2026-10-02T19:31:05.072Z",
+      "last_event": "2026-10-02T22:18:06.830Z",
+      "call_blocks": 81,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fe2f-5a36-71e2-a61d-a8ce25d8374d",
+      "title": "Research Actionables task #651",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-55-11-01a0fe2f-5a36-71e2-a61d-a8ce25d8374d.jsonl"
+      ],
+      "first_event": "2026-10-02T19:56:09.546Z",
+      "last_event": "2026-10-02T20:36:25.460Z",
+      "call_blocks": 12,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fe88-7363-7ef1-a2a0-7e261e7d22d9",
+      "title": "Move text to description tooltip",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T14-32-30-01a0fe88-7363-7ef1-a2a0-7e261e7d22d9.jsonl"
+      ],
+      "first_event": "2026-10-02T21:34:54.599Z",
+      "last_event": "2026-10-02T22:32:06.563Z",
+      "call_blocks": 23,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0feb0-f79b-7dc3-89de-2e50e47c5a79",
+      "title": "Select eligible task in #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-16-45-01a0feb0-f79b-7dc3-89de-2e50e47c5a79.jsonl"
+      ],
+      "first_event": "2026-10-02T22:17:20.301Z",
+      "last_event": "2026-10-02T22:48:14.376Z",
+      "call_blocks": 19,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl"
+      ],
+      "first_event": "2026-10-02T22:51:25.013Z",
+      "last_event": "2026-10-05T15:45:29.422Z",
+      "call_blocks": 557,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a102db-91c2-71a1-851e-88d70358a816",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-41-46-01a102db-91c2-71a1-851e-88d70358a816.jsonl"
+      ],
+      "first_event": "2026-10-03T17:42:32.335Z",
+      "last_event": "2026-10-04T14:34:41.844Z",
+      "call_blocks": 102,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a102db-decd-7303-ad0c-e53c99d7458a",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-42-06-01a102db-decd-7303-ad0c-e53c99d7458a.jsonl"
+      ],
+      "first_event": "2026-10-03T17:42:46.930Z",
+      "last_event": "2026-10-04T15:04:56.306Z",
+      "call_blocks": 115,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a102dc-2553-72b2-8435-d9bd2f753708",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-42-24-01a102dc-2553-72b2-8435-d9bd2f753708.jsonl"
+      ],
+      "first_event": "2026-10-03T17:43:21.520Z",
+      "last_event": "2026-10-04T10:49:32.176Z",
+      "call_blocks": 89,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a102ec-e416-7e53-89d8-1b1eb191788c",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-00-42-01a102ec-e416-7e53-89d8-1b1eb191788c.jsonl"
+      ],
+      "first_event": "2026-10-03T18:01:29.389Z",
+      "last_event": "2026-10-04T13:42:30.455Z",
+      "call_blocks": 74,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1030a-e817-7763-a656-6e32b5192d01",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-33-29-01a1030a-e817-7763-a656-6e32b5192d01.jsonl"
+      ],
+      "first_event": "2026-10-03T21:02:48.350Z",
+      "last_event": "2026-10-04T07:45:50.785Z",
+      "call_blocks": 42,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1030f-0bc5-7db0-8cfd-add77e4d31ce",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-38-00-01a1030f-0bc5-7db0-8cfd-add77e4d31ce.jsonl"
+      ],
+      "first_event": "2026-10-03T18:38:54.591Z",
+      "last_event": "2026-10-04T14:19:42.636Z",
+      "call_blocks": 76,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10334-252c-7e92-9b3a-fe3a8fd54f1d",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T12-18-31-01a10334-252c-7e92-9b3a-fe3a8fd54f1d.jsonl"
+      ],
+      "first_event": "2026-10-03T19:19:31.782Z",
+      "last_event": "2026-10-04T12:05:29.654Z",
+      "call_blocks": 67,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1033d-0e47-79a0-b4e3-1abe0e361922",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T12-28-15-01a1033d-0e47-79a0-b4e3-1abe0e361922.jsonl"
+      ],
+      "first_event": "2026-10-03T19:29:14.150Z",
+      "last_event": "2026-10-04T14:19:00.769Z",
+      "call_blocks": 73,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10398-19ea-7210-b1b4-096d44d1910b",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T14-07-42-01a10398-19ea-7210-b1b4-096d44d1910b.jsonl"
+      ],
+      "first_event": "2026-10-03T21:08:25.507Z",
+      "last_event": "2026-10-04T13:42:38.187Z",
+      "call_blocks": 111,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a105e1-6b32-7f21-97e6-fbdef01239f3",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T00-47-01-01a105e1-6b32-7f21-97e6-fbdef01239f3.jsonl"
+      ],
+      "first_event": "2026-10-04T07:47:49.155Z",
+      "last_event": "2026-10-04T11:04:00.075Z",
+      "call_blocks": 29,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1066c-55b2-7b31-9b84-e453f90bc73c",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T03-18-45-01a1066c-55b2-7b31-9b84-e453f90bc73c.jsonl"
+      ],
+      "first_event": "2026-10-04T10:19:57.753Z",
+      "last_event": "2026-10-04T11:50:35.953Z",
+      "call_blocks": 11,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10749-8515-7c32-b083-09894720fb5e",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T07-20-21-01a10749-8515-7c32-b083-09894720fb5e.jsonl"
+      ],
+      "first_event": "2026-10-04T14:21:44.038Z",
+      "last_event": "2026-10-04T15:08:53.177Z",
+      "call_blocks": 8,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1074a-25c2-7741-ab9a-2677bb408719",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T07-21-02-01a1074a-25c2-7741-ab9a-2677bb408719.jsonl"
+      ],
+      "first_event": "2026-10-04T14:22:05.415Z",
+      "last_event": "2026-10-04T14:52:10.367Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10cc9-4d6d-78b2-96f9-cff60ffa5e1e",
+      "title": "Investigate commission count #541114",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T08-58-01-01a10cc9-4d6d-78b2-96f9-cff60ffa5e1e.jsonl"
+      ],
+      "first_event": "2026-10-05T16:00:01.996Z",
+      "last_event": "2026-10-05T16:00:01.996Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10d20-2362-7390-b059-ced08d729553",
+      "title": "Research ChatGPT App integration",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T10-32-53-01a10d20-2362-7390-b059-ced08d729553.jsonl"
+      ],
+      "first_event": "2026-10-05T20:20:02.909Z",
+      "last_event": "2026-10-05T21:56:52.220Z",
+      "call_blocks": 26,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10e22-ea6b-73e0-8391-f1fc693b7864",
+      "title": "Retrieve Actionable 1001 review",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-15-32-01a10e22-ea6b-73e0-8391-f1fc693b7864.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-37-22-01a10e22-ea6b-73e0-8391-f1fc693b7864_01a10e36-e97f-7ef0-8429-0a15823b123e.jsonl"
+      ],
+      "first_event": "2026-10-05T22:16:30.649Z",
+      "last_event": "2026-10-05T23:16:40.821Z",
+      "call_blocks": 7,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a10e41-484e-7293-a4f1-a318f6bd910b",
+      "title": "Exclude Phoenix from Southern report",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-48-42-01a10e41-484e-7293-a4f1-a318f6bd910b.jsonl"
+      ],
+      "first_event": "2026-10-05T22:50:36.550Z",
+      "last_event": "2026-10-06T00:28:08.223Z",
+      "call_blocks": 27,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a111fd-a21a-79d1-895e-fc170abc7b70",
+      "title": "Add created column to findings table",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-13-17-01a111fd-a21a-79d1-895e-fc170abc7b70.jsonl"
+      ],
+      "first_event": "2026-10-06T16:14:51.031Z",
+      "last_event": "2026-10-06T16:14:51.031Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a111ff-a848-75b3-8e27-1b2e7832180e",
+      "title": "Review invoice 280483 commissions",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Codex\\2026-10-06\\giv",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-15-29-01a111ff-a848-75b3-8e27-1b2e7832180e.jsonl"
+      ],
+      "first_event": "2026-10-06T16:20:04.291Z",
+      "last_event": "2026-10-06T16:20:04.291Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11203-0543-7690-8ad8-7b460305ae35",
+      "title": "Move private description help to a [",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-19-10-01a11203-0543-7690-8ad8-7b460305ae35.jsonl"
+      ],
+      "first_event": "2026-10-06T16:22:27.173Z",
+      "last_event": "2026-10-06T18:28:48.064Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11204-c587-7381-a786-71a61cea16af",
+      "title": "Sort grids by recent updates",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-21-05-01a11204-c587-7381-a786-71a61cea16af.jsonl"
+      ],
+      "first_event": "2026-10-06T16:22:26.964Z",
+      "last_event": "2026-10-06T16:22:26.964Z",
+      "call_blocks": 1,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11205-25d6-7900-a6f3-b0a7325a3bb2",
+      "title": "Research Actionables task 957",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-21-30-01a11205-25d6-7900-a6f3-b0a7325a3bb2.jsonl"
+      ],
+      "first_event": "2026-10-06T16:22:09.646Z",
+      "last_event": "2026-10-06T18:40:10.822Z",
+      "call_blocks": 24,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11206-c131-7b82-b896-57f0fe71c0b0",
+      "title": "Fix Actionable worktree assignment",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-23-15-01a11206-c131-7b82-b896-57f0fe71c0b0.jsonl"
+      ],
+      "first_event": "2026-10-06T16:27:13.218Z",
+      "last_event": "2026-10-06T16:27:48.962Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11236-0ff7-7db0-91d6-5f82ce88f543",
+      "title": "Research Actionables task 957 (2)",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T10-14-56-01a11236-0ff7-7db0-91d6-5f82ce88f543.jsonl"
+      ],
+      "first_event": "2026-10-06T17:16:18.024Z",
+      "last_event": "2026-10-06T17:17:01.693Z",
+      "call_blocks": 2,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1128c-7014-7a43-95cb-602ff68d5240",
+      "title": "Research Actionable #961",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-49-17-01a1128c-7014-7a43-95cb-602ff68d5240.jsonl"
+      ],
+      "first_event": "2026-10-06T18:49:53.983Z",
+      "last_event": "2026-10-06T19:20:16.961Z",
+      "call_blocks": 14,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11295-dc8b-7a23-81da-f0e3d470f291",
+      "title": "Complete Actionables 960, 958, 956,",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-59-34-01a11295-dc8b-7a23-81da-f0e3d470f291.jsonl"
+      ],
+      "first_event": "2026-10-06T19:00:44.549Z",
+      "last_event": "2026-10-06T20:39:12.098Z",
+      "call_blocks": 42,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a112ab-a3e9-7500-8ea2-932320f6a8c7",
+      "title": "Resume research on #961",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T12-23-21-01a112ab-a3e9-7500-8ea2-932320f6a8c7.jsonl"
+      ],
+      "first_event": "2026-10-06T19:23:58.126Z",
+      "last_event": "2026-10-06T23:16:50.284Z",
+      "call_blocks": 55,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1135f-a61c-72e2-bd7b-3c734834a657",
+      "title": "Review commission history approach",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T16-25-31-01a1135f-a61c-72e2-bd7b-3c734834a657_01a11389-5b3f-71c1-ae22-4e8fc345bec1.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T15-39-58-01a1135f-a61c-72e2-bd7b-3c734834a657.jsonl"
+      ],
+      "first_event": "2026-10-06T22:44:11.867Z",
+      "last_event": "2026-10-06T23:18:00.218Z",
+      "call_blocks": 8,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a1180f-3a44-7972-a092-b89739b6c803",
+      "title": "Allow textarea scrolling in Ideas",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T13-30-13-01a1180f-3a44-7972-a092-b89739b6c803.jsonl"
+      ],
+      "first_event": "2026-10-07T20:31:32.523Z",
+      "last_event": "2026-10-07T20:53:41.772Z",
+      "call_blocks": 7,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11853-7a99-7381-89c7-55279ecce829",
+      "title": "Research task #598",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T14-44-46-01a11853-7a99-7381-89c7-55279ecce829.jsonl"
+      ],
+      "first_event": "2026-10-07T21:45:21.899Z",
+      "last_event": "2026-10-08T16:36:59.160Z",
+      "call_blocks": 25,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a11c81-c495-76d2-84ce-7445afebdc1b",
+      "title": "Find a small MyStotz page",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-08T10-13-49-01a11c81-c495-76d2-84ce-7445afebdc1b.jsonl"
+      ],
+      "first_event": "2026-10-08T17:26:45.144Z",
+      "last_event": "2026-10-08T19:14:11.517Z",
+      "call_blocks": 40,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a13103-ed3b-77e0-97f8-8db50a9870e2",
+      "title": "Complete Actionable 964",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-12T09-48-23-01a13103-ed3b-77e0-97f8-8db50a9870e2.jsonl"
+      ],
+      "first_event": "2026-10-12T16:49:17.177Z",
+      "last_event": "2026-10-12T16:52:29.667Z",
+      "call_blocks": 10,
+      "incremental_call_blocks": 0
+    },
+    {
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "title": "Research Actionable #574",
+      "archived_at_scan": false,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\sessions\\2026\\10\\12\\rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl"
+      ],
+      "first_event": "2026-10-12T16:54:13.676Z",
+      "last_event": "2026-10-12T19:01:48.236Z",
+      "call_blocks": 16,
+      "incremental_call_blocks": 13
+    }
+  ]
+}
