@@ -1147,7 +1147,20 @@ export const archiveImpactResponseSchema = z.object({
 
 const titleField = z.string().trim().min(1, "Enter a title.").max(240);
 const markdownField = z.string().trim().max(100_000);
-const notesSchema = z.array(z.string().trim().min(1)).max(200);
+export const agentResearchBatchLimit = 200;
+export const agentSourceBatchLimit = 50;
+const retainedNotesSchema = z.array(z.string().trim().min(1));
+const notesSchema = retainedNotesSchema.max(agentResearchBatchLimit);
+const researchBatchSchema = retainedNotesSchema.max(
+  agentResearchBatchLimit,
+  "Send at most 200 research notes per request. Split appendResearch into batches; existing history is retained.",
+);
+const sourceBatchSchema = z
+  .array(userSourceReferenceInputSchema)
+  .max(
+    agentSourceBatchLimit,
+    "Send at most 50 sources per request. Split addUserSources into batches; existing sources are retained.",
+  );
 
 /** Use the same tag spelling for writes, bulk edits, and exact filters. */
 export function normalizeTag(value: string) {
@@ -1184,6 +1197,8 @@ export const updateActionableRequestSchema = createActionableRequestSchema
   .extend({
     version: z.number().int().positive(),
     status: statusSchema,
+    research: retainedNotesSchema.default([]),
+    userSources: z.array(userSourceReferenceInputSchema).default([]),
   })
   .strict();
 
@@ -1363,7 +1378,7 @@ export const groomActionableNotesProposalSchema = z
     description: markdownField.describe(
       "Reorganized description preserving the original meaning.",
     ),
-    research: notesSchema.describe(
+    research: retainedNotesSchema.describe(
       "Reorganized research notes containing no invented evidence.",
     ),
     validation: notesSchema.describe(
@@ -1527,15 +1542,15 @@ export const updateClaimedAgentTaskRequestSchema = z
       .describe(
         "Replace the Resolution Markdown describing completed changes and important implementation decisions.",
       ),
-    research: notesSchema
+    research: researchBatchSchema
       .optional()
       .describe(
         "Replace all research notes; do not combine with appendResearch.",
       ),
-    appendResearch: notesSchema
+    appendResearch: researchBatchSchema
       .optional()
       .describe(
-        "Append exact-deduplicated research notes while preserving existing notes.",
+        "Append up to 200 exact-deduplicated research notes per request. Retained research has no total item-count cap; use bounded context/history pages to read it.",
       ),
     plannedValidation: notesSchema
       .optional()
@@ -1546,18 +1561,16 @@ export const updateClaimedAgentTaskRequestSchema = z
       .optional()
       .describe("Append planned checks while preserving existing checks."),
     tags: tagsSchema.optional().describe("Replace all task tags."),
-    userSources: z
-      .array(userSourceReferenceInputSchema)
-      .max(50)
+    userSources: sourceBatchSchema
       .optional()
       .describe(
         "Replace all source references; do not combine with addUserSources.",
       ),
-    addUserSources: z
-      .array(userSourceReferenceInputSchema)
-      .max(50)
+    addUserSources: sourceBatchSchema
       .optional()
-      .describe("Add new exact-deduplicated source references."),
+      .describe(
+        "Add up to 50 exact-deduplicated source references per request. Retained sources have no total item-count cap.",
+      ),
   })
   .strict()
   .superRefine((input, context) => {
@@ -1706,7 +1719,7 @@ export const handoffClaimedAgentTaskRequestSchema = z
       .describe(
         "Add exact-deduplicated file references while preserving existing files.",
       ),
-    appendResearch: notesSchema
+    appendResearch: researchBatchSchema
       .min(1)
       .optional()
       .describe("Append exact-deduplicated research notes before release."),
@@ -2398,7 +2411,7 @@ export const bulkPrepareAgentTaskItemSchema = z
     description: markdownField
       .optional()
       .describe("Optional intended-result Markdown to replace before Ready."),
-    appendResearch: notesSchema
+    appendResearch: researchBatchSchema
       .min(1, "Provide at least one research note.")
       .optional()
       .describe("Research notes to append with exact deduplication."),
@@ -2771,7 +2784,7 @@ const portableActionableSchema = z
     finding: z.string().max(100_000),
     description: z.string().max(100_000),
     resolution: z.string().max(100_000).default(""),
-    research: notesSchema,
+    research: retainedNotesSchema,
     validation: notesSchema,
     files: z.array(sourceFileSchema).max(500),
     tags: tagsSchema,

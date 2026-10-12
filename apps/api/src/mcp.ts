@@ -11,6 +11,8 @@ import {
   agentTaskClaimCredentialSchema,
   agentTaskHandoffContentRecoveryMessage,
   agentTaskLeaseMinutesSchema,
+  agentResearchBatchLimit,
+  agentSourceBatchLimit,
   agentTaskListViewSchema,
   agentTaskVersionInputSchema,
   bulkCreateAgentTasksRequestSchema,
@@ -260,6 +262,40 @@ const getTaskHistorySchema = z
       });
     }
   });
+const evidenceCapacitySchema = z
+  .object({
+    research: z
+      .object({
+        count: z.number().int().nonnegative(),
+        appendMax: z.literal(agentResearchBatchLimit),
+        totalLimit: z.null(),
+      })
+      .strict(),
+    userSources: z
+      .object({
+        count: z.number().int().nonnegative(),
+        appendMax: z.literal(agentSourceBatchLimit),
+        totalLimit: z.null(),
+      })
+      .strict(),
+  })
+  .strict();
+function evidenceCapacity(
+  task: Pick<ActionableDetail, "research" | "userSources">,
+) {
+  return {
+    research: {
+      count: task.research.length,
+      appendMax: agentResearchBatchLimit,
+      totalLimit: null,
+    },
+    userSources: {
+      count: task.userSources.length,
+      appendMax: agentSourceBatchLimit,
+      totalLimit: null,
+    },
+  };
+}
 const historyFieldSchema = z.enum([
   "title",
   "priority",
@@ -447,6 +483,7 @@ const compactTaskSchema = z
     manualBlocker: z.string().max(1_500).nullable(),
     resolution: z.string().max(2_500),
     research: z.array(z.string().max(400)).max(6),
+    evidenceCapacity: evidenceCapacitySchema,
     plannedValidation: z.array(z.string().max(400)).max(6),
     tags: z.array(z.string().max(60)).max(10),
     files: z
@@ -670,6 +707,7 @@ const taskHistoryPageSchema = z
     archiveState: actionableDetailSchema.shape.archiveState,
     updatedAt: z.string().datetime(),
     contentHash: taskDetailPageSchema.shape.contentHash,
+    evidenceCapacity: evidenceCapacitySchema,
     fieldCounts: z
       .object({
         research: z.number().int().nonnegative(),
@@ -709,6 +747,7 @@ const selectedTaskContextPageSchema = taskContextPageSchema.extend({
     .nullable(),
 });
 const updateTaskReceiptSchema = mutationReceiptSchema.extend({
+  evidenceCapacity: evidenceCapacitySchema,
   changedContext: selectedTaskContextPageSchema.optional(),
 });
 /** Bounded active context; values share the terminal history chunk contract. */
@@ -891,6 +930,7 @@ function taskHistoryPage(
     status: task.status,
     archiveState: task.archiveState,
     updatedAt: task.updatedAt,
+    evidenceCapacity: evidenceCapacity(task),
     fieldCounts: activeContext
       ? Object.fromEntries(
           historyFieldSchema.options.map((field) => [
@@ -1011,6 +1051,7 @@ function completionView(
     archiveState: task.archiveState,
     updatedAt: task.updatedAt,
     progress: task.directTaskProgress,
+    evidenceCapacity: evidenceCapacity(task),
     outstandingRequirements,
     unresolvedDependencyCount: task.unresolvedDependencyCount,
     excludedArchivedDescendants: snapshot.descendants.filter(
@@ -1283,6 +1324,7 @@ function compactTask(
   };
   return compactTaskSchema.parse({
     ...detail,
+    evidenceCapacity: evidenceCapacity(task),
     truncation: {
       truncatedFields,
       omitted,
@@ -2015,6 +2057,7 @@ function createActionablesMcpServer(
           input,
           (result) =>
             updateTaskReceiptSchema.parse({
+              evidenceCapacity: evidenceCapacity(result.task),
               ...mutationReceipt(result.task, {
                 changedFields: result.changedFields,
                 claimReleased: false,

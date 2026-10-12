@@ -2059,19 +2059,34 @@ describe("agent task claims", () => {
         new Date("2026-07-25T12:13:00.000Z"),
       ),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    const retained = await updateClaimedAgentTask(
+      prisma,
+      task.sourceOrdinal,
+      {
+        claimToken: claimed.claim.claimToken,
+        version: appended.version,
+        appendResearch: Array.from(
+          { length: 200 },
+          (_, index) => `Research ${index}`,
+        ),
+      },
+      new Date("2026-07-25T12:14:00.000Z"),
+    );
+    expect(retained.research).toHaveLength(202);
+    expect(retained.research.slice(0, 2)).toEqual(appended.research);
     await expect(
       updateClaimedAgentTask(
         prisma,
         task.sourceOrdinal,
         {
           claimToken: claimed.claim.claimToken,
-          version: appended.version,
+          version: retained.version,
           appendResearch: Array.from(
-            { length: 200 },
-            (_, index) => `Research ${index}`,
+            { length: 201 },
+            (_, index) => `Oversized ${index}`,
           ),
         },
-        new Date("2026-07-25T12:14:00.000Z"),
+        new Date("2026-07-25T12:15:00.000Z"),
       ),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
   });

@@ -20,6 +20,7 @@ import {
   type InspectAgentTaskResponse,
   type AgentDependencyReceipt,
   type AgentTaskCompletionReceipt,
+  type ActionableDetail,
 } from "@actionables/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
@@ -757,7 +758,9 @@ describe("Actionables MCP", () => {
       const updateSchema = tools.find(
         (tool) => tool.name === "actionables.update_task",
       )!.outputSchema!;
-      expect(updateSchema.required).toEqual(receiptSchemas[0]!.required);
+      expect(updateSchema.required?.toSorted()).toEqual(
+        [...receiptSchemas[0]!.required!, "evidenceCapacity"].toSorted(),
+      );
       expect(updateSchema.properties).toMatchObject(
         receiptSchemas[0]!.properties!,
       );
@@ -5022,7 +5025,7 @@ describe("Actionables MCP", () => {
     } finally {
       await transport.close();
     }
-  });
+  }, 20_000);
 
   it("names fields whose compact detail omits otherwise short values", async () => {
     const task = await createTask({ title: "Omission-only detail" });
@@ -6974,6 +6977,193 @@ describe("Actionables MCP", () => {
           }),
         ).recordedValidationId,
       ).toBeNull();
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("retains evidence beyond batch limits through updates, completion, and archived history", async () => {
+    const notes = Array.from(
+      { length: 200 },
+      (_, index) => `Research ${index}`,
+    );
+    const task = await createTask({ research: notes });
+    await prisma.userSourceReference.createMany({
+      data: Array.from({ length: 50 }, (_, index) => ({
+        actionableId: task.id,
+        type: "File",
+        locator: `evidence-${index}.md`,
+      })),
+    });
+    const { client, transport } = await connectClient();
+    const call = (name: string, args: Record<string, unknown>) =>
+      client.callTool({ name: `actionables.${name}`, arguments: args });
+    try {
+      const claimed = output<{
+        task: { version: number; evidenceCapacity: unknown };
+        claim: { claimToken: string };
+      }>(
+        await call("claim_task", {
+          id: task.sourceOrdinal,
+          workItemId: task.sourceOrdinal,
+          version: task.version,
+        }),
+      );
+      expect(claimed.task.evidenceCapacity).toEqual({
+        research: { count: 200, appendMax: 200, totalLimit: null },
+        userSources: { count: 50, appendMax: 50, totalLimit: null },
+      });
+      const credentials = {
+        id: task.sourceOrdinal,
+        claimToken: claimed.claim.claimToken,
+      };
+      const updated = output<{
+        version: number;
+        changedContext: TaskContextPage;
+        evidenceCapacity: unknown;
+      }>(
+        await call("update_task", {
+          ...credentials,
+          version: claimed.task.version,
+          appendResearch: [" Research 200 ", "Research 200"],
+          addUserSources: [
+            { type: "File", locator: " evidence-50.md " },
+            { type: "File", locator: "evidence-50.md" },
+          ],
+        }),
+      );
+      const capacity = {
+        research: { count: 201, appendMax: 200, totalLimit: null },
+        userSources: { count: 51, appendMax: 50, totalLimit: null },
+      };
+      expect(updated.evidenceCapacity).toEqual(capacity);
+      expect(updated).toMatchObject({
+        counts: [
+          { field: "research", persisted: 1, duplicatesIgnored: 1 },
+          { field: "userSources", persisted: 1, duplicatesIgnored: 1 },
+        ],
+      });
+      let page = updated.changedContext;
+      const items: TaskContextPage["items"] = [];
+      do {
+        expect(page.evidenceCapacity).toEqual(capacity);
+        expect(page.items.length).toBeLessThanOrEqual(40);
+        expect(JSON.stringify(page.items).length).toBeLessThanOrEqual(8000);
+        items.push(...page.items);
+        if (!page.nextRead) break;
+        page = output<TaskContextPage>(
+          await call("get_task_context", { ...credentials, ...page.nextRead }),
+        );
+      } while (true);
+      expect(
+        items
+          .filter((item) => item.field === "research")
+          .map((item) => (item.kind === "value" ? item.value : item.text)),
+      ).toEqual([...notes, "Research 200"]);
+      expect(items.filter((item) => item.field === "userSources")).toHaveLength(
+        51,
+      );
+      const before = await historyReadState();
+      for (const additions of [
+        { appendResearch: Array.from({ length: 201 }, () => "Too large") },
+        {
+          addUserSources: Array.from({ length: 51 }, () => ({
+            type: "File",
+            locator: "too-many.md",
+          })),
+        },
+      ]) {
+        const rejected = await call("update_task", {
+          ...credentials,
+          version: updated.version,
+          ...additions,
+        });
+        expect(rejected.isError).toBe(true);
+        expect(JSON.stringify(rejected)).toContain("batches");
+      }
+      expect(await historyReadState()).toEqual(before);
+      const detail = (
+        await app.inject({
+          method: "GET",
+          url: `/api/actionables/${task.sourceOrdinal}`,
+        })
+      ).json<{ item: ActionableDetail }>().item;
+      const edited = await app.inject({
+        method: "PATCH",
+        url: `/api/actionables/${task.sourceOrdinal}`,
+        payload: {
+          version: detail.version,
+          title: "Edited without losing history",
+          priority: detail.priority,
+          effort: detail.effort,
+          evidenceState: detail.evidenceState,
+          ...scope,
+          status: detail.status,
+          finding: detail.finding,
+          description: detail.description,
+          resolution: detail.resolution,
+          research: detail.research,
+          validation: detail.validation,
+          tags: detail.tags,
+          userSources: detail.userSources.map(({ type, locator, label }) => ({
+            type,
+            locator,
+            ...(label ? { label } : {}),
+          })),
+        },
+      });
+      expect(edited.statusCode).toBe(200);
+      const editedTask = edited.json<{ item: ActionableDetail }>().item;
+      expect(editedTask.research).toEqual([...notes, "Research 200"]);
+      expect(editedTask.userSources).toHaveLength(51);
+      const started = output<{ version: number }>(
+        await call("transition_task", {
+          ...credentials,
+          version: editedTask.version,
+          status: "In progress",
+        }),
+      );
+      const done = output<AgentTaskCompletionReceipt>(
+        await call("complete_task", {
+          ...credentials,
+          version: started.version,
+          idempotencyKey: randomUUID(),
+          resolution: "Retained and reviewed all evidence.",
+          validation: {
+            type: "Automated test",
+            outcome: "Passed",
+            evidence:
+              "Read all 201 notes and 51 sources through bounded pages.",
+          },
+        }),
+      );
+      expect(done.status).toBe("Done");
+      const archived = await prisma.actionable.update({
+        where: { id: task.id },
+        data: { archivedAt: new Date(), version: { increment: 1 } },
+      });
+      let history = output<TaskHistoryPage>(
+        await call("get_task_history", {
+          id: task.sourceOrdinal,
+          workItemId: task.sourceOrdinal,
+          version: archived.version,
+          includeArchived: true,
+        }),
+      );
+      const historyItems = [...history.items];
+      while (history.nextCall) {
+        history = output<TaskHistoryPage>(
+          await client.callTool(history.nextCall),
+        );
+        expect(JSON.stringify(history.items).length).toBeLessThanOrEqual(8000);
+        historyItems.push(...history.items);
+      }
+      expect(
+        historyItems.filter((item) => item.field === "research"),
+      ).toHaveLength(201);
+      expect(
+        historyItems.filter((item) => item.field === "userSources"),
+      ).toHaveLength(51);
     } finally {
       await transport.close();
     }

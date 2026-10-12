@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { open, rm } from "node:fs/promises";
+import { mkdtemp, open } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,8 +25,11 @@ const databases: Array<{ path: string; prisma: AppPrismaClient }> = [];
 
 async function freshDatabase() {
   const databaseName = `import-test-${randomUUID()}.db`;
-  const path = resolve(repoRoot, "data", databaseName);
-  const url = `file:./data/${databaseName}`;
+  const path = resolve(
+    await mkdtemp(resolve(tmpdir(), "actionables-import-")),
+    databaseName,
+  );
+  const url = `file:${path.replaceAll("\\", "/")}`;
   const file = await open(path, "a");
   await file.close();
   execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
@@ -40,13 +44,8 @@ async function freshDatabase() {
 
 afterEach(async () => {
   await Promise.all(
-    databases.splice(0).map(async ({ path, prisma }) => {
+    databases.splice(0).map(async ({ prisma }) => {
       await prisma.$disconnect();
-      await Promise.all(
-        ["", "-journal", "-shm", "-wal"].map((suffix) =>
-          rm(`${path}${suffix}`, { force: true }),
-        ),
-      );
     }),
   );
 });
@@ -684,7 +683,10 @@ describe("internal seed reconciliation", () => {
         description: "Restore every supported field.",
         resolution:
           "Completed the portable round trip and preserved field ownership.",
-        researchJson: ["Research note"],
+        researchJson: Array.from(
+          { length: 201 },
+          (_, index) => `Research note ${index}`,
+        ),
         validationJson: ["Run the integration suite"],
         filesJson: [{ path: "src/user.ts", lines: "1-5", symbol: "userWork" }],
         tagsJson: ["user", "roundtrip"],
@@ -760,6 +762,14 @@ describe("internal seed reconciliation", () => {
         provenance: "agent-added",
         createdAt: new Date("2026-07-25T01:10:00.000Z"),
       },
+    });
+    await source.userSourceReference.createMany({
+      data: Array.from({ length: 50 }, (_, index) => ({
+        actionableId: manual.id,
+        type: "File",
+        locator: `evidence-${index}.md`,
+        provenance: "agent-added",
+      })),
     });
     await source.dependencyRelationship.create({
       data: {

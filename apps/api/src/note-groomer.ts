@@ -32,7 +32,7 @@ export async function groomActionableNotes(
   });
   if (context.length > maxContextCharacters) {
     throw new AssistantContextTooLargeError(
-      "Shorten the description, research notes, or validation plan and retry.",
+      "This task exceeds the note-grooming context limit. Keep its evidence intact; read it through bounded MCP context/history pages and edit the current finding or description separately.",
     );
   }
 

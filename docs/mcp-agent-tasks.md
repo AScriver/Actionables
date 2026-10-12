@@ -539,6 +539,27 @@ return an empty complete page. Keep the same selection, version and hash while
 paging; changed selection or content invalidates the continuation. Initial
 scope reconciliation must still cover every required field before work starts.
 
+Research and source references have no configured total item-count cap. Keep
+original evidence in research and source history; use finding/description for
+the current summary. Existing JSON research and source-reference storage is
+retained, with no migration or automatic deletion/compaction. Full-record edits,
+completion, handoff, and portable export/import preserve history beyond the
+former 200-note and 50-source limits.
+
+MCP research writes remain limited to 200 notes per request and source writes
+to 50 references. Use `appendResearch` / `addUserSources` in batches, retaining
+the latest receipt version between calls. Oversized batches fail before any
+write and explain this recovery. Replacement fields still deliberately replace
+their collection; use append fields to add evidence without losing history.
+Compact task detail, context/history pages, completion views, and update receipts
+report `evidenceCapacity`: stored `count`, per-request `appendMax`, and
+`totalLimit: null` for each collection. Transport byte limits, note-grooming
+context limits, and available disk space still apply. Native history reads stay
+bounded to 40 items and 8,000 serialized item characters per page.
+
+Older application releases may still reject edits or portable imports above
+the former totals; update the runtime before relying on extended history.
+
 ## Results and error recovery
 
 Successful calls expose their authoritative result in `structuredContent`.
