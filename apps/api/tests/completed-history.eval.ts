@@ -1557,7 +1557,56 @@ function score(test: Case, answer: Answer, calls: RecordedCall[]) {
 }
 
 /** Exercise the acceptance oracle with valid traces and single broken pagination steps. */
+function isScopedCoordinationInspection(
+  call: {
+    name: string;
+    id?: number;
+    workItemId?: number;
+    view?: string;
+    error?: string;
+  },
+  id: number,
+) {
+  if (call.error) return false;
+  if (call.name === "actionables.inspect_task") return call.id === id;
+  return (
+    call.name === "actionables.list_tasks" &&
+    call.view === "available" &&
+    call.workItemId === id
+  );
+}
+
 function checkScorer() {
+  assert(
+    isScopedCoordinationInspection(
+      { name: "actionables.inspect_task", id: 7 },
+      7,
+    ),
+  );
+  assert(
+    isScopedCoordinationInspection(
+      { name: "actionables.list_tasks", workItemId: 7, view: "available" },
+      7,
+    ),
+  );
+  assert(
+    !isScopedCoordinationInspection(
+      { name: "actionables.list_tasks", workItemId: 8, view: "available" },
+      7,
+    ),
+  );
+  assert(
+    !isScopedCoordinationInspection(
+      { name: "actionables.list_tasks", view: "mine" },
+      7,
+    ),
+  );
+  assert(
+    !isScopedCoordinationInspection(
+      { name: "actionables.inspect_task", id: 7, error: "NOT_FOUND" },
+      7,
+    ),
+  );
   const test = cases[0]!;
   const answer: Answer = {
     disposition: "found",
@@ -2068,6 +2117,8 @@ async function runCoordinationEvaluation() {
   let calls: Array<{
     name: string;
     id?: number;
+    workItemId?: number;
+    view?: string;
     error?: string;
     responseBytes: number;
   }> = [];
@@ -2146,6 +2197,8 @@ async function runCoordinationEvaluation() {
           calls.push({
             name: call.name,
             id: args.id,
+            workItemId: args.workItemId,
+            view: args.view,
             error: parsed.result?.isError
               ? (parsed.result?.structuredContent?.code ?? "UNSTRUCTURED_ERROR")
               : undefined,
@@ -2260,7 +2313,7 @@ async function runCoordinationEvaluation() {
           ),
         ),
       );
-      const prompt = `Complete the explicitly authorized synthetic Actionable ${id}, workItemId ${id}, using only the isolated MCP server named coordination_evaluation. Read actionables://workflow once with MCP resources/read. Inspect the named task and follow claims, full-context reconciliation, research, readiness, validation and completion rules. Perform the arithmetic review described by its data, record actual Review evidence and Resolution, and finish Done with no claim. No shell, files, web, other applications, other tasks, invented tests, or deployment claims. Never print or persist claim credentials. This is ${scenario === "fresh" ? "new Inbox work" : "previously researched work resumed by a new session; reconcile stale versions if encountered"}.${discovery === "narrow" ? " Native MCP tools are already advertised: call the needed tool directly. Do not dump the full catalog or generated return schemas. Fetch only an exact missing input contract. Use complete changedContext as update readback." : ""}`;
+      const prompt = `Complete the explicitly authorized synthetic Actionable ${id}, workItemId ${id}, using only the isolated MCP server named coordination_evaluation. Read actionables://workflow once with MCP resources/read. Inspect the named task and follow claims, full-context reconciliation, research, readiness, validation and completion rules. For both scenarios, read the entire description with get_task_context, then persist the newly checked arithmetic in finding and appendResearch with update_task before completing; these are required exercise steps even if claim detail already contains the inputs. Perform the arithmetic review described by its data, record actual Review evidence and Resolution, and finish Done with no claim. No shell, files, web, other applications, other tasks, invented tests, or deployment claims. Never print or persist claim credentials. This is ${scenario === "fresh" ? "new Inbox work" : "previously researched work resumed by a new session; reconcile stale versions if encountered"}.${discovery === "narrow" ? " Native MCP tools are already advertised: call the needed tool directly. Do not dump the full catalog or generated return schemas. Fetch only an exact missing input contract. Use complete changedContext as update readback." : ""}`;
       const args = buildCodexAssistantArguments({
         model,
         reasoningEffort,
@@ -2268,6 +2321,10 @@ async function runCoordinationEvaluation() {
         outputPath: join(directory, "unused-answer.json"),
       });
       args.splice(args.indexOf("--output-last-message"), 2);
+      // TOML preserves dots in tool names; dotted CLI override paths split them.
+      const toolApprovals = [...allowed]
+        .map((name) => `${JSON.stringify(name)}={approval_mode="approve"}`)
+        .join(",");
       args.splice(
         -1,
         0,
@@ -2278,6 +2335,8 @@ async function runCoordinationEvaluation() {
         'cli_auth_credentials_store="auto"',
         "--config",
         `mcp_servers.coordination_evaluation={url=${JSON.stringify(url)},bearer_token_env_var="ACTIONABLES_COORDINATION_EVAL_TOKEN",required=true}`,
+        "--config",
+        `mcp_servers.coordination_evaluation.tools={${toolApprovals}}`,
         "--config",
         'otel.exporter="none"',
         "--config",
@@ -2336,12 +2395,14 @@ async function runCoordinationEvaluation() {
         },
       });
       const required = [
-        "inspect_task",
         "claim_task",
         "get_task_context",
         "update_task",
         "complete_task",
       ].map((name) => `actionables.${name}`);
+      const scopedInspectionObserved = calls.some((call) =>
+        isScopedCoordinationInspection(call, id),
+      );
       const errors = calls.filter((call) => call.error);
       const clientToolErrors = events.events
         .filter((event) => event.type === "item.completed" && event.item?.error)
@@ -2363,6 +2424,7 @@ async function runCoordinationEvaluation() {
         saved.agentTaskClaim === null &&
         saved.validationRecords.some((record) => record.outcome === "Passed") &&
         saved.resolution.includes("42") &&
+        scopedInspectionObserved &&
         required.every((name) => calls.some((call) => call.name === name)) &&
         nonMcpActions.length === 0 &&
         (id === 1
@@ -2376,6 +2438,7 @@ async function runCoordinationEvaluation() {
         durationMs: Date.now() - started,
         status: saved.status,
         claimReleased: saved.agentTaskClaim === null,
+        scopedInspectionObserved,
         requiredToolsObserved: required.every((name) =>
           calls.some((call) => call.name === name),
         ),
@@ -2412,6 +2475,7 @@ async function runCoordinationEvaluation() {
         model,
         reasoningEffort,
         catalogFingerprint,
+        approvedTools: [...allowed],
         source: identity,
         note: "Two ephemeral CLI sessions exercise fresh Inbox and resumed Ready work. This is not a same-session resume or a Desktop model-request capture. Catalog is unchanged; usage totals are whole-turn counters, not isolated tool-schema costs.",
         cases: summaries,

@@ -31,7 +31,18 @@ coordination calls, caps calls at 40, and rejects other tools. Each process has
 a four-minute deadline. The default is the existing assistant runner's model,
 with medium reasoning effort and the existing auto credential store.
 
-Pass requires observed inspect/claim/context/update/complete calls, persisted
+The opt-in run approves only the proxy's existing coordination allowlist through
+invocation-local [MCP tool approval overrides](https://developers.openai.com/codex/mcp#other-configuration-options).
+The override is one TOML table because the CLI splits dotted override paths,
+including dots inside quoted tool names. Global approval settings and the
+requested read-only shell sandbox are unchanged; the isolated proxy still
+enforces task scope and rejects every tool outside its allowlist. Both variants
+use exactly the same permissions and retain the full advertised catalog.
+
+The prompt explicitly requires a complete context read and an update in both
+scenarios so resumed work reaches the injected conflict. Pass requires scoped
+inspection (the exact task or its available-work listing), observed
+claim/context/update/complete calls, persisted
 Done state, a released claim, passed validation, the correct arithmetic result,
 complete usage accounting, no truncation or non-MCP actions, and no unexpected
 errors. Claim and bearer credentials are redacted before saving event logs;
@@ -45,7 +56,7 @@ internal thinking or isolated schema cost. Native CLI adoption and the
 executable Desktop code-mode example are separate checks. A small comparison
 can expose regressions but cannot establish broad reliability.
 
-October 12 result: the Desktop example printed 534 characters of the selected
+Initial October 12 result: the Desktop example printed 534 characters of the selected
 input declaration instead of the 5,894-character full definition. The actual
 control CLI sessions each made five setup calls; fresh/resumed uncached input
 was 44,469/45,311 tokens. Both stopped because `transition_task` required approval
@@ -54,8 +65,39 @@ reach the injected conflict. Narrow was not run after that gate, so these
 results establish no input reduction or successful end-to-end adoption. The
 harness now records client-side denials and stops further cases at this gate.
 See the [recorded measurements](actionables-coordination-evaluation-2026-10-12.json).
-The remaining acceptance requires an environment permitted to execute these
-isolated lifecycle writes; this evaluation does not alter approval policy.
+Subsequent approval diagnosis confirmed that a quoted dotted CLI key produced
+an incorrect tool name. Passing the override as a TOML table resolved that gate.
+The first permitted runs reached Done but exposed two fixture/scorer gaps:
+resumed work could legitimately finish without a separate update, and scoped
+available-work inspection was rejected in favor of a redundant `inspect_task`
+call. The prompt now requires the intended context/update exercise; the scorer
+accepts both scoped inspection routes and rejects wrong-scope, unscoped and
+failed inspection calls. Historical failures remain in the measurement record;
+later runs must not be pooled with them as one unchanged experiment.
+
+The final paired run used the same source, full catalog, model (`gpt-5.6-terra`),
+medium effort and permission allowlist. All four cases reached Done with passed
+arithmetic validation and released claims. Both resumed cases recovered from
+the injected stale version. The strict score remained **1/2 per variant**:
+control fresh and narrow resumed each sent two malformed calls, then corrected
+them. Those errors remain failures in the record; successful completion does
+not turn them into strict passes.
+
+| Variant | Case    | Strict score                   | Tool calls | Setup calls | Uncached input | Tool response bytes |
+| ------- | ------- | ------------------------------ | ---------: | ----------: | -------------: | ------------------: |
+| Control | Fresh   | Fail: 2 recovered input errors |         13 |           4 |         30,199 |              21,666 |
+| Control | Resumed | Pass                           |         11 |           5 |         37,109 |              21,167 |
+| Narrow  | Fresh   | Pass                           |         11 |           4 |         45,669 |              20,824 |
+| Narrow  | Resumed | Fail: 2 recovered input errors |         15 |           6 |         44,254 |              22,713 |
+
+Each case made one catalog request and one workflow resource read. There were
+no approval blocks, human approval prompts, truncations or non-MCP actions.
+Narrow totaled 26 calls and 89,923 uncached input tokens versus control's 24
+calls and 67,308 tokens. This small sample establishes **no native CLI efficiency
+gain**. The Desktop input-declaration example remains a separate measured
+reduction in returned characters. Runs overlapped local validation; elapsed
+time is not compared. This completes the planned evaluation, including its
+negative efficiency result, without claiming broad reliability.
 
 ### Completed history
 

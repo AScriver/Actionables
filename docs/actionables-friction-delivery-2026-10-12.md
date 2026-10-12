@@ -1,16 +1,17 @@
 # October 12 friction improvements: delivery status
 
-All five implementations are committed and pushed to `AScriver`. Four children
-are Done; actual-agent acceptance for #973 remains blocked. Root #969 remains
-open until that acceptance and its own aggregate review finish.
+All five children are Done. The evaluator approval blocker is resolved and its
+real-agent comparison is complete, including the negative efficiency result.
+Root #969 is completing aggregate release acceptance before the installed app
+is updated.
 
-| Task | Result                                                                                                                       | Commit                                     |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| #970 | Done: automatic renewal preserves longer claim deadlines; renewing receipts show persisted expiry.                           | `ecb7bbefdb169543161fc7b3d2636c02e34c37a4` |
-| #971 | Done: bounded changed-field readback and selected context reads reuse native value/text pages.                               | `4ec8871d6b5183230fbc18e3ce386153633d93fc` |
-| #972 | Done: bounded append batches preserve retained research/source overflow and expose evidence capacity.                        | `a5d4e14aee4c75a5a45e36149c4abc9b2fec5330` |
-| #973 | Implementation pushed; acceptance Blocked by CLI approval policy. Narrow discovery example and actual-agent evaluator added. | `0d9d23c7a88d0fee0174e33511ce6239c6bc3306` |
-| #974 | Done: parent acceptance shows remaining checks and waiting dependents, with a scoped Codex prompt.                           | `3a7648fe81a3cd62e49d19f55c46a0be9a8ecf5f` |
+| Task | Result                                                                                                                   | Commit                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| #970 | Done: automatic renewal preserves longer claim deadlines; renewing receipts show persisted expiry.                       | `ecb7bbefdb169543161fc7b3d2636c02e34c37a4`                                        |
+| #971 | Done: bounded changed-field readback and selected context reads reuse native value/text pages.                           | `4ec8871d6b5183230fbc18e3ce386153633d93fc`                                        |
+| #972 | Done: bounded append batches preserve retained research/source overflow and expose evidence capacity.                    | `a5d4e14aee4c75a5a45e36149c4abc9b2fec5330`                                        |
+| #973 | Done: narrow discovery and actual-agent evaluation delivered; isolated invocation permissions resolve the approval gate. | `0d9d23c7a88d0fee0174e33511ce6239c6bc3306` plus the approval/evaluation follow-up |
+| #974 | Done: parent acceptance shows remaining checks and waiting dependents, with a scoped Codex prompt.                       | `3a7648fe81a3cd62e49d19f55c46a0be9a8ecf5f`                                        |
 
 The original [review](actionables-friction-review-2026-10-12.md) and its
 [evidence manifest](actionables-friction-review-2026-10-12.json) describe the
@@ -32,13 +33,18 @@ The five changes are independent; their order does not establish dependencies.
   The browser tests used an explicitly isolated TEMP database and verified
   sample scope on dedicated ports 4973/4974. The [captured panel](images/parent-acceptance-2026-10-12.png)
   was inspected. The in-app browser stayed queued; no in-app acceptance is claimed.
-- The actual CLI fresh/resumed control runs stopped when `transition_task`
-  required approval under policy `never`. Neither completed, and the narrow
-  variant was not attempted after that gate. Therefore no successful adoption
-  or uncached-input reduction is established. The
+- Initial CLI runs stopped at the approval gate. Invocation-only per-tool
+  approvals on the isolated proxy now permit the authorized fixture writes,
+  with global permissions unchanged. Final control/narrow fresh/resumed cases
+  all reached Done with validation and released claims; both resumed cases
+  recovered a real stale-version conflict. Each variant scored 1/2 strict
+  passes because its other case corrected two malformed requests. Narrow used
+  26 calls and 89,923 uncached tokens versus 24 and 67,308 for control; no native
+  CLI efficiency gain is established. The
   [measurement record](actionables-coordination-evaluation-2026-10-12.json)
   and [reproduction instructions](completed-history-agent-evaluation.md#active-coordination-companion)
-  preserve the remaining acceptance. Approval policy was not changed.
+  preserve both historical failures and final results. The review accepted the
+  completed experiment without changing its strict failure scores.
 - No installed-runtime update or restart was performed by this implementation
   run. Source and isolated-server verification do not prove deployed behavior.
 
