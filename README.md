@@ -126,5 +126,7 @@ single-user application.
 Repository scope provisioning reads Git metadata. Actionables does not commit,
 push, switch branches, or edit tracked project files. Relationship changes use
 explicit dashboard or MCP operations; the relationship auditor only recommends
-changes. The repository contains source launchers, not an installer or updater.
-Externally managed installations have their own release and restart procedures.
+changes. The repository contains source launchers and a
+[Local Apps redeploy command](docs/windows-setup.md#managed-or-background-installations)
+for the existing Windows installation. Other externally managed installations
+have their own release and restart procedures.

@@ -192,10 +192,9 @@ exits unexpectedly, it stops the other and returns a failure code.
 
 ### Managed or background installations
 
-This repository supplies foreground development and production launchers. It
-does not register a Windows Scheduled Task, install a background service, or
-provide an updater. Restart policies, release directories, and log locations
-belong to the external process manager.
+This repository supplies foreground launchers and a redeploy script for this
+machine's existing Local Apps installation. It does not install a background
+service. Restart policies, release directories, and logs belong to Local Apps.
 
 The [September 22 deployment baseline](actionables-friction-baseline-2026-09-22.md#verified-installed-state)
 records a Local Apps installation and a disabled, retired `Actionables Dashboard`
@@ -203,6 +202,36 @@ Scheduled Task. That is a dated installation record, not a requirement for every
 machine. Identify the owner of the running process and its configured database
 before updating or restarting it; use that owner's stop/start procedure.
 Editing a source checkout does not update a separately installed release.
+
+For the existing `C:\Code\Actionables` checkout and Local Apps installation:
+
+```powershell
+corepack pnpm run redeploy --check  # Read-only source/installation preflight
+corepack pnpm run redeploy          # Build, back up, migrate, switch and restart
+```
+
+Commit or stash changes first. The script packages the current local `HEAD`; it
+does not pull, commit or push. It reuses
+`C:\Code\LocalApps\scripts\package-app.ps1` and `backup-sqlite.py`, so Local Apps
+must already be running, with PowerShell 7, Python, Git, Node and Corepack on
+PATH. Its existing packager fixes this checkout, database and ports 4173/4174;
+other checkouts or installations are refused. `--check` does not build or test
+toolchain availability.
+
+The build finishes before the app stops. Consistent SQLite backups and the
+previous launch settings are retained under `%USERPROFILE%\Apps\LocalApps\backups`.
+The script then stops Actionables through Local Apps, takes a final backup,
+applies migrations without seeding, preserves the registered startup/recovery
+preferences, and starts the new release. It checks the managed process, API and
+dashboard proxy health, and the served source commit/release identity, then
+writes `release-verification.json` in that backup directory.
+
+Build or initial backup failure leaves the running app alone. Failure after
+stopping attempts to leave Actionables stopped and prints the backup directory;
+inspect the Local Apps logs before recovery. The script never automatically
+restores an old database or starts old code against a possibly migrated schema.
+A concurrent script run is refused by `apps\actionables\redeploy.lock`; after an
+interrupted run, confirm its process has exited before removing a stale lock.
 
 If MCP was enabled after the app started, restart its owning process so the API
 reads the new token.

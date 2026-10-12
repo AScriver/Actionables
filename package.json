@@ -24,6 +24,7 @@
     "format:check": "prettier --check \"{src,apps,packages,tests,scripts}/**/*.{ts,tsx,js,mjs,json}\" \"*.{ts,js,mjs,json}\"",
     "preview": "vite preview",
     "start": "node scripts/start-production.mjs",
+    "redeploy": "node scripts/redeploy.mjs",
     "test": "tsc -p packages/contracts/tsconfig.json && prisma generate && vitest run apps/api/tests",
     "test:a11y": "playwright test --grep @a11y",
     "test:e2e": "playwright test --grep-invert @a11y",
