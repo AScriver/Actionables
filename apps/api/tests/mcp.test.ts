@@ -6768,6 +6768,22 @@ describe("Actionables MCP", () => {
       research: ["Child implementation researched"],
     });
     const childPlan = "Verify child behavior. ".repeat(300).trim();
+    const dismissed = await createTask({ title: "Archived dismissed child" });
+    await prisma.actionable.update({
+      where: { id: dismissed.id },
+      data: { status: "Dismissed", archivedAt: new Date() },
+    });
+    await prisma.hierarchyRelationship.create({
+      data: { parentId: parent.id, childId: dismissed.id, provenance: "test" },
+    });
+    const dependent = await createTask({ title: "Waits on parent acceptance" });
+    await prisma.dependencyRelationship.create({
+      data: {
+        prerequisiteId: parent.id,
+        dependentId: dependent.id,
+        provenance: "test",
+      },
+    });
     await prisma.actionable.update({
       where: { id: child.id },
       data: { validationJson: json([childPlan]) },
@@ -6829,7 +6845,14 @@ describe("Actionables MCP", () => {
           arguments: parentCredentials,
         }),
       );
-      expect(first.progress).toMatchObject({ total: 1, completed: 1, open: 0 });
+      expect(first.progress).toMatchObject({
+        total: 2,
+        completed: 1,
+        dismissed: 1,
+        open: 0,
+      });
+      expect(first.parentAcceptancePending).toBe(true);
+      expect(first.affectedDependentCount).toBe(1);
       expect(first).not.toHaveProperty("nextCall");
       expect(
         output<CompletionView>(
@@ -6877,6 +6900,17 @@ describe("Actionables MCP", () => {
           )
           .map((item) => (item.kind === "text" ? item.text : ""))
           .join("");
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          field: "blocks",
+          kind: "value",
+          value: {
+            id: dependent.sourceOrdinal,
+            title: dependent.title,
+            status: dependent.status,
+          },
+        }),
+      );
       expect(text("resolution")).toBe(resolution.trim());
       expect(text("validationRecords", "notes")).toBe(notes.trim());
       expect(text("plannedValidation")).toBe(childPlan);
@@ -6935,7 +6969,7 @@ describe("Actionables MCP", () => {
           arguments: parentCredentials,
         }),
       );
-      expect(excluded.excludedArchivedDescendants).toBe(1);
+      expect(excluded.excludedArchivedDescendants).toBe(2);
       expect(
         excluded.items.every((item) => item.task.id === parent.sourceOrdinal),
       ).toBe(true);
@@ -6952,6 +6986,24 @@ describe("Actionables MCP", () => {
             item.task.id === child.sourceOrdinal && item.task.isArchived,
         ),
       ).toBe(true);
+      await prisma.actionable.update({
+        where: { id: dismissed.id },
+        data: { status: "Inbox" },
+      });
+      const unfinished = output<CompletionView>(
+        await client.callTool({
+          name: "actionables.get_completion_view",
+          arguments: parentCredentials,
+        }),
+      );
+      expect(unfinished.parentAcceptancePending).toBe(false);
+      expect(unfinished.outstandingRequirements).toContain(
+        "Complete or dismiss 1 unfinished descendants, including archived work.",
+      );
+      await prisma.actionable.update({
+        where: { id: dismissed.id },
+        data: { status: "Dismissed" },
+      });
       const validated = output<{ version: number }>(
         await client.callTool({
           name: "actionables.record_task_validation",

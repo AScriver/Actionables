@@ -1,6 +1,69 @@
 import { z } from "zod";
 import type { ActionableDetail, InspectAgentTaskResponse } from "./index.js";
 
+export function parentAcceptancePending(
+  task: Pick<ActionableDetail, "status" | "directTaskProgress">,
+) {
+  return Boolean(
+    task.directTaskProgress &&
+    task.directTaskProgress.total > 0 &&
+    task.directTaskProgress.open === 0 &&
+    task.status !== "Done" &&
+    task.status !== "Dismissed",
+  );
+}
+
+/** Shared display requirements; lifecycle enforcement remains on the server. */
+export function completionRequirements(task: ActionableDetail) {
+  const requirements: string[] = [];
+  if (task.archiveState.isArchived)
+    requirements.push("Restore this task before starting parent acceptance.");
+  if (task.status !== "In progress")
+    requirements.push(
+      "Move this task through its required lifecycle to In progress before completion.",
+    );
+  requirements.push(
+    ...task.readiness.blockers.map((blocker) => blocker.message),
+  );
+  if (task.directTaskProgress?.open)
+    requirements.push(
+      `Complete or dismiss ${task.directTaskProgress.open} unfinished descendants, including archived work.`,
+    );
+  if (task.manualBlocker)
+    requirements.push("Resolve this task's recorded manual blocker.");
+  if (task.unresolvedDependencyCount)
+    requirements.push(
+      `Resolve ${task.unresolvedDependencyCount} outstanding prerequisite dependencies.`,
+    );
+  if (!task.resolution.trim())
+    requirements.push(
+      "Save a Resolution describing completed changes and decisions.",
+    );
+  if (!task.completionEligibility.qualifyingValidationRecordId)
+    requirements.push(
+      "Record current Passed validation after the latest move into In progress.",
+    );
+  return requirements;
+}
+
+/** A parent launch authorizes its acceptance, while preserving unfinished research. */
+export function renderCodexParentAcceptancePrompt(
+  task: ActionableDetail,
+  templates: Parameters<typeof renderCodexStartPrompt>[1],
+) {
+  if (
+    !parentAcceptancePending(task) ||
+    task.agentClaim ||
+    task.archiveState.isArchived ||
+    task.isEffectivelyBlocked ||
+    (task.status === "Ready" && task.readiness.requiredForReady.length > 0)
+  )
+    return null;
+  const start = renderCodexStartPrompt(task, templates);
+  if (!start) return null;
+  return `${start} This request authorizes parent #${task.id}'s own acceptance under workItemId #${task.workItemId}. Re-inspect its complete subtree and current ownership before claiming. After claiming, read actionables.get_completion_view with the current version, claim token and includeArchived: true; follow every nextOffset with its contentHash until complete. Review the parent's planned checks, outstanding requirements and affected dependents. Finish any remaining parent research; if it reveals unfinished scope, keep the parent open and record a bounded handoff. Perform only authorized aggregate checks, save actual evidence and Resolution, then use complete_task if all requirements pass. Child completion is not proof of parent acceptance. Do not claim dependents or perform separately gated deployment or live writes.`;
+}
+
 /** Literal substitutions supported by the two Codex start-prompt templates. */
 export const codexPromptVariables = {
   workItemId: "Governing top-level work item ID",
@@ -164,7 +227,7 @@ export function renderCodexSubtaskPrompt(
     if (references.length)
       prompt += ` Completed prerequisite references: ${references.join("; ")}. Inspect each referenced ID to resolve its root, then read its research and Resolution with actionables.get_task_history; verify conclusions against current code before relying on them.`;
   } else {
-    prompt += ` Use Actionables work item #${parent.workItemId}. The user delegates first subtask selection to you within parent #${parent.id}'s subtree. Inspect #${parent.id} with actionables.inspect_task and includeDescendants: true; follow every nextAfterId until the complete subtree is read. List your owned tasks, then available tasks using workItemId #${parent.workItemId}, and choose one currently eligible descendant within this subtree. Do not claim the parent or any task outside its subtree. Check recorded dependencies, ownership, version and readiness immediately before claiming; skip terminal, archived, blocked or live-claimed tasks. Prefer eligible leaves; a nested coordination task is eligible only after its descendants are terminal. If no task is eligible, report the blocker and stop. Do not ask the user to choose between equally eligible tasks or invent a dependency between them. Claim only the chosen task and follow actionables-workflow for its recorded phase. Treat its full task detail, research, sources and planned validation as authoritative. ${truncationInstructions} ${composedToolInstructions} Research Inbox or Researching work before implementation, enter In progress before editing, and resume In progress work from its recorded context. ${readinessInstructions} Read completed prerequisites' research and Resolution with actionables.get_task_history and verify conclusions against current code. Preserve existing user modifications, run planned validation, save Resolution and qualifying evidence before Done, or hand off with the blocker.`;
+    prompt += ` Use Actionables work item #${parent.workItemId}. The user delegates first subtask selection to you within parent #${parent.id}'s subtree. Inspect #${parent.id} with actionables.inspect_task and includeDescendants: true; follow every nextAfterId until the complete subtree is read. List your owned tasks, then available tasks using workItemId #${parent.workItemId}, and choose one currently eligible descendant within this subtree. While selecting a child, do not claim the parent or any task outside its subtree. Check recorded dependencies, ownership, version and readiness immediately before claiming; skip terminal, archived, blocked or live-claimed tasks. Prefer eligible leaves; a nested coordination task is eligible only after its descendants are terminal. If no task is eligible, report the blocker and stop. Do not ask the user to choose between equally eligible tasks or invent a dependency between them. Claim only the chosen task and follow actionables-workflow for its recorded phase. Treat its full task detail, research, sources and planned validation as authoritative. ${truncationInstructions} ${composedToolInstructions} Research Inbox or Researching work before implementation, enter In progress before editing, and resume In progress work from its recorded context. ${readinessInstructions} Read completed prerequisites' research and Resolution with actionables.get_task_history and verify conclusions against current code. Preserve existing user modifications, run planned validation, save Resolution and qualifying evidence before Done, or hand off with the blocker.`;
   }
   const authorization = task
     ? `only #${task.id}`
@@ -172,5 +235,5 @@ export function renderCodexSubtaskPrompt(
   if (mode === "next")
     return `${prompt} Authorization covers ${authorization}; do not start another child automatically. Preserve every recorded approval and business-decision boundary.`;
   const firstTask = task ? ` Start with #${task.id}.` : "";
-  return `${prompt} The user explicitly authorizes sequential work only within parent #${parent.id}'s subtree under original workItemId #${parent.workItemId}.${firstTask} Finish and validate one child, save Resolution and qualifying evidence, and verify it is Done before starting the next. Re-read the complete subtree inventory and recorded dependencies before every claim; skip terminal, archived, blocked or live-claimed tasks. Work on eligible leaves first and finalize nested coordination tasks only when their descendants are terminal. If several tasks are equally eligible, choose one within this authorized subtree without inventing a dependency or claiming several at once. Continue between tasks without asking for a restart. When unfinished work has no eligible task, record the unresolved blocker and stop. Stop for business decisions or required approvals; this authorization does not grant deployment, live writes or any other separately gated action. Preserve existing task boundaries. Once all descendants are terminal, report the parent ready for its own aggregate validation; do not mark the parent Done merely because its children are terminal.`;
+  return `${prompt} The user explicitly authorizes sequential work only within parent #${parent.id}'s subtree under original workItemId #${parent.workItemId}.${firstTask} Finish and validate one child, save Resolution and qualifying evidence, and verify it is Done before starting the next. Re-read the complete subtree inventory and recorded dependencies before every claim; skip terminal, archived, blocked or live-claimed tasks. Work on eligible leaves first and finalize nested coordination tasks only when their descendants are terminal. If several tasks are equally eligible, choose one within this authorized subtree without inventing a dependency or claiming several at once. Continue between tasks without asking for a restart. When unfinished work has no eligible task, record the unresolved blocker and stop. Stop for business decisions or required approvals; this authorization does not grant deployment, live writes or any other separately gated action. Preserve existing task boundaries. Once all descendants are terminal, parent acceptance is the next phase. This child-work prompt does not itself authorize parent acceptance. If the user already authorized that phase separately, re-inspect and claim the parent, follow its recorded research and readiness, read actionables.get_completion_view through all pages, and perform its own planned checks before complete_task. Otherwise hand off the remaining parent checks and affected dependents. In either case, do not mark the parent Done merely because its children are terminal.`;
 }

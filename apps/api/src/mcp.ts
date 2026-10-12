@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   actionableDetailSchema,
+  completionRequirements,
+  parentAcceptancePending,
   completeClaimedAgentTaskRequestSchema,
   agentTaskCompletionReceiptSchema,
   agentDependencyReceiptSchema,
@@ -315,9 +317,10 @@ const historyFieldSchema = z.enum([
   "parent",
   "subtasks",
   "blockedBy",
+  "blocks",
   "validationRecords",
 ]);
-const contextFieldsSchema = z.array(historyFieldSchema).min(1).max(19);
+const contextFieldsSchema = z.array(historyFieldSchema).min(1).max(20);
 const getTaskContextSchema = z
   .object({
     id: idSchema,
@@ -772,7 +775,9 @@ const completionViewSchema = taskContextPageSchema
   .omit({ fieldCounts: true, items: true })
   .extend({
     progress: actionableDetailSchema.shape.directTaskProgress,
-    outstandingRequirements: z.array(z.string().max(300)).max(4),
+    outstandingRequirements: z.array(z.string().max(300)).max(12),
+    parentAcceptancePending: z.boolean(),
+    affectedDependentCount: z.number().int().nonnegative(),
     acceptanceGuidance: z.string().max(500),
     unresolvedDependencyCount: z.number().int().nonnegative(),
     excludedArchivedDescendants: z.number().int().nonnegative(),
@@ -920,6 +925,9 @@ function taskHistoryPage(
           blockedBy: task.relationships.blockedBy.map(({ prerequisite }) =>
             taskReference(prerequisite),
           ),
+          blocks: task.relationships.blocks.map(({ dependent }) =>
+            taskReference(dependent),
+          ),
         }
       : {}),
   };
@@ -1000,23 +1008,15 @@ function completionView(
   input: z.infer<typeof getCompletionViewSchema>,
 ) {
   const task = snapshot.task;
-  const outstandingRequirements: string[] = [];
-  if (task.status !== "In progress")
-    outstandingRequirements.push(
-      "Move this task through its required lifecycle to In progress before completion.",
-    );
-  if (task.directTaskProgress?.open)
-    outstandingRequirements.push(
-      `Complete or dismiss ${task.directTaskProgress.open} unfinished descendants, including archived work.`,
-    );
-  if (!task.resolution.trim())
-    outstandingRequirements.push(
-      "Save a Resolution describing completed changes and decisions.",
-    );
-  if (!task.completionEligibility.qualifyingValidationRecordId)
-    outstandingRequirements.push(
-      "Record current Passed validation after the latest move into In progress.",
-    );
+  const outstandingRequirements = completionRequirements(task);
+  const affectedDependents = task.relationships.blocks
+    .filter(
+      ({ isSatisfied, dependent }) =>
+        !isSatisfied &&
+        dependent.status !== "Done" &&
+        dependent.status !== "Dismissed",
+    )
+    .map(({ dependent }) => taskReference(dependent));
   const nodes = [
     task,
     ...snapshot.descendants.filter(
@@ -1038,6 +1038,7 @@ function completionView(
     values: {
       resolution: [node.resolution],
       plannedValidation: node.validation,
+      blocks: node.id === task.id ? affectedDependents : [],
       validationRecords: node.validationRecords.filter(
         (record) => record.qualifiesForCompletion,
       ),
@@ -1053,6 +1054,8 @@ function completionView(
     progress: task.directTaskProgress,
     evidenceCapacity: evidenceCapacity(task),
     outstandingRequirements,
+    parentAcceptancePending: parentAcceptancePending(task),
+    affectedDependentCount: affectedDependents.length,
     unresolvedDependencyCount: task.unresolvedDependencyCount,
     excludedArchivedDescendants: snapshot.descendants.filter(
       (child) => child.archiveState.isArchived && !input.includeArchived,

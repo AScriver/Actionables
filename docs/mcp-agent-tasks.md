@@ -115,6 +115,24 @@ unfinished archived work still contributes to parent blockers. This read makes
 no changes, including expired-claim cleanup. Child results do not prove the
 parent's own acceptance criteria or live checks.
 
+When every attached descendant is Done or Dismissed, an open parent reports
+`parentAcceptancePending: true`. Remaining requirements include unfinished
+parent research and readiness, blockers, Resolution and current validation.
+`affectedDependentCount` counts open tasks still waiting on this parent;
+their references are paged as native `blocks` items with the parent's checks.
+These references do not authorize work on those dependents. Active context
+reads also accept `fields: ["blocks"]`.
+
+The dashboard shows **Children complete · Parent acceptance pending** with
+the parent's checks and waiting tasks. Its existing Codex launch becomes a
+parent-acceptance prompt, gated by claim, archive and blocker state. It reads
+current completion context after claiming; unfinished research stays open.
+Sequential child prompts continue parent acceptance only if the user's
+existing authorization includes that phase; otherwise they hand off its
+remaining checks. Neither display nor prompt automatically completes a parent.
+
+![Parent acceptance checks and a waiting dependent in an isolated browser fixture](images/parent-acceptance-2026-10-12.png)
+
 `actionables.complete_task` saves Resolution, optional actual Passed validation,
 the normal Done transition and claim release in one transaction. Existing
 qualifying evidence may be used when validation is omitted. Failed/Partial

@@ -49,6 +49,9 @@ import {
   minimumInboxTriageBatchSize,
   noteGroomerModels,
   renderCodexStartPrompt,
+  renderCodexParentAcceptancePrompt,
+  parentAcceptancePending,
+  completionRequirements,
   renderCodexSubtaskPrompt,
   eligibleCodexSubtasks,
   type CreateActionableRequest,
@@ -1999,6 +2002,13 @@ function AgentClaimPanel({
   const isTerminal =
     selected.status === "Done" || selected.status === "Dismissed";
   const hasReadyBlockers = selected.readiness.requiredForReady.length > 0;
+  const acceptancePending = parentAcceptancePending(selected);
+  const affectedDependents = selected.relationships.blocks.filter(
+    ({ isSatisfied, dependent }) =>
+      !isSatisfied &&
+      dependent.status !== "Done" &&
+      dependent.status !== "Dismissed",
+  );
   const canRecommendPrompt =
     !claim &&
     !selected.archiveState.isArchived &&
@@ -2021,14 +2031,22 @@ function AgentClaimPanel({
     enabled: canRecommendPrompt && Boolean(selected.projectRoot),
     retry: false,
   });
-  const startPrompt =
+  let startPrompt: string | null = null;
+  if (
     canRecommendPrompt &&
     (!selected.projectRoot ||
       (workspaceQuery.isSuccess && !workspaceQuery.isFetching)) &&
     promptSettingsQuery.data &&
     !promptSettingsQuery.isError
-      ? renderCodexStartPrompt(selected, promptSettingsQuery.data)
-      : null;
+  ) {
+    if (acceptancePending)
+      startPrompt = renderCodexParentAcceptancePrompt(
+        selected,
+        promptSettingsQuery.data,
+      );
+    else
+      startPrompt = renderCodexStartPrompt(selected, promptSettingsQuery.data);
+  }
   const preparedChatUrl = startPrompt
     ? buildCodexNewChatUrl(
         startPrompt,
@@ -2108,10 +2126,53 @@ function AgentClaimPanel({
           </div>
         </dl>
       )}
+      {acceptancePending && (
+        <div className="parent-acceptance">
+          <h3>Children complete · Parent acceptance pending</h3>
+          <p>
+            Review this parent's remaining scope and checks before closing it.
+          </p>
+          <ul>
+            {completionRequirements(selected).map((requirement) => (
+              <li key={requirement}>{requirement}</li>
+            ))}
+          </ul>
+          <h4>Parent checks</h4>
+          {selected.validation.length > 0 ? (
+            <ul>
+              {selected.validation.map((check, index) => (
+                <li key={index}>
+                  <Markdown>{check}</Markdown>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>
+              No parent checks recorded. Finish the parent's research first.
+            </p>
+          )}
+          {affectedDependents.length > 0 && (
+            <>
+              <h4>Tasks waiting on this parent</h4>
+              <ul>
+                {affectedDependents.map(({ id, dependent }) => (
+                  <li key={id}>
+                    #{dependent.id} · {dependent.title}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
       {startPrompt && (
         <div className="agent-start-prompt">
           <div className="agent-start-heading">
-            <span>Start with Codex</span>
+            <span>
+              {acceptancePending
+                ? "Review parent acceptance with Codex"
+                : "Start with Codex"}
+            </span>
             <div className="agent-start-actions">
               {preparedChatUrl && (
                 <a className="toolbar-button" href={preparedChatUrl}>
@@ -2136,6 +2197,7 @@ function AgentClaimPanel({
         <p className="agent-start-guidance">{unavailableGuidance}</p>
       )}
       {canRecommendPrompt &&
+        !acceptancePending &&
         selected.relationships.subtasks.length > 0 &&
         promptSettingsQuery.data &&
         !promptSettingsQuery.isError && (

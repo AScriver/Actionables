@@ -7,6 +7,9 @@ import {
   defaultCodexResearchPrompt,
   renderCodexStartPrompt,
   renderCodexSubtaskPrompt,
+  renderCodexParentAcceptancePrompt,
+  parentAcceptancePending,
+  completionRequirements,
   eligibleCodexSubtasks,
   type InspectAgentTaskResponse,
   type ActionableDetail,
@@ -26,6 +29,65 @@ const task = {
 };
 
 describe("Codex prompt templates", () => {
+  it("keeps finished children separate from parent research, validation and ownership", () => {
+    const parent = {
+      ...task,
+      status: "Researching",
+      agentClaim: null,
+      archiveState: { isArchived: false },
+      isEffectivelyBlocked: false,
+      manualBlocker: null,
+      unresolvedDependencyCount: 0,
+      resolution: "",
+      completionEligibility: { qualifyingValidationRecordId: null },
+      readiness: {
+        requiredForReady: ["finding"],
+        blockers: [
+          {
+            field: "finding",
+            message: "Finish the remaining parent research.",
+          },
+        ],
+      },
+      relationships: { subtasks: [{}] },
+      directTaskProgress: { total: 2, completed: 1, dismissed: 1, open: 0 },
+    } as unknown as ActionableDetail;
+    expect(parentAcceptancePending(parent)).toBe(true);
+    expect(completionRequirements(parent)).toContain(
+      "Finish the remaining parent research.",
+    );
+    expect(completionRequirements(parent)).toContain(
+      "Record current Passed validation after the latest move into In progress.",
+    );
+    const prompt = renderCodexParentAcceptancePrompt(parent, templates)!;
+    expect(prompt).toContain("resume the Researching phase");
+    expect(prompt).toContain(
+      "parent #47's own acceptance under workItemId #42",
+    );
+    expect(prompt).toContain("actionables.get_completion_view");
+    expect(prompt).toContain("includeArchived: true");
+    expect(prompt).toContain("follow every nextOffset");
+    expect(prompt).toContain("Do not claim dependents");
+    for (const changed of [
+      { status: "Done" },
+      { status: "Dismissed" },
+      { status: "Ready" },
+      { directTaskProgress: { ...parent.directTaskProgress!, open: 1 } },
+      { directTaskProgress: null },
+      { agentClaim: { state: "active" } },
+      { agentClaim: { state: "expired" } },
+      { archiveState: { isArchived: true } },
+      { isEffectivelyBlocked: true },
+    ]) {
+      expect(
+        renderCodexParentAcceptancePrompt(
+          { ...parent, ...changed } as ActionableDetail,
+          templates,
+        ),
+      ).toBeNull();
+    }
+    expect(parent.status).toBe("Researching");
+  });
   it("shows equally eligible leaves and waits to finalize nested parents until their children are terminal", () => {
     const item = (
       id: number,
@@ -120,6 +182,15 @@ describe("Codex prompt templates", () => {
     );
     expect(sequential).toContain(
       "do not mark the parent Done merely because its children are terminal",
+    );
+    expect(sequential).toContain(
+      "This child-work prompt does not itself authorize parent acceptance",
+    );
+    expect(sequential).toContain(
+      "If the user already authorized that phase separately",
+    );
+    expect(sequential).toContain(
+      "Otherwise hand off the remaining parent checks and affected dependents",
     );
     expect(
       renderCodexSubtaskPrompt(

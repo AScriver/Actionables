@@ -4,6 +4,93 @@ import { expect, test, type Page } from "@playwright/test";
 type ClaimState = "unclaimed" | "active" | "expired";
 const ACTIONABLE_ID = 32;
 
+test("finished children expose parent acceptance without closing unfinished parent research", async ({
+  page,
+}, testInfo) => {
+  const original = await detailFixture(page);
+  const post = async (path: string, data: unknown) => {
+    const response = await page.request.post(path, { data });
+    expect(response.ok(), await response.text()).toBe(true);
+    return (await response.json()).item;
+  };
+  const create = (title: string) =>
+    post("/api/actionables", {
+      title,
+      priority: "Medium",
+      effort: "S",
+      evidenceState: "Proposed",
+      projectId: original.scope.projectId,
+      repositoryId: original.scope.repositoryId,
+      worktreeId: original.scope.worktreeId,
+      finding: "",
+      research: [],
+      description: "Parent research remains open after its child is resolved.",
+      validation: [
+        "Review combined behavior against the original parent scope.",
+      ],
+      tags: [],
+      userSources: [],
+    });
+  let parent = await create("Parent acceptance browser fixture");
+  parent = await post(`/api/actionables/${parent.id}/subtasks`, {
+    version: parent.version,
+    title: "Resolved implementation child",
+  });
+  const child = parent.relationships.subtasks[0].child;
+  const dependent = await create("Waiting on parent acceptance");
+  await post(`/api/actionables/${dependent.id}/dependencies`, {
+    version: dependent.version,
+    prerequisiteId: parent.id,
+    prerequisiteVersion: parent.version,
+  });
+  await page.goto(`/actionables/${parent.id}`);
+  await expect(page.locator(".parent-acceptance")).toHaveCount(0);
+  await post(`/api/actionables/${child.id}/status-transitions`, {
+    version: child.version,
+    status: "Dismissed",
+    reason: "Synthetic child resolved without implementation.",
+  });
+  await page.reload();
+  const acceptance = page.locator(".parent-acceptance");
+  await expect(acceptance).toContainText(
+    "Children complete · Parent acceptance pending",
+  );
+  await expect(acceptance).toContainText("Add a non-empty finding");
+  await expect(acceptance).toContainText("Record current Passed validation");
+  await expect(acceptance).toContainText(
+    "Review combined behavior against the original parent scope.",
+  );
+  await expect(acceptance).toContainText(
+    `#${dependent.id} · Waiting on parent acceptance`,
+  );
+  await expect(page.locator(".subtask-start-prompt")).toHaveCount(0);
+  const launch = page
+    .locator(".agent-claim-panel")
+    .getByRole("link", { name: "Open in Codex" });
+  const prompt = new URL((await launch.getAttribute("href"))!).searchParams.get(
+    "prompt",
+  );
+  expect(prompt).toContain(
+    `parent #${parent.id}'s own acceptance under workItemId #${parent.id}`,
+  );
+  expect(prompt).toContain("actionables.get_completion_view");
+  expect(prompt).toContain("begin the Researching phase");
+  const saved = (
+    await (await page.request.get(`/api/actionables/${parent.id}`)).json()
+  ).item;
+  expect(saved.status).toBe("Inbox");
+  expect(saved.agentClaim).toBeNull();
+  expect(saved.completionEligibility.qualifyingValidationRecordId).toBeNull();
+  const waiting = (
+    await (await page.request.get(`/api/actionables/${dependent.id}`)).json()
+  ).item;
+  expect(waiting.isDependencyBlocked).toBe(true);
+  await acceptance.screenshot({
+    path: testInfo.outputPath("parent-acceptance.png"),
+  });
+  console.log(`Parent acceptance fixture: ${parent.id}`);
+});
+
 test("subtask prompts explain selection and stay disabled until preparation finishes", async ({
   page,
 }) => {
