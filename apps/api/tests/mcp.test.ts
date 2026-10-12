@@ -1197,10 +1197,18 @@ describe("Actionables MCP", () => {
         argumentsValue: Record<string, unknown>,
         expected: string,
       ) => {
-        const message = validationErrorText(
+        const result = errorOutput(
           await client.callTool({ name, arguments: argumentsValue }),
         );
+        expect(result).toMatchObject({
+          code: "INVALID_REQUEST",
+          retryMode: "after_input_change",
+          recovery: { action: "modify_request" },
+        });
+        const message = JSON.stringify(result);
         expect(message).toContain(expected);
+        expect(message).not.toContain(claimed.claim.claimToken);
+        expect(message.length).toBeLessThan(8_000);
       };
       const updateBase = {
         id: task.sourceOrdinal,
@@ -1264,6 +1272,53 @@ describe("Actionables MCP", () => {
         },
         "If no task content needs to change, call actionables.release_task instead.",
       );
+      await schemaError(
+        "actionables.inspect_task",
+        { id: task.sourceOrdinal, workItemId: task.sourceOrdinal },
+        "Minimal read call",
+      );
+      await schemaError(
+        "actionables.inspect_task",
+        { workItemId: task.sourceOrdinal },
+        "id",
+      );
+      await schemaError(
+        "actionables.get_task_context",
+        { ...updateBase, workItemId: task.sourceOrdinal },
+        "Accepted top-level fields",
+      );
+      await schemaError(
+        "actionables.transition_task",
+        {
+          ...updateBase,
+          status: "Researching",
+          workItemId: task.sourceOrdinal,
+        },
+        "Accepted top-level fields",
+      );
+      await schemaError(
+        "actionables.update_task",
+        { ...updateBase, appendResearch: "wrong shape" },
+        "array",
+      );
+      await schemaError(
+        "actionables.get_task",
+        {
+          id: task.sourceOrdinal,
+          claimToken: claimed.claim.claimToken,
+          workItemId: task.sourceOrdinal,
+        },
+        "exactly one read authorization",
+      );
+      const secretKey = `private-${claimed.claim.claimToken}`;
+      const invalid = errorOutput(
+        await client.callTool({
+          name: "actionables.inspect_task",
+          arguments: { id: task.sourceOrdinal, [secretKey]: "private-value" },
+        }),
+      );
+      expect(JSON.stringify(invalid)).not.toContain(secretKey);
+      expect(JSON.stringify(invalid)).not.toContain("private-value");
 
       const stored = await prisma.actionable.findUniqueOrThrow({
         where: { id: task.id },

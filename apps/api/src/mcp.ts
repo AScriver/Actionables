@@ -42,7 +42,11 @@ import {
 } from "@actionables/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  JSONRPCRequestSchema,
+  type CallToolResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import type {
   FastifyBaseLogger,
   FastifyInstance,
@@ -420,6 +424,41 @@ const recordValidationSchema =
 const handoffTaskSchema = handoffClaimedAgentTaskRequestSchema
   .extend({ id: idSchema })
   .describe(agentTaskHandoffContentRecoveryMessage);
+
+const completeTaskSchema = completeClaimedAgentTaskRequestSchema.extend({
+  id: idSchema,
+});
+
+const toolInputSchemas = {
+  "actionables.create_task": createAgentTaskRequestSchema,
+  "actionables.bulk_create_tasks": bulkCreateAgentTasksRequestSchema,
+  "actionables.bulk_prepare_tasks": bulkPrepareAgentTasksRequestSchema,
+  "actionables.list_tasks": listTasksSchema,
+  "actionables.inspect_task": inspectAgentTaskRequestSchema,
+  "actionables.create_dependency": createAgentDependencyRequestSchema,
+  "actionables.remove_dependency": removeAgentDependencyRequestSchema,
+  "actionables.search_completed_tasks": searchCompletedTasksRequestSchema,
+  "actionables.get_task_context": getSelectedTaskContextSchema,
+  "actionables.get_completion_view": getCompletionViewSchema,
+  "actionables.complete_task": completeTaskSchema,
+  "actionables.get_task_history": getTaskHistorySchema,
+  "actionables.get_task": taskReadSchema,
+  "actionables.get_task_detail": getTaskDetailSchema,
+  "actionables.claim_task": claimTaskSchema,
+  "actionables.renew_task_claim": renewTaskSchema,
+  "actionables.recover_task_claim": recoverTaskClaimSchema,
+  "actionables.update_task": updateTaskSchema,
+  "actionables.transition_task": transitionTaskSchema,
+  "actionables.dismiss_task": dismissTaskSchema,
+  "actionables.record_task_validation": recordValidationSchema,
+  "actionables.handoff_task": handoffTaskSchema,
+  "actionables.release_task": releaseTaskSchema,
+} satisfies Record<string, z.ZodObject>;
+const knownInputFields = new Set(
+  Object.values(toolInputSchemas).flatMap((schema) =>
+    Object.keys(schema.shape),
+  ),
+);
 
 const compactReferenceSchema = z
   .object({
@@ -1661,7 +1700,7 @@ function createActionablesMcpServer(
       title: "Create Actionable",
       description:
         "Create one task with a deliberate priority other than Unset, an effort estimate other than Unknown, and at least one meaningful tag, then return its detail. For a top-level task, either provide projectId, repositoryId, and worktreeId or provide repositoryPath with ensureScope true to resolve and provision the local Git scope. For a subtask at any depth, provide the original top-level Actionable as workItemId and its intended immediate parent as parentId; the parent must belong to that work item. Omit placement fields. The server inherits the parent's scope. Reuse the idempotency UUID only for an exact retry.",
-      inputSchema: createAgentTaskRequestSchema,
+      inputSchema: toolInputSchemas["actionables.create_task"],
       outputSchema: compactTaskSchema,
       annotations: { ...mutation, idempotentHint: true },
     },
@@ -1679,7 +1718,7 @@ function createActionablesMcpServer(
       title: "Preview or create Actionables in bulk",
       description:
         "Preview or create 1 through 25 explicitly authorized tasks in one ordered call. Every item uses the normal create_task scope, hierarchy, classification, and caller-stable idempotency-key rules. The whole request must first satisfy the published input schema. mode preview performs no writes; mode apply commits each schema-valid item atomically while allowing valid siblings to succeed when another item fails. Read every compact per-item outcome and retry an applied request only with the same keys and identical item content. No claim credential is returned.",
-      inputSchema: bulkCreateAgentTasksRequestSchema,
+      inputSchema: toolInputSchemas["actionables.bulk_create_tasks"],
       outputSchema: bulkCreateAgentTasksResponseSchema,
       annotations: { ...mutation, idempotentHint: true },
     },
@@ -1699,7 +1738,7 @@ function createActionablesMcpServer(
       title: "Preview or prepare Actionables in bulk",
       description:
         "Preview or prepare 1 through 25 explicit Inbox tasks created by the current Codex thread in one ordered call. The whole request must first satisfy the published input schema. mode preview validates current scope, hierarchy, lifecycle, version, claim availability, content, and idempotency without writing. mode apply handles each schema-valid item atomically: it claims for the current Codex thread, enters Researching when needed, saves the supplied preparation, reaches Ready only when every prerequisite passes, and releases the claim. A failed item is fully rolled back while valid siblings may succeed. Use the normal list, claim, and reconciliation workflow for pre-existing tasks. Read every compact per-item outcome; exact retries replay without duplicate writes. Claim credentials are never accepted or returned.",
-      inputSchema: bulkPrepareAgentTasksRequestSchema,
+      inputSchema: toolInputSchemas["actionables.bulk_prepare_tasks"],
       outputSchema: bulkPrepareAgentTasksResponseSchema,
       annotations: {
         ...mutation,
@@ -1723,7 +1762,7 @@ function createActionablesMcpServer(
       title: "List Actionables",
       description:
         "List the current Codex thread's unexpired claims, optionally within one feature or bug. Thread identity comes from request metadata. Available discovery requires that work item's top-level Actionable ID and never returns arbitrary pending work. Scoped reads of Done or Dismissed work items succeed with workItem status and terminal true; items remains an active-work list and may be empty.",
-      inputSchema: listTasksSchema,
+      inputSchema: toolInputSchemas["actionables.list_tasks"],
       outputSchema: listAgentTasksResponseSchema,
       annotations: readOnly,
     },
@@ -1742,7 +1781,7 @@ function createActionablesMcpServer(
       title: "Inspect an explicit Actionable",
       description:
         "Read an explicitly named task without a claim; resolves its original workItemId and immediate parent. Optionally page only its descendants, including blocked, claimed and terminal tasks. Archived inclusion is explicit. Continue with nextAfterId as afterId and unchanged options until null; pages reflect current state. Availability reasons and bounded blocker IDs explain exclusion from available work; compare unresolvedDependencyCount for omitted IDs. For an explicitly authorized unblock request, claim_task may use this version despite manual_blocker, subject to ownership and dependency checks. Lifecycle permittedTransitions still require ownership and all normal mutation checks. Never claims, expires, renews, restores or changes records, and never authorizes siblings.",
-      inputSchema: inspectAgentTaskRequestSchema,
+      inputSchema: toolInputSchemas["actionables.inspect_task"],
       outputSchema: inspectAgentTaskResponseSchema,
       annotations: readOnly,
     },
@@ -1757,7 +1796,7 @@ function createActionablesMcpServer(
       title: "Record an Actionable prerequisite",
       description:
         "Create a confirmed blocking dependency using a claimed coordinator and explicit endpoint IDs/versions in that coordinator's subtree. Supply original workItemId and the coordinator's id, claimToken and version. Both endpoint versions change; use the persisted receipt for subsequent changes. Rejects cycles, duplicates, archived endpoints, other-agent ownership and scope/version conflicts. Creates normal relationship audits plus coordinator provenance. Preferred execution order alone is not a dependency. On uncertain delivery inspect both endpoints before retrying; stale or duplicate retries never create another edge.",
-      inputSchema: createAgentDependencyRequestSchema,
+      inputSchema: toolInputSchemas["actionables.create_dependency"],
       outputSchema: agentDependencyReceiptSchema,
       annotations: mutation,
     },
@@ -1772,7 +1811,7 @@ function createActionablesMcpServer(
       title: "Remove an Actionable prerequisite",
       description:
         "Remove the existing dependency between explicit dependent/prerequisite IDs under a claimed coordinator, with a required reason and current coordinator/endpoint versions. Uses the same scope, ownership and archive guards as create_dependency; no waiver or restoration is implied. The receipt verifies persisted removal and remaining blocker count. Both endpoint versions change. On uncertain delivery inspect state before retrying; a repeated removal cannot mutate an unrelated edge.",
-      inputSchema: removeAgentDependencyRequestSchema,
+      inputSchema: toolInputSchemas["actionables.remove_dependency"],
       outputSchema: agentDependencyReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
@@ -1787,7 +1826,7 @@ function createActionablesMcpServer(
       title: "Search completed Actionables",
       description:
         "Search Done tasks across work items within an explicit projectId or repositoryId. Supply exactly one of q (one literal keyword/phrase) or terms (1-10 literal keywords/phrases, all required across title, finding, description, research or Resolution). Matching is case-insensitive; terms are deduplicated while retaining first spelling and order. Returns match plus per-term termMatches for terms queries, with field-labeled excerpts, IDs, scope, archive state and updatedAt (last modification, not completion date), newest public ID first. Execute an item's historyCall unchanged to read its research, Resolution and sources; execute top-level nextCall unchanged for the next search page, stopping when null. These name/arguments objects preserve the query, scope, version and explicit archive option. nextCursor remains available. Archived history is excluded unless includeArchived is true. History is evidence to verify against current code. Never claims, renews, reopens or changes records; does not authorize active work discovery.",
-      inputSchema: searchCompletedTasksRequestSchema,
+      inputSchema: toolInputSchemas["actionables.search_completed_tasks"],
       outputSchema: searchCompletedTasksOutputSchema,
       annotations: readOnly,
     },
@@ -1825,7 +1864,7 @@ function createActionablesMcpServer(
       title: "Read active Actionable context",
       description:
         "Read complete active context, or only requested fields, using a valid claimToken and exact version. Native values/text chunks are bounded to 40 items and 8,000 serialized item characters. fields identifies the selected content; fieldCounts includes all stored counts. Start at offset 0; continue with nextRead plus the same claimToken until complete. Never log that credential. Initial scope reconciliation must include every required field. Each page validates ownership, version, selection and contentHash; discard partial results on failure. Successful reads never renew claims.",
-      inputSchema: getSelectedTaskContextSchema,
+      inputSchema: toolInputSchemas["actionables.get_task_context"],
       outputSchema: selectedTaskContextPageSchema,
       annotations: readOnly,
     },
@@ -1843,7 +1882,7 @@ function createActionablesMcpServer(
       title: "Review parent and descendant completion evidence",
       description:
         "Read a claimed task's own completion requirements, planned checks, descendant status, Resolution and qualifying validation together. Native values/text chunks are labeled with task metadata and use the context/history format, capped at 40 items and 8,000 serialized item characters. Start at offset 0; follow nextOffset with the same claimToken, version, contentHash and includeArchived until complete. Archived descendant evidence requires explicit opt-in; unfinished archived descendants still count as blockers. Changed evidence invalidates paging. This read never cleans up or renews claims. Child evidence does not prove parent acceptance: review the parent's own planned validation and perform required aggregate/live checks.",
-      inputSchema: getCompletionViewSchema,
+      inputSchema: toolInputSchemas["actionables.get_completion_view"],
       outputSchema: completionViewSchema,
       annotations: readOnly,
     },
@@ -1861,9 +1900,7 @@ function createActionablesMcpServer(
       title: "Complete an Actionable atomically",
       description:
         "Save Resolution, optionally record actual Passed validation, enforce existing Done rules and release the claim in one transaction. Requires a valid claim and exact version, In progress lifecycle, terminal descendants and current qualifying validation; omitted validation uses existing qualifying evidence. Failed/Partial results must be recorded separately while work remains open. Rejection leaves the attempted completion unchanged. Use one caller-stable UUID and identical arguments for an uncertain/exact retry: a saved secret-free receipt prevents duplicate evidence/activity, and replay succeeds only while completed task state is unchanged. Child completion does not waive parent acceptance or approvals. Returns persisted terminal state and validation IDs.",
-      inputSchema: completeClaimedAgentTaskRequestSchema.extend({
-        id: idSchema,
-      }),
+      inputSchema: toolInputSchemas["actionables.complete_task"],
       outputSchema: agentTaskCompletionReceiptSchema,
       annotations: { ...mutation, idempotentHint: true },
     },
@@ -1888,7 +1925,7 @@ function createActionablesMcpServer(
       title: "Read completed Actionable history",
       description:
         "Read research, Resolution, userSources, files and sourceThread together for a Done or Dismissed task. Execute a search item's historyCall unchanged, or start at offset 0 with id, top-level workItemId and version from get_task. No claim or thread metadata is required. Returns whole native values when they fit and labeled plain-text chunks for oversized values, never serialized JSON fragments. Items identify field and zero-based index; text chunks add property for split references, offset and totalLength in UTF-16 units. Pages cap items at 40 and their serialized size at 8,000 characters. Execute nextCall unchanged for each subsequent page; it preserves id, workItemId, version, includeArchived, offset and contentHash. nextCall is null when complete. fieldCounts, complete, remainingItems and nextOffset remain available. On VERSION_CONFLICT discard partial history and restart with a fresh version; on TERMINAL_READ_INVALIDATED discard it and stop terminal inspection. Never claims, renews, reopens, restores or changes records.",
-      inputSchema: getTaskHistorySchema,
+      inputSchema: toolInputSchemas["actionables.get_task_history"],
       outputSchema: taskHistoryOutputSchema,
       annotations: readOnly,
     },
@@ -1926,7 +1963,7 @@ function createActionablesMcpServer(
       title: "Get Actionable",
       description:
         "Fetch bounded details using exactly one read authorization: claimToken for active claimed work, or the top-level workItemId for read-only inspection of a Done or Dismissed task in that work item. Terminal history includes archived tasks and scopes only with includeArchived true. The response reports terminal and archive state; page truncated research or Resolution with get_task_detail. Use the returned version for a later mutation only after terminal work has been explicitly reopened and claimed.",
-      inputSchema: taskReadSchema,
+      inputSchema: toolInputSchemas["actionables.get_task"],
       outputSchema: compactTaskSchema,
       annotations: readOnly,
     },
@@ -1953,7 +1990,7 @@ function createActionablesMcpServer(
       title: "Get exact Actionable detail",
       description:
         "Fetch one fixed-size page of an exact task field, including research and Resolution, using the compact task's exact version and the same single read authorization: claimToken for active claimed work or top-level workItemId for terminal inspection. Keep includeArchived true on every archived history read. Start with offset 0, then pass each nextOffset until null with the first page's contentHash; concatenate json in offset order and JSON-parse the complete value. On VERSION_CONFLICT, discard partial json and restart from current compact detail. On TERMINAL_READ_INVALIDATED, discard partial pages and stop terminal inspection; active work requires the normal authorized list and claim flow. A successful page never returns a claim token, renews a claim, or changes the task version.",
-      inputSchema: getTaskDetailSchema,
+      inputSchema: toolInputSchemas["actionables.get_task_detail"],
       outputSchema: taskDetailPageSchema,
       annotations: readOnly,
     },
@@ -1981,7 +2018,7 @@ function createActionablesMcpServer(
       title: "Claim Actionable",
       description:
         "Claim one task for the current Codex thread at its exact listed version within the same explicitly identified feature or bug work item. For an explicitly authorized blocked task, use inspect_task's version even though available discovery excludes it. Unresolved dependencies and another thread's live claim prevent claiming. Claiming does not clear the blocker; read the full manualBlocker and verify its resolution before a reasoned transition. Thread identity comes from request metadata. A successful claim returns `{ task, claim }`; use `task.version` as the latest version and `claim.claimToken` as the secret capability for later claimed-task calls.",
-      inputSchema: claimTaskSchema,
+      inputSchema: toolInputSchemas["actionables.claim_task"],
       outputSchema: claimTaskOutputSchema,
       annotations: mutation,
     },
@@ -2006,7 +2043,7 @@ function createActionablesMcpServer(
       title: "Renew Actionable claim",
       description:
         "Extend a valid claim during long read-only work. Omitted duration and automatic renewal preserve a later existing expiry. Explicit leaseMinutes sets a new duration. Renewing mutation receipts report claimLease.",
-      inputSchema: renewTaskSchema,
+      inputSchema: toolInputSchemas["actionables.renew_task_claim"],
       outputSchema: mutationReceiptSchema,
       annotations: mutation,
     },
@@ -2026,7 +2063,7 @@ function createActionablesMcpServer(
       title: "Recover Actionable claim credentials",
       description:
         "Rotate and return fresh credentials for an unexpired claim already owned by the current Codex thread. Supply the current version from list_tasks(view: mine). The superseded token becomes invalid immediately, and concurrent calls using the same version have one winner.",
-      inputSchema: recoverTaskClaimSchema,
+      inputSchema: toolInputSchemas["actionables.recover_task_claim"],
       outputSchema: claimTaskOutputSchema,
       annotations: mutation,
     },
@@ -2048,7 +2085,7 @@ function createActionablesMcpServer(
       title: "Update claimed Actionable",
       description:
         "Update only supplied user-authored fields using the claim token and latest version. Prefer append fields for additions. The receipt reports changedFields, reconciliationFields, counts, readiness, permitted transitions and bounded canonical changedContext. When changedContext is complete it verifies those fields; otherwise call get_task_context with nextRead plus the existing claimToken. Stop on isError before dependent operations. Set Resolution before Done.",
-      inputSchema: updateTaskSchema,
+      inputSchema: toolInputSchemas["actionables.update_task"],
       outputSchema: updateTaskReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
@@ -2086,7 +2123,7 @@ function createActionablesMcpServer(
       title: "Transition claimed Actionable",
       description:
         "Move a claimed task through Inbox to Researching to Ready to In progress. Ready requires non-empty finding, description, Research, and planned validation; use readiness.requiredForReady and permittedTransitions before requesting Ready or moving Ready to In progress. Unblock to Researching or Ready only with a meaningful reason describing verified blocker resolution; the reason is audited. Unresolved dependencies prevent unblocking or entering In progress. Return In progress directly to Researching only with a meaningful reason. Implementation changes must wait until In progress. Done requires non-empty Resolution plus qualifying validation and releases the claim. If a composed call returns isError, stop before reading success fields or issuing dependent mutations.",
-      inputSchema: transitionTaskSchema,
+      inputSchema: toolInputSchemas["actionables.transition_task"],
       outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
@@ -2107,7 +2144,7 @@ function createActionablesMcpServer(
       title: "Dismiss unclaimed Actionable",
       description:
         "Dismiss one active unclaimed task created by the current Codex thread. Accepts only the public task ID and a required reason; thread identity and current version are resolved internally. Claimed work must use transition_task.",
-      inputSchema: dismissTaskSchema,
+      inputSchema: toolInputSchemas["actionables.dismiss_task"],
       outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
@@ -2134,7 +2171,7 @@ function createActionablesMcpServer(
       title: "Record Actionable validation",
       description:
         "Record actual validation evidence for a claimed task. A current Passed record can qualify an In progress task for Done.",
-      inputSchema: recordValidationSchema,
+      inputSchema: toolInputSchemas["actionables.record_task_validation"],
       outputSchema: mutationReceiptSchema,
       annotations: mutation,
     },
@@ -2159,7 +2196,7 @@ function createActionablesMcpServer(
     {
       title: "Handoff claimed Actionable",
       description: `Atomically save handoff content, then release the claim. ${agentTaskHandoffContentRecoveryMessage} If any requested write fails, no handoff content is saved and the claim remains active.`,
-      inputSchema: handoffTaskSchema,
+      inputSchema: toolInputSchemas["actionables.handoff_task"],
       outputSchema: mutationReceiptSchema,
       annotations: { ...mutation, destructiveHint: true },
     },
@@ -2181,7 +2218,7 @@ function createActionablesMcpServer(
       title: "Release Actionable claim",
       description:
         "Release only; this tool does not save or update task content. Use handoff_task when content must be saved before release. Before releasing a Researching task, record findings so far, remaining questions, and the next research step.",
-      inputSchema: releaseTaskSchema,
+      inputSchema: toolInputSchemas["actionables.release_task"],
       outputSchema: mutationReceiptSchema,
       annotations: {
         ...mutation,
@@ -2283,6 +2320,60 @@ export function registerMcpRoutes(
   app.get("/mcp", { onRequest }, methodNotAllowed);
   app.delete("/mcp", { onRequest }, methodNotAllowed);
   app.post("/mcp", { onRequest }, async (request, reply) => {
+    // The SDK rejects malformed arguments before our tool error handler runs.
+    const envelope = JSONRPCRequestSchema.safeParse(request.body);
+    const call = CallToolRequestSchema.safeParse(request.body);
+    if (envelope.success && call.success) {
+      const name = call.data.params.name;
+      const schema = Object.hasOwn(toolInputSchemas, name)
+        ? toolInputSchemas[name as keyof typeof toolInputSchemas]
+        : undefined;
+      if (schema) {
+        const parsed = await schema.safeParseAsync(call.data.params.arguments);
+        if (!parsed.success) {
+          const errors: Record<string, string[]> = {};
+          for (const issue of parsed.error.issues.slice(0, 8)) {
+            const field = issue.path.join(".").slice(0, 120) || "arguments";
+            let message = issue.message;
+            if (issue.code === "unrecognized_keys") {
+              // Only echo names from our public contract, never arbitrary input keys.
+              const fields = issue.keys
+                .filter((key) => knownInputFields.has(key))
+                .slice(0, 8);
+              message = `Unsupported fields: ${fields.join(", ") || "unrecognized argument"}. Remove unsupported fields from this object. Accepted top-level fields: ${Object.keys(schema.shape).join(", ")}. Do not substitute a root workItemId for the selected task id.`;
+            }
+            (errors[field] ??= []).push(message.slice(0, 600));
+          }
+          if (name === "actionables.inspect_task") {
+            const id = idSchema.safeParse(call.data.params.arguments?.id);
+            if (id.success) {
+              errors.arguments ??= [];
+              errors.arguments.push(
+                `Minimal read call: ${JSON.stringify({ name, arguments: { id: id.data } })}`,
+              );
+            }
+          }
+          reply.header("x-correlation-id", request.id);
+          return reply.send({
+            jsonrpc: "2.0",
+            id: envelope.data.id,
+            result: failure(
+              new DomainValidationError(
+                "INVALID_REQUEST",
+                errors,
+                `Invalid arguments for ${name}. No operation was performed.`,
+              ),
+              {
+                correlationId: request.id,
+                logger: request.log,
+                toolName: name,
+                internalRetryMode: "never",
+              },
+            ),
+          });
+        }
+      }
+    }
     const server = createServer(prisma, {
       correlationId: request.id,
       logger: request.log,
