@@ -1,0 +1,3477 @@
+{
+  "purpose": "Post-baseline Actionables friction review. Metadata and selected sanitized observations only.",
+  "counting_caveat": "Literal invocation expressions and call blocks are not executed MCP request counts; loops and conditional branches prevent a reliable request denominator.",
+  "coverage_limit": "Local Codex active and archived rollout files; no unavailable remote or cloud bodies. Dynamic and REST paths may be undercounted.",
+  "summary": {
+    "review_start_exclusive": "2026-09-23T00:04:15.004Z",
+    "review_end_inclusive": "2026-10-12T16:56:54.000Z",
+    "indexed_threads": 4660,
+    "indexed_archived_threads": 4158,
+    "candidate_logs": 980,
+    "invalid_json_lines": 0,
+    "all_usage": {
+      "logs": 119,
+      "archived": 118,
+      "call_blocks": 3213,
+      "literal_invocation_expressions": 5951,
+      "methods": {
+        "get_task_context": 1332,
+        "list_tasks": 806,
+        "update_task": 748,
+        "transition_task": 561,
+        "get_task": 507,
+        "inspect_task": 453,
+        "renew_task_claim": 371,
+        "claim_task": 367,
+        "record_task_validation": 278,
+        "complete_task": 121,
+        "handoff_task": 99,
+        "bulk_create_tasks": 64,
+        "create_task": 53,
+        "release_task": 52,
+        "get_task_detail": 47,
+        "get_task_history": 42,
+        "get_completion_view": 33,
+        "create_dependency": 7,
+        "recover_task_claim": 6,
+        "remove_dependency": 2,
+        "search_completed_tasks": 1,
+        "dismiss_task": 1
+      },
+      "error_envelopes": {
+        "CLAIM_EXPIRED": 26,
+        "INVALID_REQUEST": 9,
+        "VERSION_CONFLICT": 4,
+        "OWN_CLAIM_ACTIVE": 4,
+        "NOT_FOUND": 2,
+        "TERMINAL": 1,
+        "CREATOR_THREAD_MISMATCH": 1
+      }
+    },
+    "top_level": {
+      "logs": 105,
+      "archived": 104,
+      "call_blocks": 2400,
+      "literal_invocation_expressions": 4144,
+      "methods": {
+        "get_task_context": 880,
+        "list_tasks": 659,
+        "update_task": 532,
+        "transition_task": 448,
+        "inspect_task": 361,
+        "get_task": 298,
+        "claim_task": 291,
+        "record_task_validation": 125,
+        "complete_task": 116,
+        "renew_task_claim": 94,
+        "handoff_task": 87,
+        "bulk_create_tasks": 64,
+        "release_task": 43,
+        "create_task": 40,
+        "get_task_detail": 37,
+        "get_completion_view": 33,
+        "get_task_history": 24,
+        "create_dependency": 7,
+        "remove_dependency": 2,
+        "recover_task_claim": 1,
+        "search_completed_tasks": 1,
+        "dismiss_task": 1
+      },
+      "error_envelopes": {
+        "CLAIM_EXPIRED": 14,
+        "INVALID_REQUEST": 9,
+        "VERSION_CONFLICT": 4,
+        "NOT_FOUND": 2,
+        "OWN_CLAIM_ACTIVE": 1,
+        "TERMINAL": 1,
+        "CREATOR_THREAD_MISMATCH": 1
+      }
+    },
+    "subagent": {
+      "logs": 14,
+      "archived": 14,
+      "call_blocks": 813,
+      "literal_invocation_expressions": 1807,
+      "methods": {
+        "get_task_context": 452,
+        "renew_task_claim": 277,
+        "update_task": 216,
+        "get_task": 209,
+        "record_task_validation": 153,
+        "list_tasks": 147,
+        "transition_task": 113,
+        "inspect_task": 92,
+        "claim_task": 76,
+        "get_task_history": 18,
+        "create_task": 13,
+        "handoff_task": 12,
+        "get_task_detail": 10,
+        "release_task": 9,
+        "complete_task": 5,
+        "recover_task_claim": 5
+      },
+      "error_envelopes": {
+        "CLAIM_EXPIRED": 12,
+        "OWN_CLAIM_ACTIVE": 3
+      }
+    },
+    "actionables_workspace_proxy": {
+      "logs": 18,
+      "archived": 18,
+      "call_blocks": 221,
+      "literal_invocation_expressions": 379,
+      "methods": {
+        "get_task_context": 61,
+        "list_tasks": 59,
+        "transition_task": 57,
+        "inspect_task": 46,
+        "update_task": 42,
+        "claim_task": 28,
+        "get_task": 27,
+        "complete_task": 22,
+        "create_task": 8,
+        "handoff_task": 8,
+        "bulk_create_tasks": 4,
+        "record_task_validation": 3,
+        "get_completion_view": 3,
+        "renew_task_claim": 3,
+        "get_task_detail": 2,
+        "release_task": 2,
+        "get_task_history": 2,
+        "create_dependency": 1,
+        "search_completed_tasks": 1
+      },
+      "error_envelopes": {
+        "NOT_FOUND": 2
+      }
+    },
+    "other_workspaces_proxy": {
+      "logs": 87,
+      "archived": 86,
+      "call_blocks": 2179,
+      "literal_invocation_expressions": 3765,
+      "methods": {
+        "get_task_context": 819,
+        "list_tasks": 600,
+        "update_task": 490,
+        "transition_task": 391,
+        "inspect_task": 315,
+        "get_task": 271,
+        "claim_task": 263,
+        "record_task_validation": 122,
+        "complete_task": 94,
+        "renew_task_claim": 91,
+        "handoff_task": 79,
+        "bulk_create_tasks": 60,
+        "release_task": 41,
+        "get_task_detail": 35,
+        "create_task": 32,
+        "get_completion_view": 30,
+        "get_task_history": 22,
+        "create_dependency": 6,
+        "remove_dependency": 2,
+        "recover_task_claim": 1,
+        "dismiss_task": 1
+      },
+      "error_envelopes": {
+        "CLAIM_EXPIRED": 14,
+        "INVALID_REQUEST": 9,
+        "VERSION_CONFLICT": 4,
+        "OWN_CLAIM_ACTIVE": 1,
+        "TERMINAL": 1,
+        "CREATOR_THREAD_MISMATCH": 1
+      }
+    }
+  },
+  "runtime_snapshot": {
+    "source_head": "086dda5",
+    "managed_release": "20261006-133516",
+    "health": "ok",
+    "schema": "current",
+    "mcp_tools": 23,
+    "initialize_instruction_utf16_characters": 1219,
+    "server_tool_description_utf16_characters": 13177,
+    "largest_server_description_utf16_characters": 1036,
+    "client_exposed_descriptions_with_wrappers_utf16_characters": 97714,
+    "saved_claim_minutes": 30,
+    "saved_claim_warning_minutes": 10,
+    "installed_source_hashes_match_checkout": [
+      "apps/api/src/agent-tasks.ts",
+      "apps/api/src/mcp.ts",
+      "packages/contracts/src/index.ts",
+      "resources/agent-integration/actionables-workflow/SKILL.md"
+    ]
+  },
+  "selected_evidence": [
+    {
+      "key": "lease_failure",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-03T09:02:05.558Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "line": 2379,
+      "observation": "Failed renewal produced CLAIM_EXPIRED and stopped dependent work.",
+      "result_line": 2383,
+      "methods": ["renew_task_claim"],
+      "returned_output_characters": 1336,
+      "structured_errors": [
+        {
+          "code": "CLAIM_EXPIRED",
+          "detail": "The claim lease expired and must be reacquired.",
+          "retryMode": "after_state_change"
+        }
+      ]
+    },
+    {
+      "key": "lease_recovery",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-03T09:02:43.113Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "line": 2393,
+      "observation": "Listed available work, inspected missing tasks, and reclaimed with 120-minute leases.",
+      "result_line": 2403,
+      "methods": ["list_tasks", "inspect_task", "claim_task"],
+      "returned_output_characters": 13754,
+      "structured_errors": []
+    },
+    {
+      "key": "lease_context_rebuild",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-03T09:03:02.004Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "line": 2409,
+      "observation": "Rebuilt complete context for the reclaimed tasks.",
+      "result_line": 2462,
+      "methods": ["get_task_context"],
+      "returned_output_characters": 40086,
+      "structured_errors": []
+    },
+    {
+      "key": "context_before_change",
+      "thread_id": "01a1128c-7014-7a43-95cb-602ff68d5240",
+      "thread_title": "Research Actionable #961",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-06T19:18:02.615Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-49-17-01a1128c-7014-7a43-95cb-602ff68d5240.jsonl",
+      "line": 450,
+      "observation": "Read the entire task context before a bounded design-note revision.",
+      "result_line": 457,
+      "methods": ["get_task_context"],
+      "returned_output_characters": 34395,
+      "structured_errors": []
+    },
+    {
+      "key": "context_update",
+      "thread_id": "01a1128c-7014-7a43-95cb-602ff68d5240",
+      "thread_title": "Research Actionable #961",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-06T19:19:45.551Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-49-17-01a1128c-7014-7a43-95cb-602ff68d5240.jsonl",
+      "line": 474,
+      "observation": "Updated finding, description, research, planned validation, and sources.",
+      "result_line": 477,
+      "methods": ["update_task"],
+      "returned_output_characters": 495,
+      "structured_errors": []
+    },
+    {
+      "key": "context_readback",
+      "thread_id": "01a1128c-7014-7a43-95cb-602ff68d5240",
+      "thread_title": "Research Actionable #961",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-06T19:20:03.984Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-49-17-01a1128c-7014-7a43-95cb-602ff68d5240.jsonl",
+      "line": 482,
+      "observation": "Retrieved five full context pages and compared expected fields after one update.",
+      "result_line": 489,
+      "methods": ["get_task_context"],
+      "returned_output_characters": 769,
+      "structured_errors": []
+    },
+    {
+      "key": "context_set_difference",
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "thread_title": "Research Actionable #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-02T19:50:34.857Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl",
+      "line": 299,
+      "observation": "Re-read all context and computed a client-side set difference after appending evidence.",
+      "result_line": 319,
+      "methods": ["get_task_context"],
+      "returned_output_characters": 4575,
+      "structured_errors": []
+    },
+    {
+      "key": "context_output_truncated",
+      "thread_id": "01a11853-7a99-7381-89c7-55279ecce829",
+      "thread_title": "Research task #598",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-07T22:06:35.566Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T14-44-46-01a11853-7a99-7381-89c7-55279ecce829.jsonl",
+      "line": 211,
+      "observation": "A combined context output was truncated.",
+      "result_line": 218,
+      "methods": ["get_task_context"],
+      "returned_output_characters": 39433,
+      "structured_errors": []
+    },
+    {
+      "key": "source_limit",
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "thread_title": "Research Actionable #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-02T19:49:09.345Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl",
+      "line": 282,
+      "observation": "Adding ten sources to 43 existing sources exceeded the 50-source aggregate cap.",
+      "result_line": 285,
+      "methods": ["update_task"],
+      "returned_output_characters": 1151,
+      "structured_errors": [
+        {
+          "code": "INVALID_REQUEST",
+          "detail": "The agent task request is invalid.",
+          "errors": {
+            "userSources": ["Too big: expected array to have <=50 items"]
+          },
+          "retryMode": "after_input_change"
+        }
+      ]
+    },
+    {
+      "key": "source_retry",
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "thread_title": "Research Actionable #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-02T19:49:59.766Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl",
+      "line": 290,
+      "observation": "Reduced the additions to seven and retried successfully.",
+      "result_line": 294,
+      "methods": ["update_task"],
+      "returned_output_characters": 7104,
+      "structured_errors": []
+    },
+    {
+      "key": "strategy_note_rejected",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-03T04:35:05.137Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "line": 1834,
+      "observation": "Adding a module-strategy note and one source hit the same source cap.",
+      "result_line": 1837,
+      "methods": ["update_task"],
+      "returned_output_characters": 1151,
+      "structured_errors": [
+        {
+          "code": "INVALID_REQUEST",
+          "detail": "The agent task request is invalid.",
+          "errors": {
+            "userSources": ["Too big: expected array to have <=50 items"]
+          },
+          "retryMode": "after_input_change"
+        }
+      ]
+    },
+    {
+      "key": "research_limit",
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "thread_title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-05T04:55:18.246Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl",
+      "line": 41225,
+      "observation": "An incremental parent update exceeded the 200-research-entry cap.",
+      "result_line": 41230,
+      "methods": ["update_task", "update_task"],
+      "returned_output_characters": 2729,
+      "structured_errors": [
+        {
+          "code": "INVALID_REQUEST",
+          "detail": "The agent task request is invalid.",
+          "errors": {
+            "research": ["Too big: expected array to have <=200 items"]
+          },
+          "retryMode": "after_input_change"
+        }
+      ]
+    },
+    {
+      "key": "discovery_truncated",
+      "thread_id": "01a11853-7a99-7381-89c7-55279ecce829",
+      "thread_title": "Research task #598",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-07T21:44:59.456Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T14-44-46-01a11853-7a99-7381-89c7-55279ecce829.jsonl",
+      "line": 18,
+      "observation": "Combined setup and broad Actionables discovery reported 41949 tokens and was truncated.",
+      "result_line": 23,
+      "methods": [],
+      "returned_output_characters": 40131,
+      "structured_errors": []
+    },
+    {
+      "key": "discovery_retry",
+      "thread_id": "01a11853-7a99-7381-89c7-55279ecce829",
+      "thread_title": "Research task #598",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-07T21:45:12.594Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T14-44-46-01a11853-7a99-7381-89c7-55279ecce829.jsonl",
+      "line": 28,
+      "observation": "A follow-up printed names and only the three starting tool definitions.",
+      "result_line": 33,
+      "methods": [],
+      "returned_output_characters": 24100,
+      "structured_errors": []
+    },
+    {
+      "key": "parent_blocker_question",
+      "thread_id": "01a0e3f4-3a32-7ba2-b090-0f165c6423cd",
+      "thread_title": "Research Actionable #617",
+      "archived_at_scan": true,
+      "timestamp": "2026-09-27T18:04:31.531Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-40-29-01a0e3f4-3a32-7ba2-b090-0f165c6423cd.jsonl",
+      "line": 338,
+      "observation": "User asked why remaining children were blocked by their parent."
+    },
+    {
+      "key": "parent_completion_evidence",
+      "thread_id": "01a0e3f4-3a32-7ba2-b090-0f165c6423cd",
+      "thread_title": "Research Actionable #617",
+      "archived_at_scan": true,
+      "timestamp": "2026-09-27T18:06:08.617Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-40-29-01a0e3f4-3a32-7ba2-b090-0f165c6423cd.jsonl",
+      "line": 378,
+      "observation": "Consolidated parent evidence and moved the coordinator into its own acceptance phase.",
+      "result_line": 384,
+      "methods": ["get_completion_view", "transition_task"],
+      "returned_output_characters": 22540,
+      "structured_errors": []
+    },
+    {
+      "key": "parent_completion_request",
+      "thread_id": "01a13103-ed3b-77e0-97f8-8db50a9870e2",
+      "thread_title": "Complete Actionable 964",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-12T16:48:38.363Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-12T09-48-23-01a13103-ed3b-77e0-97f8-8db50a9870e2.jsonl",
+      "line": 13,
+      "observation": "User requested closing parent 964 if all work was complete."
+    },
+    {
+      "key": "parent_completion_review",
+      "thread_id": "01a13103-ed3b-77e0-97f8-8db50a9870e2",
+      "thread_title": "Complete Actionable 964",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-12T16:49:34.737Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-12T09-48-23-01a13103-ed3b-77e0-97f8-8db50a9870e2.jsonl",
+      "line": 56,
+      "observation": "All four children were Done; aggregate parent review and completion record remained."
+    },
+    {
+      "key": "parent_completion_result",
+      "thread_id": "01a13103-ed3b-77e0-97f8-8db50a9870e2",
+      "thread_title": "Complete Actionable 964",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-12T16:52:50.658Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-12T09-48-23-01a13103-ed3b-77e0-97f8-8db50a9870e2.jsonl",
+      "line": 143,
+      "observation": "Parent marked Done after aggregate review; tests and live checks were not rerun."
+    },
+    {
+      "key": "unblock_detour_fixed",
+      "thread_id": "01a0f9cf-7000-73d3-8a8f-c852b256e496",
+      "thread_title": "Research Actionable task 647",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-02T14:54:27.652Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T16-31-56-01a0f9cf-7000-73d3-8a8f-c852b256e496.jsonl",
+      "line": 1001,
+      "observation": "Agent used the dashboard to reopen a blocked task before native unblocking shipped."
+    },
+    {
+      "key": "selection_expectation_fixed",
+      "thread_id": "01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6",
+      "thread_title": "Add agent task unblocking",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-02T16:46:58.904Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T07-56-16-01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6.jsonl",
+      "line": 317,
+      "observation": "User expected the eligible-task placeholder to delegate selection to the agent."
+    },
+    {
+      "key": "scope_placement_fixed",
+      "thread_id": "01a11206-c131-7b82-b896-57f0fe71c0b0",
+      "thread_title": "Fix Actionable worktree assignment",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-06T16:26:12.978Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-23-15-01a11206-c131-7b82-b896-57f0fe71c0b0.jsonl",
+      "line": 13,
+      "observation": "User reported task 611 under CurrentSprint rather than its creation branch."
+    },
+    {
+      "key": "plugin_startup_fixed",
+      "thread_id": "01a10e22-ea6b-73e0-8391-f1fc693b7864",
+      "thread_title": "Retrieve Actionable 1001 review",
+      "archived_at_scan": true,
+      "timestamp": "2026-10-05T22:19:46.553Z",
+      "path": "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-15-32-01a10e22-ea6b-73e0-8391-f1fc693b7864.jsonl",
+      "line": 86,
+      "observation": "User requested automatic local plugin launch/connection without maintaining a port."
+    }
+  ],
+  "chat_inventory": [
+    {
+      "thread_id": "01a0cb1b-e684-77a3-8ca1-694ac649ede2",
+      "title": "Protect private task content",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-22T14-53-18-01a0cb1b-e684-77a3-8ca1-694ac649ede2.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T00:04:26.689Z",
+      "last_named_tool_event": "2026-09-23T00:19:39.301Z",
+      "call_blocks_with_named_expressions": 17,
+      "literal_method_expressions": {
+        "list_tasks": 5,
+        "claim_task": 3,
+        "get_task_detail": 6,
+        "update_task": 3,
+        "record_task_validation": 3,
+        "release_task": 3,
+        "transition_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0cf01-e43a-79f3-b69c-5694f2d6ad7f",
+      "title": "Review private feature architecture",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T09-03-23-01a0cf01-e43a-79f3-b69c-5694f2d6ad7f.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T16:26:04.181Z",
+      "last_named_tool_event": "2026-09-23T16:27:04.224Z",
+      "call_blocks_with_named_expressions": 4,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0cf4f-8900-7fc2-96b0-116a2441c018",
+      "title": "Fix VS Code debug startup",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-28-11-01a0cf4f-8900-7fc2-96b0-116a2441c018.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T17:29:32.798Z",
+      "last_named_tool_event": "2026-09-23T17:29:32.798Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0cf5b-0ab6-76c0-b449-e7ae3031dc41",
+      "title": "Claim and work on 538",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-40-46-01a0cf5b-0ab6-76c0-b449-e7ae3031dc41.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T17:41:43.242Z",
+      "last_named_tool_event": "2026-09-23T18:06:45.883Z",
+      "call_blocks_with_named_expressions": 15,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "get_task_context": 4,
+        "update_task": 3,
+        "transition_task": 1,
+        "get_task_detail": 3,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0cf5b-fce5-7a22-b69e-5bbd7c5f507d",
+      "title": "Add private task checkbox",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T10-41-47-01a0cf5b-fce5-7a22-b69e-5bbd7c5f507d.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T17:42:53.854Z",
+      "last_named_tool_event": "2026-09-23T17:43:28.087Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "inspect_task": 1,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d04a-5491-78f1-8171-c9049305e582",
+      "title": "Claim Actionable 539",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-23T15-02-07-01a0d04a-5491-78f1-8171-c9049305e582.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-23T22:02:48.339Z",
+      "last_named_tool_event": "2026-09-24T00:35:36.131Z",
+      "call_blocks_with_named_expressions": 71,
+      "literal_method_expressions": {
+        "list_tasks": 17,
+        "inspect_task": 5,
+        "claim_task": 11,
+        "transition_task": 16,
+        "get_task": 4,
+        "get_task_history": 6,
+        "update_task": 17,
+        "get_task_context": 24,
+        "renew_task_claim": 1,
+        "dismiss_task": 1,
+        "remove_dependency": 2,
+        "create_dependency": 1,
+        "release_task": 2,
+        "complete_task": 4,
+        "handoff_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CREATOR_THREAD_MISMATCH": 1
+      }
+    },
+    {
+      "thread_id": "01a0d3fb-cd42-7ba1-94b0-eef0dc7eb0ee",
+      "title": "Map Stotz technology connections",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Codex\\2026-09-24\\i-w",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T08-14-49-01a0d3fb-cd42-7ba1-94b0-eef0dc7eb0ee.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T15:19:12.306Z",
+      "last_named_tool_event": "2026-09-24T15:19:12.306Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d40b-f6bf-71c1-ae52-49c5766121e2",
+      "title": "Assess WWW architecture cleanup",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T08-32-29-01a0d40b-f6bf-71c1-ae52-49c5766121e2.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T15:54:27.679Z",
+      "last_named_tool_event": "2026-09-24T17:35:06.754Z",
+      "call_blocks_with_named_expressions": 7,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d42d-6304-75b0-8ff2-d528b5ebb76f",
+      "title": "Check Actionable 541 blocker",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T09-08-59-01a0d42d-6304-75b0-8ff2-d528b5ebb76f.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T16:09:49.441Z",
+      "last_named_tool_event": "2026-09-24T16:21:58.473Z",
+      "call_blocks_with_named_expressions": 5,
+      "literal_method_expressions": {
+        "inspect_task": 4,
+        "list_tasks": 1,
+        "get_task": 4,
+        "get_task_detail": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d42d-fcff-7bf2-bc69-22050d110b17",
+      "title": "Update documentation and README",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T09-09-39-01a0d42d-fcff-7bf2-bc69-22050d110b17.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T16:12:02.616Z",
+      "last_named_tool_event": "2026-09-24T16:12:02.616Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d473-9548-7193-a8de-4cd4fa8a57bc",
+      "title": "Add app to LocalApps",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\LocalApps",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T10-25-39-01a0d473-9548-7193-a8de-4cd4fa8a57bc.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T17:27:54.123Z",
+      "last_named_tool_event": "2026-09-24T17:27:54.123Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d476-925f-7973-8f08-dc06e9dc77fc",
+      "title": "Verify TaskDetails privacy boundary",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T10-28-55-01a0d476-925f-7973-8f08-dc06e9dc77fc.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T17:29:51.168Z",
+      "last_named_tool_event": "2026-09-24T17:59:24.327Z",
+      "call_blocks_with_named_expressions": 22,
+      "literal_method_expressions": {
+        "list_tasks": 10,
+        "inspect_task": 5,
+        "claim_task": 3,
+        "get_task_context": 6,
+        "update_task": 8,
+        "transition_task": 5,
+        "record_task_validation": 2,
+        "handoff_task": 2,
+        "get_completion_view": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d493-b6fb-7e70-bd64-4b61cf096a78",
+      "title": "Prepare DEV privacy rollout plan",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-00-45-01a0d493-b6fb-7e70-bd64-4b61cf096a78.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T18:01:30.149Z",
+      "last_named_tool_event": "2026-09-24T18:29:05.046Z",
+      "call_blocks_with_named_expressions": 20,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "get_task": 2,
+        "claim_task": 1,
+        "get_task_context": 6,
+        "update_task": 3,
+        "transition_task": 3,
+        "record_task_validation": 1,
+        "handoff_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d499-185b-7b02-a8f2-f9964e72893c",
+      "title": "Review Actionables 534 563 556",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-29-54-01a0d499-185b-7b02-a8f2-f9964e72893c_01a0d4ae-6710-7c51-a69f-6575b0aa885f.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-06-38-01a0d499-185b-7b02-a8f2-f9964e72893c.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T18:08:33.430Z",
+      "last_named_tool_event": "2026-09-24T18:38:04.085Z",
+      "call_blocks_with_named_expressions": 23,
+      "literal_method_expressions": {
+        "list_tasks": 7,
+        "inspect_task": 8,
+        "claim_task": 4,
+        "get_task_context": 7,
+        "transition_task": 6,
+        "get_task": 2,
+        "get_task_detail": 1,
+        "update_task": 5,
+        "release_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d4aa-f6e6-7ad2-9cf3-f1c1e1c591c3",
+      "title": "Normalize tag formatting",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-26-09-01a0d4aa-f6e6-7ad2-9cf3-f1c1e1c591c3.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T18:27:51.264Z",
+      "last_named_tool_event": "2026-09-24T18:57:22.840Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "list_tasks": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d4b7-eff1-7b90-b6ca-46452f45b4c2",
+      "title": "Implement Actionable #564",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-40-19-01a0d4b7-eff1-7b90-b6ca-46452f45b4c2.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T18:41:08.806Z",
+      "last_named_tool_event": "2026-09-24T18:56:25.470Z",
+      "call_blocks_with_named_expressions": 14,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "get_task_context": 5,
+        "transition_task": 2,
+        "update_task": 2,
+        "record_task_validation": 1,
+        "release_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d4c7-9a80-7593-887f-91b774f4445e",
+      "title": "Resume task 565 research",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T11-57-26-01a0d4c7-9a80-7593-887f-91b774f4445e.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T18:58:14.220Z",
+      "last_named_tool_event": "2026-09-24T19:54:31.171Z",
+      "call_blocks_with_named_expressions": 23,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "inspect_task": 4,
+        "claim_task": 3,
+        "get_task_context": 6,
+        "update_task": 3,
+        "transition_task": 7,
+        "handoff_task": 1,
+        "record_task_validation": 1,
+        "complete_task": 2,
+        "get_task": 3,
+        "get_completion_view": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d4fe-46bc-7370-9f2b-d6fe958bbf42",
+      "title": "Complete Actionable #534",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T12-57-09-01a0d4fe-46bc-7370-9f2b-d6fe958bbf42.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T19:57:51.711Z",
+      "last_named_tool_event": "2026-09-24T20:10:44.030Z",
+      "call_blocks_with_named_expressions": 13,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 1,
+        "get_task_context": 3,
+        "get_completion_view": 4,
+        "get_task": 2,
+        "get_task_history": 1,
+        "transition_task": 1,
+        "update_task": 1,
+        "get_task_detail": 2,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d50a-b1d3-7662-b974-372c5c6029cc",
+      "title": "Reuse Task Queue reads in saves",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-11-01-01a0d50a-b1d3-7662-b974-372c5c6029cc_01a0d50a-f8d2-79b0-b4e7-f2742d0266d1.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T20:11:50.552Z",
+      "last_named_tool_event": "2026-09-24T20:29:34.545Z",
+      "call_blocks_with_named_expressions": 11,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "inspect_task": 2,
+        "claim_task": 2,
+        "get_task_context": 3,
+        "update_task": 1,
+        "transition_task": 2,
+        "release_task": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d522-53fe-7111-a39a-7473362dcca5",
+      "title": "Implement Actionables task 553",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-36-32-01a0d522-53fe-7111-a39a-7473362dcca5.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T20:37:22.171Z",
+      "last_named_tool_event": "2026-09-24T20:45:39.575Z",
+      "call_blocks_with_named_expressions": 5,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "get_task_context": 1,
+        "transition_task": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d525-747c-7f32-9873-2c7738f6d255",
+      "title": "Hide bulk toolbar until 2 selected",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-39-57-01a0d525-747c-7f32-9873-2c7738f6d255.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T20:41:35.207Z",
+      "last_named_tool_event": "2026-09-24T20:41:35.207Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d52c-37f9-7b02-8125-6f8bcbb7bed1",
+      "title": "Resume research for #554",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T13-47-20-01a0d52c-37f9-7b02-8125-6f8bcbb7bed1.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T20:48:21.091Z",
+      "last_named_tool_event": "2026-09-24T21:10:02.969Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 2,
+        "claim_task": 2,
+        "get_task_context": 3,
+        "update_task": 1,
+        "record_task_validation": 1,
+        "transition_task": 2,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d544-67b1-77c3-949a-ec2e6ba482c8",
+      "title": "Review task privacy toggle",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T14-13-45-01a0d544-67b1-77c3-949a-ec2e6ba482c8.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T21:32:04.271Z",
+      "last_named_tool_event": "2026-09-24T21:33:29.504Z",
+      "call_blocks_with_named_expressions": 3,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "bulk_create_tasks": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d557-46fb-7531-8ea4-8c96047e6d9d",
+      "title": "Research Actionables task 575",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T14-34-22-01a0d557-46fb-7531-8ea4-8c96047e6d9d.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T21:35:06.308Z",
+      "last_named_tool_event": "2026-09-24T21:56:19.051Z",
+      "call_blocks_with_named_expressions": 13,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 2,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 2,
+        "get_task_context": 4,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d571-ce45-7e23-a4a4-01a5210a2d30",
+      "title": "Use Actionables work item #576. Claim task #576 and begin t…",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T15-03-20-01a0d571-ce45-7e23-a4a4-01a5210a2d30.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T22:04:20.200Z",
+      "last_named_tool_event": "2026-09-24T22:44:53.280Z",
+      "call_blocks_with_named_expressions": 30,
+      "literal_method_expressions": {
+        "list_tasks": 11,
+        "inspect_task": 5,
+        "claim_task": 5,
+        "transition_task": 7,
+        "update_task": 5,
+        "get_task_context": 11,
+        "handoff_task": 4,
+        "complete_task": 2,
+        "get_task": 2,
+        "record_task_validation": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d58d-fd46-75a2-b163-01ae66685dbd",
+      "title": "Find biggest project pain points",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\WWW",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T15-34-07-01a0d58d-fd46-75a2-b163-01ae66685dbd.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T22:37:00.335Z",
+      "last_named_tool_event": "2026-09-24T22:52:40.793Z",
+      "call_blocks_with_named_expressions": 4,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "bulk_create_tasks": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d5a6-d194-7b41-8933-dcb9f7db0cf0",
+      "title": "Research Actionable 578",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-01-15-01a0d5a6-d194-7b41-8933-dcb9f7db0cf0.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T23:02:07.659Z",
+      "last_named_tool_event": "2026-09-25T15:27:40.423Z",
+      "call_blocks_with_named_expressions": 26,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 6,
+        "claim_task": 2,
+        "transition_task": 4,
+        "update_task": 4,
+        "get_task_context": 11,
+        "bulk_create_tasks": 2,
+        "record_task_validation": 2,
+        "handoff_task": 1,
+        "get_completion_view": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d5a7-35b5-7f00-8b2b-9c200e40552b",
+      "title": "Consolidate reference-data actionals",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-01-40-01a0d5a7-35b5-7f00-8b2b-9c200e40552b.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T23:02:41.257Z",
+      "last_named_tool_event": "2026-09-24T23:07:04.000Z",
+      "call_blocks_with_named_expressions": 4,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "inspect_task": 2,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d5b9-2a45-72f3-9084-de726b7e220a",
+      "title": "Research Actionable 584",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-21-17-01a0d5b9-2a45-72f3-9084-de726b7e220a.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T23:22:04.816Z",
+      "last_named_tool_event": "2026-09-24T23:55:30.367Z",
+      "call_blocks_with_named_expressions": 17,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "get_task_context": 7,
+        "transition_task": 3,
+        "update_task": 2,
+        "record_task_validation": 1,
+        "release_task": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d5d3-4191-7bf0-abb1-6542ab8a17f5",
+      "title": "Add rolling average trend line",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\Code\\repo-stats",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-49-47-01a0d5d3-4191-7bf0-abb1-6542ab8a17f5.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-24T23:51:15.875Z",
+      "last_named_tool_event": "2026-09-24T23:51:15.875Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d5db-f8b6-7e81-bb17-fa270601e59c",
+      "title": "Research Actionable 585",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-24T16-59-18-01a0d5db-f8b6-7e81-bb17-fa270601e59c.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T00:00:19.341Z",
+      "last_named_tool_event": "2026-09-25T00:31:16.675Z",
+      "call_blocks_with_named_expressions": 15,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 2,
+        "claim_task": 2,
+        "get_task_context": 5,
+        "transition_task": 3,
+        "update_task": 3,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d910-6827-7611-a0ce-3b79c34ec456",
+      "title": "Add circuit board canvas view",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\StotzTechnologyMap",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T07-55-26-01a0d910-6827-7611-a0ce-3b79c34ec456.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T14:59:20.689Z",
+      "last_named_tool_event": "2026-09-25T14:59:20.689Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d928-3ed1-7bb1-8d06-35fe897a3f9f",
+      "title": "Break down Actionable 579",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-21-28-01a0d928-3ed1-7bb1-8d06-35fe897a3f9f.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T15:22:22.453Z",
+      "last_named_tool_event": "2026-09-25T15:31:50.343Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 3,
+        "claim_task": 1,
+        "transition_task": 2,
+        "bulk_create_tasks": 2,
+        "update_task": 1,
+        "get_task_context": 1,
+        "record_task_validation": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d931-1a6b-7e40-86ba-52c7aaa9da54",
+      "title": "Break up Actionable 582",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-31-09-01a0d931-1a6b-7e40-86ba-52c7aaa9da54.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T15:32:18.940Z",
+      "last_named_tool_event": "2026-09-25T15:47:10.925Z",
+      "call_blocks_with_named_expressions": 11,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "inspect_task": 4,
+        "claim_task": 1,
+        "transition_task": 2,
+        "bulk_create_tasks": 2,
+        "update_task": 1,
+        "get_task_context": 2,
+        "handoff_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d936-c2fd-7c13-a120-52b311c7faae",
+      "title": "Break down Actionable 581",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T08-37-20-01a0d936-c2fd-7c13-a120-52b311c7faae.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T15:38:10.353Z",
+      "last_named_tool_event": "2026-09-25T15:48:15.773Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 3,
+        "claim_task": 1,
+        "transition_task": 2,
+        "bulk_create_tasks": 2,
+        "create_dependency": 1,
+        "update_task": 1,
+        "get_task_context": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d94b-9fce-71a0-9db5-7194ad60e1ea",
+      "title": "Ignore generated docs-proof shims",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-00-07-01a0d94b-9fce-71a0-9db5-7194ad60e1ea.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:01:26.771Z",
+      "last_named_tool_event": "2026-09-25T16:01:26.771Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d952-c9ad-7482-9c97-4a95b8d511f3",
+      "title": "Research Actionable #586",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-07-56-01a0d952-c9ad-7482-9c97-4a95b8d511f3.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:08:39.723Z",
+      "last_named_tool_event": "2026-09-25T16:32:38.118Z",
+      "call_blocks_with_named_expressions": 14,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 4,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 5,
+        "get_task_context": 4,
+        "release_task": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d955-f2c9-7f90-ab18-ab378130efc8",
+      "title": "Research Actionable #550",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-11-23-01a0d955-f2c9-7f90-ab18-ab378130efc8.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:12:10.137Z",
+      "last_named_tool_event": "2026-09-25T16:27:29.246Z",
+      "call_blocks_with_named_expressions": 14,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "transition_task": 3,
+        "get_task": 2,
+        "get_task_history": 1,
+        "search_completed_tasks": 1,
+        "update_task": 2,
+        "get_task_context": 3,
+        "handoff_task": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d968-3471-7032-bc66-5eeead69f4cc",
+      "title": "Research Actionables #551",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-31-20-01a0d968-3471-7032-bc66-5eeead69f4cc.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:32:01.795Z",
+      "last_named_tool_event": "2026-09-25T16:54:02.327Z",
+      "call_blocks_with_named_expressions": 9,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 1,
+        "get_task": 2,
+        "get_task_context": 2,
+        "handoff_task": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d974-8d6d-7082-9c23-0dccfe7555d8",
+      "title": "Research Actionables task 587",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-44-49-01a0d974-8d6d-7082-9c23-0dccfe7555d8.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:48:37.521Z",
+      "last_named_tool_event": "2026-09-25T17:38:03.550Z",
+      "call_blocks_with_named_expressions": 19,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 5,
+        "claim_task": 2,
+        "transition_task": 6,
+        "update_task": 4,
+        "get_task": 1,
+        "get_task_context": 6,
+        "release_task": 1,
+        "record_task_validation": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d97d-ee65-79b0-bd12-7c46ae29758b",
+      "title": "Research Actionable #552",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T09-55-04-01a0d97d-ee65-79b0-bd12-7c46ae29758b.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T16:55:45.501Z",
+      "last_named_tool_event": "2026-09-25T17:29:02.542Z",
+      "call_blocks_with_named_expressions": 13,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "inspect_task": 2,
+        "claim_task": 1,
+        "transition_task": 3,
+        "get_task": 1,
+        "get_task_history": 1,
+        "update_task": 4,
+        "get_task_context": 3,
+        "record_task_validation": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9a7-cf70-77e0-bbf7-d28d68563509",
+      "title": "Test commit in browser",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T10-40-48-01a0d9a7-cf70-77e0-bbf7-d28d68563509.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T17:42:19.927Z",
+      "last_named_tool_event": "2026-09-25T18:21:10.996Z",
+      "call_blocks_with_named_expressions": 3,
+      "literal_method_expressions": {
+        "list_tasks": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9b0-a044-7541-8f5e-52d32d78f0be",
+      "title": "Create Sales Delivery Process Map",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T10-50-26-01a0d9b0-a044-7541-8f5e-52d32d78f0be.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T17:52:01.373Z",
+      "last_named_tool_event": "2026-09-25T17:55:27.510Z",
+      "call_blocks_with_named_expressions": 5,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9ba-63e8-7632-b288-c78892b54806",
+      "title": "Research Actionable #588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-01-06-01a0d9ba-63e8-7632-b288-c78892b54806.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T18:02:06.032Z",
+      "last_named_tool_event": "2026-09-25T18:15:16.111Z",
+      "call_blocks_with_named_expressions": 7,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 2,
+        "claim_task": 1,
+        "transition_task": 2,
+        "update_task": 2,
+        "get_task_context": 2,
+        "record_task_validation": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9d0-1e84-7e90-9229-a4b05a1bcd29",
+      "title": "Debug changes in commit 9b52c3bd",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-24-50-01a0d9d0-1e84-7e90-9229-a4b05a1bcd29.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T18:26:28.448Z",
+      "last_named_tool_event": "2026-09-25T19:14:43.858Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "list_tasks": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9de-e3e9-7ea1-b070-edb34139f6b3",
+      "title": "Continue Actionables task #588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-40-58-01a0d9de-e3e9-7ea1-b070-edb34139f6b3.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T18:41:39.138Z",
+      "last_named_tool_event": "2026-09-25T19:15:58.865Z",
+      "call_blocks_with_named_expressions": 13,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "get_task_context": 6,
+        "transition_task": 5,
+        "update_task": 4,
+        "record_task_validation": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0d9df-2dae-7633-bf14-e96ac250ff17",
+      "title": "Find Actionable 588",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T11-41-17-01a0d9df-2dae-7633-bf14-e96ac250ff17.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T18:42:07.489Z",
+      "last_named_tool_event": "2026-09-25T18:42:07.489Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0da31-7f34-7a60-a1c6-66c0f4c92289",
+      "title": "Research Actionable #572",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T13-11-12-01a0da31-7f34-7a60-a1c6-66c0f4c92289.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T20:11:53.248Z",
+      "last_named_tool_event": "2026-09-25T20:35:59.468Z",
+      "call_blocks_with_named_expressions": 20,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 3,
+        "transition_task": 4,
+        "update_task": 2,
+        "get_task_context": 9,
+        "handoff_task": 1,
+        "record_task_validation": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0da60-dc44-7250-9541-65ab8ea43698",
+      "title": "Research Actionable #602",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T17-25-23-01a0da60-dc44-7250-9541-65ab8ea43698_01a0db1a-3748-7862-9360-ce671f0ee645.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T14-02-56-01a0da60-dc44-7250-9541-65ab8ea43698.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-25T21:03:40.563Z",
+      "last_named_tool_event": "2026-09-26T03:55:40.122Z",
+      "call_blocks_with_named_expressions": 105,
+      "literal_method_expressions": {
+        "list_tasks": 26,
+        "inspect_task": 7,
+        "claim_task": 11,
+        "get_task_context": 40,
+        "transition_task": 20,
+        "update_task": 28,
+        "handoff_task": 1,
+        "get_task": 10,
+        "record_task_validation": 10,
+        "complete_task": 7,
+        "get_completion_view": 8,
+        "create_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "TERMINAL": 1
+      }
+    },
+    {
+      "thread_id": "01a0dbdb-55b3-7733-8a97-449a71ed3981",
+      "title": "Research Actionable #601",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T20-56-19-01a0dbdb-55b3-7733-8a97-449a71ed3981.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-26T03:57:52.521Z",
+      "last_named_tool_event": "2026-09-26T05:20:24.062Z",
+      "call_blocks_with_named_expressions": 38,
+      "literal_method_expressions": {
+        "list_tasks": 8,
+        "inspect_task": 5,
+        "claim_task": 6,
+        "get_task_context": 20,
+        "transition_task": 8,
+        "update_task": 16,
+        "create_dependency": 3,
+        "record_task_validation": 4,
+        "complete_task": 2,
+        "get_task": 3,
+        "handoff_task": 2,
+        "release_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0dbdd-83bf-73d0-bf93-a99a523b4b17",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-25T20-58-42-01a0dbdd-83bf-73d0-bf93-a99a523b4b17.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-26T03:59:23.721Z",
+      "last_named_tool_event": "2026-09-26T04:00:08.581Z",
+      "call_blocks_with_named_expressions": 6,
+      "literal_method_expressions": {
+        "get_task": 1,
+        "get_task_detail": 1,
+        "get_task_history": 5
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0dec8-7063-7561-ada2-9c7b95b676e1",
+      "title": "Find Microsoft record links",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T10-34-33-01a0dec8-7063-7561-ada2-9c7b95b676e1.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-26T17:35:52.474Z",
+      "last_named_tool_event": "2026-09-26T18:19:21.891Z",
+      "call_blocks_with_named_expressions": 12,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 3,
+        "claim_task": 1,
+        "get_task_context": 5,
+        "update_task": 1,
+        "handoff_task": 1,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0def3-00d9-7c51-b7d4-5bc8f916aa84",
+      "title": "Research Actionable #606",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T15-32-47-01a0def3-00d9-7c51-b7d4-5bc8f916aa84_01a0dfd9-7b91-7892-8af6-47759a2e420a.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-26T11-21-02-01a0def3-00d9-7c51-b7d4-5bc8f916aa84.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-26T18:21:40.571Z",
+      "last_named_tool_event": "2026-09-27T16:14:33.750Z",
+      "call_blocks_with_named_expressions": 93,
+      "literal_method_expressions": {
+        "list_tasks": 28,
+        "inspect_task": 9,
+        "claim_task": 11,
+        "get_task_context": 33,
+        "transition_task": 12,
+        "update_task": 21,
+        "handoff_task": 10,
+        "record_task_validation": 4,
+        "get_task": 2,
+        "get_task_history": 1,
+        "complete_task": 1,
+        "release_task": 1,
+        "create_task": 1,
+        "renew_task_claim": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3ad-5079-7ec1-80a2-e270dd3ed651",
+      "title": "Create service workflow Actionables",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-00-57-01a0e3ad-5079-7ec1-80a2-e270dd3ed651_01a0e3d0-0bb7-7662-91c3-14fca0e57e4b.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-23-01-01a0e3ad-5079-7ec1-80a2-e270dd3ed651.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T16:25:12.550Z",
+      "last_named_tool_event": "2026-09-27T17:08:33.845Z",
+      "call_blocks_with_named_expressions": 30,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "inspect_task": 5,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 4,
+        "get_task_context": 9,
+        "record_task_validation": 3,
+        "release_task": 1,
+        "complete_task": 1,
+        "get_task": 1,
+        "get_task_detail": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3af-ea09-7e41-a0ff-3d1562fee068",
+      "title": "Fix Open Work navigation behavior",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-25-52-01a0e3af-ea09-7e41-a0ff-3d1562fee068.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T16:28:58.432Z",
+      "last_named_tool_event": "2026-09-27T16:30:47.575Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3a7-6241-7ff2-82ad-137685178b86",
+      "title": "Analyze history evaluation token",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-16-33-01a0e3a7-6241-7ff2-82ad-137685178b86.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T16:31:20.731Z",
+      "last_named_tool_event": "2026-09-27T16:35:14.431Z",
+      "call_blocks_with_named_expressions": 9,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "claim_task": 1,
+        "create_dependency": 1,
+        "release_task": 1,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3ba-cf1e-7fe3-8310-b57487fc2c9c",
+      "title": "Research task #613",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T09-37-46-01a0e3ba-cf1e-7fe3-8310-b57487fc2c9c.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T16:38:32.537Z",
+      "last_named_tool_event": "2026-09-27T17:38:44.823Z",
+      "call_blocks_with_named_expressions": 32,
+      "literal_method_expressions": {
+        "list_tasks": 10,
+        "inspect_task": 10,
+        "claim_task": 5,
+        "transition_task": 13,
+        "update_task": 7,
+        "get_task_context": 10,
+        "bulk_create_tasks": 2,
+        "get_task": 5,
+        "handoff_task": 2,
+        "complete_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3d7-f10b-71b2-86aa-805d4bbdfbdd",
+      "title": "Research Actionable #610",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-09-35-01a0e3d7-f10b-71b2-86aa-805d4bbdfbdd.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T17:10:12.952Z",
+      "last_named_tool_event": "2026-09-28T15:58:24.573Z",
+      "call_blocks_with_named_expressions": 104,
+      "literal_method_expressions": {
+        "list_tasks": 59,
+        "inspect_task": 9,
+        "claim_task": 10,
+        "get_task_context": 26,
+        "transition_task": 14,
+        "get_task": 4,
+        "get_task_history": 6,
+        "get_task_detail": 1,
+        "update_task": 20,
+        "bulk_create_tasks": 2,
+        "record_task_validation": 2,
+        "release_task": 2,
+        "renew_task_claim": 1,
+        "get_completion_view": 8,
+        "complete_task": 4,
+        "handoff_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e3f4-3a32-7ba2-b090-0f165c6423cd",
+      "title": "Research Actionable #617",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T10-40-29-01a0e3f4-3a32-7ba2-b090-0f165c6423cd.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T17:41:14.424Z",
+      "last_named_tool_event": "2026-09-27T20:44:06.204Z",
+      "call_blocks_with_named_expressions": 46,
+      "literal_method_expressions": {
+        "list_tasks": 13,
+        "inspect_task": 5,
+        "claim_task": 7,
+        "get_task_context": 14,
+        "transition_task": 12,
+        "update_task": 10,
+        "handoff_task": 1,
+        "complete_task": 6,
+        "get_task": 13,
+        "get_completion_view": 3,
+        "renew_task_claim": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e4d1-090e-7b22-a4c5-907010de2497",
+      "title": "Fix Codex configuration errors",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\.codex",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-27T14-41-39-01a0e4d1-090e-7b22-a4c5-907010de2497.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-27T21:44:21.604Z",
+      "last_named_tool_event": "2026-09-27T21:44:21.604Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e8df-9f82-7613-89b4-9241546c069a",
+      "title": "Review awkward UI",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T09-36-04-01a0e8df-9f82-7613-89b4-9241546c069a.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-28T16:47:18.520Z",
+      "last_named_tool_event": "2026-09-28T16:47:18.520Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0e8fa-65d5-7311-8039-c83a1950efe2",
+      "title": "Check financial report refresh",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T10-05-19-01a0e8fa-65d5-7311-8039-c83a1950efe2.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-28T17:14:23.050Z",
+      "last_named_tool_event": "2026-09-28T18:02:11.356Z",
+      "call_blocks_with_named_expressions": 7,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "bulk_create_tasks": 4,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0eddb-f688-78a2-9003-8128dbb48c45",
+      "title": "Draft commissions how-to",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T08-50-10-01a0eddb-f688-78a2-9003-8128dbb48c45.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T15:51:56.760Z",
+      "last_named_tool_event": "2026-09-29T15:51:56.760Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0edde-023b-7210-a6c5-ab49e2572068",
+      "title": "Document Scott’s commission email",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Users\\AustinScriver\\OneDrive - stotzeq.com\\Documents\\Obsidian Vault",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T08-52-25-01a0edde-023b-7210-a6c5-ab49e2572068.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T16:12:41.035Z",
+      "last_named_tool_event": "2026-09-29T16:12:41.035Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0ea78-daa1-7dd0-a8f2-7de9df73ddde",
+      "title": "Validate financial summary script",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\database",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-28T17-03-04-01a0ea78-daa1-7dd0-a8f2-7de9df73ddde.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T17:22:13.363Z",
+      "last_named_tool_event": "2026-09-29T17:22:13.363Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0ee8d-5bd4-7120-a955-7225227e1ab9",
+      "title": "Research Actionable #589",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T12-03-56-01a0ee8d-5bd4-7120-a955-7225227e1ab9.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T19:04:38.272Z",
+      "last_named_tool_event": "2026-09-29T20:22:46.632Z",
+      "call_blocks_with_named_expressions": 17,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "transition_task": 5,
+        "update_task": 3,
+        "get_task_context": 4,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task": 2,
+        "get_task_detail": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0eee3-d529-7f60-bef2-d32731ea6722",
+      "title": "Research Actionable #590",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T13-38-23-01a0eee3-d529-7f60-bef2-d32731ea6722.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T20:39:05.668Z",
+      "last_named_tool_event": "2026-09-29T21:11:26.714Z",
+      "call_blocks_with_named_expressions": 17,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 1,
+        "get_task": 3,
+        "get_task_context": 6,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task_detail": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0eeda-9868-70d3-b2b7-3651b22d3c1f",
+      "title": "Draft reply to Wendy",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T13-28-18-01a0eeda-9868-70d3-b2b7-3651b22d3c1f.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T20:40:10.866Z",
+      "last_named_tool_event": "2026-09-29T20:40:10.866Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0ef0d-a854-7df0-a608-150d4b6efbfb",
+      "title": "Research Actionables task 591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-29T14-24-04-01a0ef0d-a854-7df0-a608-150d4b6efbfb.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-29T21:24:47.935Z",
+      "last_named_tool_event": "2026-10-01T00:07:22.936Z",
+      "call_blocks_with_named_expressions": 131,
+      "literal_method_expressions": {
+        "list_tasks": 43,
+        "inspect_task": 11,
+        "claim_task": 22,
+        "transition_task": 31,
+        "get_task": 25,
+        "get_task_context": 54,
+        "get_task_detail": 5,
+        "bulk_create_tasks": 2,
+        "update_task": 35,
+        "handoff_task": 4,
+        "complete_task": 12,
+        "record_task_validation": 3,
+        "release_task": 5,
+        "create_task": 6
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "VERSION_CONFLICT": 1
+      }
+    },
+    {
+      "thread_id": "01a0f337-a29a-7ac3-bd85-19c9281ae5f4",
+      "title": "Find complex procedure logic",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023\\Projects\\database",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-09-30T09-48-24-01a0f337-a29a-7ac3-bd85-19c9281ae5f4.jsonl"
+      ],
+      "first_named_tool_event": "2026-09-30T16:51:27.429Z",
+      "last_named_tool_event": "2026-09-30T16:51:27.429Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f850-3a18-7de1-ab2b-dc0d9a192de5",
+      "title": "Review Actionable 579",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T09-33-22-01a0f850-3a18-7de1-ab2b-dc0d9a192de5.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T16:34:14.873Z",
+      "last_named_tool_event": "2026-10-01T17:13:12.906Z",
+      "call_blocks_with_named_expressions": 19,
+      "literal_method_expressions": {
+        "inspect_task": 5,
+        "get_task": 2,
+        "list_tasks": 2,
+        "claim_task": 1,
+        "get_task_context": 6,
+        "bulk_create_tasks": 2,
+        "update_task": 1,
+        "record_task_validation": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f875-355e-7630-a9ec-bc34503a9805",
+      "title": "Research Actionable #649",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T10-13-46-01a0f875-355e-7630-a9ec-bc34503a9805.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T17:14:41.473Z",
+      "last_named_tool_event": "2026-10-01T18:10:03.002Z",
+      "call_blocks_with_named_expressions": 22,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "get_task_context": 7,
+        "transition_task": 6,
+        "update_task": 5,
+        "handoff_task": 1,
+        "get_completion_view": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f8aa-28cc-7a00-89c1-0243a098a066",
+      "title": "Research Actionable #648",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T11-11-36-01a0f8aa-28cc-7a00-89c1-0243a098a066.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T18:12:27.508Z",
+      "last_named_tool_event": "2026-10-01T18:21:57.106Z",
+      "call_blocks_with_named_expressions": 8,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 2,
+        "claim_task": 1,
+        "get_task_context": 2,
+        "transition_task": 2,
+        "update_task": 1,
+        "get_task": 1,
+        "handoff_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f8af-3065-7783-a847-9cbde029b933",
+      "title": "Review Layne Richins’s email (2)",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T11-17-06-01a0f8af-3065-7783-a847-9cbde029b933.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T18:22:10.347Z",
+      "last_named_tool_event": "2026-10-01T20:23:56.824Z",
+      "call_blocks_with_named_expressions": 37,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "list_tasks": 13,
+        "claim_task": 6,
+        "get_task_context": 18,
+        "transition_task": 3,
+        "update_task": 8,
+        "handoff_task": 5,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f924-142d-79c3-96cf-530de19f393b",
+      "title": "Continue Actionables task 648",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T13-24-46-01a0f924-142d-79c3-96cf-530de19f393b.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T20:25:31.273Z",
+      "last_named_tool_event": "2026-10-01T20:47:08.528Z",
+      "call_blocks_with_named_expressions": 9,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "get_task_context": 3,
+        "transition_task": 2,
+        "update_task": 1,
+        "get_task_detail": 1,
+        "record_task_validation": 2,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f96c-1739-73f1-affd-c844689f7f5c",
+      "title": "Validate Actionable #641 in browser",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T14-43-26-01a0f96c-1739-73f1-affd-c844689f7f5c.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T21:44:16.386Z",
+      "last_named_tool_event": "2026-10-01T22:05:55.243Z",
+      "call_blocks_with_named_expressions": 12,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "inspect_task": 2,
+        "claim_task": 1,
+        "get_task_context": 6,
+        "transition_task": 3,
+        "update_task": 2,
+        "record_task_validation": 2,
+        "handoff_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f9a6-740c-74e1-a0eb-dec3094e2d63",
+      "title": "Commit repository changes",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T15-47-10-01a0f9a6-740c-74e1-a0eb-dec3094e2d63.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T23:31:15.628Z",
+      "last_named_tool_event": "2026-10-01T23:31:15.628Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0f9cf-7000-73d3-8a8f-c852b256e496",
+      "title": "Research Actionable task 647",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-01T16-31-56-01a0f9cf-7000-73d3-8a8f-c852b256e496.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-01T23:32:52.065Z",
+      "last_named_tool_event": "2026-10-02T15:26:36.773Z",
+      "call_blocks_with_named_expressions": 25,
+      "literal_method_expressions": {
+        "list_tasks": 9,
+        "inspect_task": 7,
+        "claim_task": 3,
+        "get_task_context": 8,
+        "transition_task": 5,
+        "update_task": 3,
+        "handoff_task": 2,
+        "renew_task_claim": 1,
+        "record_task_validation": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6",
+      "title": "Add agent task unblocking",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T07-56-16-01a0fd1d-aef6-7a72-acfe-9ebbb7cb2af6.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T14:57:47.566Z",
+      "last_named_tool_event": "2026-10-02T14:58:15.091Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "list_tasks": 1,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fd3b-4c10-7aa0-8417-ea415709ac14",
+      "title": "Research Actionable #646",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T08-28-37-01a0fd3b-4c10-7aa0-8417-ea415709ac14.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T15:29:40.419Z",
+      "last_named_tool_event": "2026-10-02T16:24:06.892Z",
+      "call_blocks_with_named_expressions": 20,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 3,
+        "claim_task": 2,
+        "get_task_context": 6,
+        "transition_task": 3,
+        "update_task": 3,
+        "handoff_task": 1,
+        "record_task_validation": 2,
+        "renew_task_claim": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fd7f-4735-7c33-9303-f8c27dc19057",
+      "title": "Research Actionable #645",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T09-42-52-01a0fd7f-4735-7c33-9303-f8c27dc19057.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T16:48:02.814Z",
+      "last_named_tool_event": "2026-10-02T19:27:39.450Z",
+      "call_blocks_with_named_expressions": 62,
+      "literal_method_expressions": {
+        "list_tasks": 14,
+        "inspect_task": 19,
+        "claim_task": 9,
+        "get_task_context": 21,
+        "transition_task": 20,
+        "update_task": 13,
+        "complete_task": 6,
+        "get_task": 7,
+        "bulk_create_tasks": 2,
+        "handoff_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fe18-4047-7012-843b-1d40a64b1a3a",
+      "title": "Research Actionable #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-29-57-01a0fe18-4047-7012-843b-1d40a64b1a3a.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T19:31:05.072Z",
+      "last_named_tool_event": "2026-10-02T22:18:06.830Z",
+      "call_blocks_with_named_expressions": 81,
+      "literal_method_expressions": {
+        "list_tasks": 15,
+        "inspect_task": 22,
+        "claim_task": 9,
+        "get_task_context": 36,
+        "bulk_create_tasks": 4,
+        "get_task": 9,
+        "update_task": 11,
+        "handoff_task": 2,
+        "transition_task": 13,
+        "renew_task_claim": 1,
+        "record_task_validation": 8,
+        "complete_task": 6,
+        "get_task_detail": 1,
+        "get_task_history": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "INVALID_REQUEST": 1
+      }
+    },
+    {
+      "thread_id": "01a0fe2f-5a36-71e2-a61d-a8ce25d8374d",
+      "title": "Research Actionables task #651",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T12-55-11-01a0fe2f-5a36-71e2-a61d-a8ce25d8374d.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T19:56:09.546Z",
+      "last_named_tool_event": "2026-10-02T20:36:25.460Z",
+      "call_blocks_with_named_expressions": 12,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 4,
+        "claim_task": 2,
+        "transition_task": 3,
+        "update_task": 2,
+        "get_task_context": 3,
+        "handoff_task": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fe88-7363-7ef1-a2a0-7e261e7d22d9",
+      "title": "Move text to description tooltip",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T14-32-30-01a0fe88-7363-7ef1-a2a0-7e261e7d22d9.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T21:34:54.599Z",
+      "last_named_tool_event": "2026-10-02T22:32:06.563Z",
+      "call_blocks_with_named_expressions": 23,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "claim_task": 3,
+        "transition_task": 6,
+        "update_task": 6,
+        "get_task_context": 10,
+        "handoff_task": 1,
+        "inspect_task": 1,
+        "list_tasks": 7,
+        "complete_task": 2,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0feb0-f79b-7dc3-89de-2e50e47c5a79",
+      "title": "Select eligible task in #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-16-45-01a0feb0-f79b-7dc3-89de-2e50e47c5a79.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T22:17:20.301Z",
+      "last_named_tool_event": "2026-10-02T22:48:14.376Z",
+      "call_blocks_with_named_expressions": 19,
+      "literal_method_expressions": {
+        "inspect_task": 7,
+        "list_tasks": 6,
+        "claim_task": 3,
+        "get_task_context": 8,
+        "transition_task": 7,
+        "get_task": 6,
+        "get_task_history": 3,
+        "update_task": 4,
+        "complete_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a0fecf-c1a8-7a10-9c7a-6ba122594e97",
+      "title": "Resume research for task #591",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-02T15-50-23-01a0fecf-c1a8-7a10-9c7a-6ba122594e97.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-02T22:51:25.013Z",
+      "last_named_tool_event": "2026-10-05T15:45:29.422Z",
+      "call_blocks_with_named_expressions": 557,
+      "literal_method_expressions": {
+        "list_tasks": 121,
+        "inspect_task": 57,
+        "claim_task": 67,
+        "get_task_context": 280,
+        "bulk_create_tasks": 22,
+        "get_task": 151,
+        "update_task": 171,
+        "get_task_detail": 8,
+        "renew_task_claim": 81,
+        "record_task_validation": 51,
+        "transition_task": 73,
+        "handoff_task": 10,
+        "release_task": 9,
+        "complete_task": 16,
+        "create_task": 5,
+        "create_dependency": 1,
+        "recover_task_claim": 1,
+        "get_task_history": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "INVALID_REQUEST": 8,
+        "CLAIM_EXPIRED": 14,
+        "VERSION_CONFLICT": 2,
+        "OWN_CLAIM_ACTIVE": 1
+      }
+    },
+    {
+      "thread_id": "01a102db-91c2-71a1-851e-88d70358a816",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-41-46-01a102db-91c2-71a1-851e-88d70358a816.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T17:42:32.335Z",
+      "last_named_tool_event": "2026-10-04T14:34:41.844Z",
+      "call_blocks_with_named_expressions": 102,
+      "literal_method_expressions": {
+        "list_tasks": 15,
+        "inspect_task": 8,
+        "claim_task": 6,
+        "get_task_context": 42,
+        "transition_task": 13,
+        "update_task": 26,
+        "renew_task_claim": 32,
+        "record_task_validation": 13,
+        "handoff_task": 2,
+        "get_task": 24,
+        "release_task": 1,
+        "get_task_detail": 3,
+        "create_task": 2,
+        "recover_task_claim": 1,
+        "get_task_history": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "OWN_CLAIM_ACTIVE": 1
+      }
+    },
+    {
+      "thread_id": "01a102db-decd-7303-ad0c-e53c99d7458a",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-42-06-01a102db-decd-7303-ad0c-e53c99d7458a.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T17:42:46.930Z",
+      "last_named_tool_event": "2026-10-04T15:04:56.306Z",
+      "call_blocks_with_named_expressions": 115,
+      "literal_method_expressions": {
+        "list_tasks": 34,
+        "inspect_task": 15,
+        "claim_task": 11,
+        "get_task_context": 73,
+        "transition_task": 13,
+        "update_task": 26,
+        "renew_task_claim": 41,
+        "record_task_validation": 28,
+        "handoff_task": 2,
+        "release_task": 1,
+        "get_task": 37,
+        "create_task": 2,
+        "recover_task_claim": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 1,
+        "OWN_CLAIM_ACTIVE": 1
+      }
+    },
+    {
+      "thread_id": "01a102dc-2553-72b2-8435-d9bd2f753708",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T10-42-24-01a102dc-2553-72b2-8435-d9bd2f753708.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T17:43:21.520Z",
+      "last_named_tool_event": "2026-10-04T10:49:32.176Z",
+      "call_blocks_with_named_expressions": 89,
+      "literal_method_expressions": {
+        "list_tasks": 17,
+        "inspect_task": 11,
+        "claim_task": 10,
+        "get_task_context": 40,
+        "transition_task": 18,
+        "update_task": 21,
+        "renew_task_claim": 17,
+        "record_task_validation": 13,
+        "handoff_task": 3,
+        "get_task": 23,
+        "create_task": 1,
+        "get_task_detail": 1,
+        "get_task_history": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 3
+      }
+    },
+    {
+      "thread_id": "01a102ec-e416-7e53-89d8-1b1eb191788c",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-00-42-01a102ec-e416-7e53-89d8-1b1eb191788c.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T18:01:29.389Z",
+      "last_named_tool_event": "2026-10-04T13:42:30.455Z",
+      "call_blocks_with_named_expressions": 74,
+      "literal_method_expressions": {
+        "list_tasks": 16,
+        "inspect_task": 20,
+        "claim_task": 8,
+        "get_task_context": 41,
+        "update_task": 21,
+        "transition_task": 10,
+        "renew_task_claim": 20,
+        "record_task_validation": 12,
+        "recover_task_claim": 1,
+        "handoff_task": 1,
+        "complete_task": 1,
+        "get_task_history": 1,
+        "get_task": 12,
+        "release_task": 2,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 2
+      }
+    },
+    {
+      "thread_id": "01a1030f-0bc5-7db0-8cfd-add77e4d31ce",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-38-00-01a1030f-0bc5-7db0-8cfd-add77e4d31ce.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T18:38:54.591Z",
+      "last_named_tool_event": "2026-10-04T14:19:42.636Z",
+      "call_blocks_with_named_expressions": 76,
+      "literal_method_expressions": {
+        "list_tasks": 11,
+        "inspect_task": 4,
+        "claim_task": 8,
+        "get_task_context": 48,
+        "transition_task": 12,
+        "update_task": 23,
+        "renew_task_claim": 33,
+        "record_task_validation": 22,
+        "release_task": 1,
+        "get_task": 9,
+        "get_task_detail": 1,
+        "create_task": 1,
+        "complete_task": 1,
+        "get_task_history": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 1
+      }
+    },
+    {
+      "thread_id": "01a10334-252c-7e92-9b3a-fe3a8fd54f1d",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T12-18-31-01a10334-252c-7e92-9b3a-fe3a8fd54f1d.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T19:19:31.782Z",
+      "last_named_tool_event": "2026-10-04T12:05:29.654Z",
+      "call_blocks_with_named_expressions": 67,
+      "literal_method_expressions": {
+        "list_tasks": 14,
+        "inspect_task": 7,
+        "claim_task": 7,
+        "get_task_context": 35,
+        "transition_task": 8,
+        "update_task": 18,
+        "get_task": 33,
+        "record_task_validation": 14,
+        "renew_task_claim": 28,
+        "handoff_task": 1,
+        "get_task_detail": 1,
+        "create_task": 2,
+        "recover_task_claim": 1,
+        "get_task_history": 4
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "OWN_CLAIM_ACTIVE": 1
+      }
+    },
+    {
+      "thread_id": "01a1033d-0e47-79a0-b4e3-1abe0e361922",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T12-28-15-01a1033d-0e47-79a0-b4e3-1abe0e361922.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T19:29:14.150Z",
+      "last_named_tool_event": "2026-10-04T14:19:00.769Z",
+      "call_blocks_with_named_expressions": 73,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "inspect_task": 4,
+        "claim_task": 4,
+        "get_task_context": 54,
+        "transition_task": 9,
+        "update_task": 28,
+        "renew_task_claim": 33,
+        "record_task_validation": 16,
+        "handoff_task": 2,
+        "get_task_detail": 2,
+        "get_task": 13,
+        "complete_task": 1,
+        "get_task_history": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a1030a-e817-7763-a656-6e32b5192d01",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T11-33-29-01a1030a-e817-7763-a656-6e32b5192d01.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T21:02:48.350Z",
+      "last_named_tool_event": "2026-10-04T07:45:50.785Z",
+      "call_blocks_with_named_expressions": 42,
+      "literal_method_expressions": {
+        "list_tasks": 9,
+        "inspect_task": 3,
+        "claim_task": 6,
+        "get_task_context": 19,
+        "transition_task": 5,
+        "update_task": 9,
+        "record_task_validation": 7,
+        "renew_task_claim": 7,
+        "get_task": 7,
+        "release_task": 1,
+        "complete_task": 1,
+        "get_task_history": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 3
+      }
+    },
+    {
+      "thread_id": "01a10398-19ea-7210-b1b4-096d44d1910b",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-03T14-07-42-01a10398-19ea-7210-b1b4-096d44d1910b.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-03T21:08:25.507Z",
+      "last_named_tool_event": "2026-10-04T13:42:38.187Z",
+      "call_blocks_with_named_expressions": 111,
+      "literal_method_expressions": {
+        "list_tasks": 13,
+        "inspect_task": 18,
+        "claim_task": 6,
+        "get_task_context": 58,
+        "transition_task": 6,
+        "update_task": 28,
+        "renew_task_claim": 36,
+        "record_task_validation": 18,
+        "create_task": 4,
+        "get_task": 44,
+        "complete_task": 1,
+        "get_task_history": 1,
+        "get_task_detail": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {
+        "CLAIM_EXPIRED": 2
+      }
+    },
+    {
+      "thread_id": "01a105e1-6b32-7f21-97e6-fbdef01239f3",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T00-47-01-01a105e1-6b32-7f21-97e6-fbdef01239f3.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-04T07:47:49.155Z",
+      "last_named_tool_event": "2026-10-04T11:04:00.075Z",
+      "call_blocks_with_named_expressions": 29,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "claim_task": 2,
+        "get_task_context": 23,
+        "update_task": 9,
+        "transition_task": 5,
+        "renew_task_claim": 4,
+        "get_task": 6,
+        "record_task_validation": 9,
+        "release_task": 1,
+        "handoff_task": 1,
+        "inspect_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a1066c-55b2-7b31-9b84-e453f90bc73c",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T03-18-45-01a1066c-55b2-7b31-9b84-e453f90bc73c.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-04T10:19:57.753Z",
+      "last_named_tool_event": "2026-10-04T11:50:35.953Z",
+      "call_blocks_with_named_expressions": 11,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1,
+        "claim_task": 4,
+        "renew_task_claim": 12,
+        "get_task_context": 8,
+        "transition_task": 5,
+        "update_task": 2,
+        "record_task_validation": 1,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a10749-8515-7c32-b083-09894720fb5e",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T07-20-21-01a10749-8515-7c32-b083-09894720fb5e.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-04T14:21:44.038Z",
+      "last_named_tool_event": "2026-10-04T15:08:53.177Z",
+      "call_blocks_with_named_expressions": 8,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "claim_task": 2,
+        "get_task_context": 5,
+        "transition_task": 4,
+        "renew_task_claim": 7,
+        "update_task": 3
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a1074a-25c2-7741-ab9a-2677bb408719",
+      "title": "",
+      "archived_at_scan": true,
+      "subagent": true,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-04T07-21-02-01a1074a-25c2-7741-ab9a-2677bb408719.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-04T14:22:05.415Z",
+      "last_named_tool_event": "2026-10-04T14:52:10.367Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "list_tasks": 3,
+        "claim_task": 2,
+        "get_task_context": 6,
+        "transition_task": 5,
+        "renew_task_claim": 7,
+        "update_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a10cc9-4d6d-78b2-96f9-cff60ffa5e1e",
+      "title": "Investigate commission count #541114",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T08-58-01-01a10cc9-4d6d-78b2-96f9-cff60ffa5e1e.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-05T16:00:01.996Z",
+      "last_named_tool_event": "2026-10-05T16:00:01.996Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a10d20-2362-7390-b059-ced08d729553",
+      "title": "Research ChatGPT App integration",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T10-32-53-01a10d20-2362-7390-b059-ced08d729553.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-05T20:20:02.909Z",
+      "last_named_tool_event": "2026-10-05T21:56:52.220Z",
+      "call_blocks_with_named_expressions": 26,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "create_task": 2,
+        "claim_task": 3,
+        "transition_task": 9,
+        "update_task": 6,
+        "get_task_context": 9,
+        "complete_task": 1,
+        "get_task": 4,
+        "get_task_detail": 2,
+        "record_task_validation": 2,
+        "handoff_task": 2,
+        "inspect_task": 6,
+        "release_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a10e22-ea6b-73e0-8391-f1fc693b7864",
+      "title": "Retrieve Actionable 1001 review",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-37-22-01a10e22-ea6b-73e0-8391-f1fc693b7864_01a10e36-e97f-7ef0-8429-0a15823b123e.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-15-32-01a10e22-ea6b-73e0-8391-f1fc693b7864.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-05T22:16:30.649Z",
+      "last_named_tool_event": "2026-10-05T23:16:40.821Z",
+      "call_blocks_with_named_expressions": 7,
+      "literal_method_expressions": {
+        "inspect_task": 1
+      },
+      "review_method_expressions": {
+        "get_actionable": 5,
+        "render_actionable_review": 2
+      },
+      "structured_error_envelopes": {
+        "NOT_FOUND": 2
+      }
+    },
+    {
+      "thread_id": "01a10e41-484e-7293-a4f1-a318f6bd910b",
+      "title": "Exclude Phoenix from Southern report",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-05T15-48-42-01a10e41-484e-7293-a4f1-a318f6bd910b.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-05T22:50:36.550Z",
+      "last_named_tool_event": "2026-10-06T00:28:08.223Z",
+      "call_blocks_with_named_expressions": 27,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "list_tasks": 10,
+        "claim_task": 5,
+        "get_task_context": 14,
+        "transition_task": 9,
+        "update_task": 9,
+        "handoff_task": 5,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a111fd-a21a-79d1-895e-fc170abc7b70",
+      "title": "Add created column to findings table",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-13-17-01a111fd-a21a-79d1-895e-fc170abc7b70.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:14:51.031Z",
+      "last_named_tool_event": "2026-10-06T16:14:51.031Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a111ff-a848-75b3-8e27-1b2e7832180e",
+      "title": "Review invoice 280483 commissions",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Codex\\2026-10-06\\giv",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-15-29-01a111ff-a848-75b3-8e27-1b2e7832180e.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:20:04.291Z",
+      "last_named_tool_event": "2026-10-06T16:20:04.291Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11205-25d6-7900-a6f3-b0a7325a3bb2",
+      "title": "Research Actionables task 957",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-21-30-01a11205-25d6-7900-a6f3-b0a7325a3bb2.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:22:09.646Z",
+      "last_named_tool_event": "2026-10-06T18:40:10.822Z",
+      "call_blocks_with_named_expressions": 24,
+      "literal_method_expressions": {
+        "list_tasks": 4,
+        "inspect_task": 4,
+        "claim_task": 2,
+        "transition_task": 1,
+        "update_task": 3,
+        "get_task_context": 7,
+        "handoff_task": 2,
+        "create_task": 1
+      },
+      "review_method_expressions": {
+        "get_actionable": 11
+      },
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11204-c587-7381-a786-71a61cea16af",
+      "title": "Sort grids by recent updates",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-21-05-01a11204-c587-7381-a786-71a61cea16af.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:22:26.964Z",
+      "last_named_tool_event": "2026-10-06T16:22:26.964Z",
+      "call_blocks_with_named_expressions": 1,
+      "literal_method_expressions": {
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11203-0543-7690-8ad8-7b460305ae35",
+      "title": "Move private description help to a [",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-19-10-01a11203-0543-7690-8ad8-7b460305ae35.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:22:27.173Z",
+      "last_named_tool_event": "2026-10-06T18:28:48.064Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "list_tasks": 3,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "transition_task": 3,
+        "update_task": 2,
+        "get_task_context": 2,
+        "record_task_validation": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11206-c131-7b82-b896-57f0fe71c0b0",
+      "title": "Fix Actionable worktree assignment",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T09-23-15-01a11206-c131-7b82-b896-57f0fe71c0b0.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T16:27:13.218Z",
+      "last_named_tool_event": "2026-10-06T16:27:48.962Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {
+        "inspect_task": 1,
+        "create_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11236-0ff7-7db0-91d6-5f82ce88f543",
+      "title": "Research Actionables task 957 (2)",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T10-14-56-01a11236-0ff7-7db0-91d6-5f82ce88f543.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T17:16:18.024Z",
+      "last_named_tool_event": "2026-10-06T17:17:01.693Z",
+      "call_blocks_with_named_expressions": 2,
+      "literal_method_expressions": {},
+      "review_method_expressions": {
+        "get_actionable": 2
+      },
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a1128c-7014-7a43-95cb-602ff68d5240",
+      "title": "Research Actionable #961",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-49-17-01a1128c-7014-7a43-95cb-602ff68d5240.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T18:49:53.983Z",
+      "last_named_tool_event": "2026-10-06T19:20:16.961Z",
+      "call_blocks_with_named_expressions": 14,
+      "literal_method_expressions": {
+        "list_tasks": 5,
+        "inspect_task": 2,
+        "claim_task": 2,
+        "get_task_context": 4,
+        "transition_task": 2,
+        "update_task": 3,
+        "handoff_task": 2
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11295-dc8b-7a23-81da-f0e3d470f291",
+      "title": "Complete Actionables 960, 958, 956,",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\Code\\Actionables",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T11-59-34-01a11295-dc8b-7a23-81da-f0e3d470f291.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T19:00:44.549Z",
+      "last_named_tool_event": "2026-10-06T20:39:12.098Z",
+      "call_blocks_with_named_expressions": 42,
+      "literal_method_expressions": {
+        "list_tasks": 7,
+        "inspect_task": 10,
+        "claim_task": 5,
+        "transition_task": 11,
+        "get_task_context": 17,
+        "update_task": 10,
+        "complete_task": 8,
+        "create_task": 1
+      },
+      "review_method_expressions": {
+        "get_actionable": 1,
+        "render_actionable_review": 1
+      },
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a112ab-a3e9-7500-8ea2-932320f6a8c7",
+      "title": "Resume research on #961",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T12-23-21-01a112ab-a3e9-7500-8ea2-932320f6a8c7.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T19:23:58.126Z",
+      "last_named_tool_event": "2026-10-06T23:16:50.284Z",
+      "call_blocks_with_named_expressions": 55,
+      "literal_method_expressions": {
+        "list_tasks": 14,
+        "inspect_task": 3,
+        "claim_task": 7,
+        "get_task_context": 24,
+        "update_task": 12,
+        "transition_task": 14,
+        "handoff_task": 2,
+        "renew_task_claim": 4,
+        "release_task": 3,
+        "record_task_validation": 5,
+        "complete_task": 2,
+        "get_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a1135f-a61c-72e2-bd7b-3c734834a657",
+      "title": "Review commission history approach",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T16-25-31-01a1135f-a61c-72e2-bd7b-3c734834a657_01a11389-5b3f-71c1-ae22-4e8fc345bec1.jsonl",
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-06T15-39-58-01a1135f-a61c-72e2-bd7b-3c734834a657.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-06T22:44:11.867Z",
+      "last_named_tool_event": "2026-10-06T23:18:00.218Z",
+      "call_blocks_with_named_expressions": 8,
+      "literal_method_expressions": {},
+      "review_method_expressions": {
+        "get_actionable": 9
+      },
+      "structured_error_envelopes": {
+        "VERSION_CONFLICT": 1
+      }
+    },
+    {
+      "thread_id": "01a1180f-3a44-7972-a092-b89739b6c803",
+      "title": "Allow textarea scrolling in Ideas",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T13-30-13-01a1180f-3a44-7972-a092-b89739b6c803.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-07T20:31:32.523Z",
+      "last_named_tool_event": "2026-10-07T20:53:41.772Z",
+      "call_blocks_with_named_expressions": 7,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "list_tasks": 2,
+        "claim_task": 1,
+        "transition_task": 3,
+        "update_task": 2,
+        "get_task": 3,
+        "complete_task": 1,
+        "get_task_detail": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11853-7a99-7381-89c7-55279ecce829",
+      "title": "Research task #598",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-07T14-44-46-01a11853-7a99-7381-89c7-55279ecce829.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-07T21:45:21.899Z",
+      "last_named_tool_event": "2026-10-08T16:36:59.160Z",
+      "call_blocks_with_named_expressions": 25,
+      "literal_method_expressions": {
+        "list_tasks": 6,
+        "inspect_task": 4,
+        "claim_task": 4,
+        "get_task_context": 9,
+        "transition_task": 8,
+        "update_task": 7,
+        "handoff_task": 2,
+        "get_task": 5,
+        "record_task_validation": 3,
+        "get_task_history": 1,
+        "get_task_detail": 1,
+        "complete_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a11c81-c495-76d2-84ce-7445afebdc1b",
+      "title": "Find a small MyStotz page",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-08T10-13-49-01a11c81-c495-76d2-84ce-7445afebdc1b.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-08T17:26:45.144Z",
+      "last_named_tool_event": "2026-10-08T19:14:11.517Z",
+      "call_blocks_with_named_expressions": 40,
+      "literal_method_expressions": {
+        "create_task": 1,
+        "bulk_create_tasks": 2,
+        "inspect_task": 21,
+        "list_tasks": 14,
+        "claim_task": 5,
+        "get_task_context": 12,
+        "transition_task": 14,
+        "update_task": 10,
+        "complete_task": 4,
+        "get_task_history": 2,
+        "record_task_validation": 2,
+        "handoff_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a13103-ed3b-77e0-97f8-8db50a9870e2",
+      "title": "Complete Actionable 964",
+      "archived_at_scan": true,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\archived_sessions\\rollout-2026-10-12T09-48-23-01a13103-ed3b-77e0-97f8-8db50a9870e2.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-12T16:49:17.177Z",
+      "last_named_tool_event": "2026-10-12T16:52:29.667Z",
+      "call_blocks_with_named_expressions": 10,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 2,
+        "claim_task": 1,
+        "transition_task": 3,
+        "get_completion_view": 4,
+        "update_task": 1,
+        "get_task_context": 1,
+        "complete_task": 1,
+        "get_task": 1
+      },
+      "review_method_expressions": {
+        "get_actionable": 1
+      },
+      "structured_error_envelopes": {}
+    },
+    {
+      "thread_id": "01a13108-7f29-77e2-9f89-7cd5df775145",
+      "title": "Research Actionable #574",
+      "archived_at_scan": false,
+      "subagent": false,
+      "workspace": "\\\\?\\C:\\repos\\MyStotz2023",
+      "paths": [
+        "C:\\Users\\AustinScriver\\.codex\\sessions\\2026\\10\\12\\rollout-2026-10-12T09-53-23-01a13108-7f29-77e2-9f89-7cd5df775145.jsonl"
+      ],
+      "first_named_tool_event": "2026-10-12T16:54:13.676Z",
+      "last_named_tool_event": "2026-10-12T16:54:48.390Z",
+      "call_blocks_with_named_expressions": 3,
+      "literal_method_expressions": {
+        "list_tasks": 2,
+        "inspect_task": 1,
+        "claim_task": 1,
+        "get_task_context": 1,
+        "transition_task": 1
+      },
+      "review_method_expressions": {},
+      "structured_error_envelopes": {}
+    }
+  ]
+}
