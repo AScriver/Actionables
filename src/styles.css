@@ -4359,6 +4359,8 @@ button {
 
 .agent-setup-dialog {
   width: min(620px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 
 .agent-setup-options {
