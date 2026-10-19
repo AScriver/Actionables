@@ -30,6 +30,7 @@ import { defaultRelationshipAuditorPrompt } from "../src/assistant-prompts.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { importSampleSeed, readSampleSeed } from "../src/import-seed.js";
 import type { NativeFolderPicker } from "../src/native-folder-picker.js";
+import { listInboxTriageCandidates } from "../src/repository.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -3422,5 +3423,186 @@ describe("Actionables API", () => {
       select,
     });
     expect(after).toEqual(before);
+  });
+
+  it("reads large collections without losing cross-batch hierarchy or filters", async ({
+    onTestFinished,
+  }) => {
+    const before = await prisma!.actionable.aggregate({
+      _count: true,
+      _max: { sourceOrdinal: true },
+    });
+    const project = await prisma!.project.create({
+      data: { externalKey: "large-collection", name: "Large collection" },
+    });
+    onTestFinished(async () => {
+      await prisma!.hierarchyRelationship.deleteMany({
+        where: { parent: { projectId: project.id } },
+      });
+      await prisma!.project.delete({ where: { id: project.id } });
+    });
+    const repository = await prisma!.repository.create({
+      data: {
+        externalKey: "large-collection-repository",
+        name: "Large collection repository",
+        projectId: project.id,
+      },
+    });
+    const worktree = await prisma!.worktree.create({
+      data: {
+        externalKey: "large-collection-worktree",
+        name: "main",
+        projectId: project.id,
+        repositoryId: repository.id,
+      },
+    });
+    const rows = Array.from({ length: 1_001 }, (_, index) => ({
+      id: randomUUID(),
+      externalKey: `large-collection-${index}`,
+      sourceOrdinal: before._max.sourceOrdinal! + (index + 1) * 2,
+      title: `Large collection filler ${index}`,
+      priority: "Unset",
+      status: "Inbox",
+      statusProvenance: "Large collection fixture.",
+      effort: "Unknown",
+      evidenceState: "Unclassified",
+      updatedLabel: "fixture",
+      finding: "",
+      description: "",
+      researchJson: [],
+      validationJson: [],
+      filesJson: [],
+      tagsJson: [],
+      blockedByOrdinalsJson: [],
+      blocksOrdinalsJson: [],
+      childOrdinalsJson: [],
+      importProvider: "MANUAL",
+      sourceContainerId: "",
+      sourceThread: "",
+      contentHash: "",
+      rawFragmentJson: {},
+      archivedAt: new Date("2026-01-01T00:00:00.000Z") as Date | null,
+      projectId: project.id,
+      repositoryId: repository.id,
+      worktreeId: worktree.id,
+    }));
+    const parent = rows[0]!;
+    const child = rows[500]!;
+    const grandchild = rows[1_000]!;
+    parent.title = "Batch A parent";
+    child.title = "Batch Z child";
+    child.status = "Ready";
+    grandchild.title = "Batch M grandchild";
+    grandchild.status = "Done";
+    for (const row of [parent, child, grandchild]) row.archivedAt = null;
+    await prisma!.actionable.createMany({ data: rows });
+    await prisma!.hierarchyRelationship.createMany({
+      data: [
+        ...rows.slice(1, 1_000).map((row) => ({
+          parentId: parent.id,
+          childId: row.id,
+        })),
+        { parentId: child.id, childId: grandchild.id },
+      ],
+    });
+    await prisma!.actionableStatusHistory.createMany({
+      data: [
+        {
+          actionableId: parent.id,
+          newStatus: "Researching",
+          origin: "fixture",
+          occurredAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
+        {
+          actionableId: parent.id,
+          previousStatus: "Researching",
+          newStatus: "Inbox",
+          origin: "fixture",
+          occurredAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+      ],
+    });
+    await prisma!.activityEvent.createMany({
+      data: [
+        {
+          actionableId: parent.id,
+          type: "reopened",
+          summary: "Later activity",
+          metadataJson: {},
+          occurredAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+        {
+          actionableId: parent.id,
+          type: "agent-updated",
+          summary: "Earlier activity",
+          metadataJson: {},
+          occurredAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const response = await app!.inject({
+      method: "GET",
+      url: `/api/actionables?project=${project.id}&status=all&sort=title`,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      counts: { total: before._count + 1_001 },
+      result: {
+        matched: 3,
+        scopeTotal: 3,
+        openScopeTotal: 2,
+        topLevel: 1,
+        nested: 2,
+      },
+      items: [
+        {
+          id: parent.sourceOrdinal,
+          childIds: expect.arrayContaining([child.sourceOrdinal]),
+          childCompletion: { terminal: 1, total: 1_000 },
+          wasReopened: true,
+        },
+        { id: grandchild.sourceOrdinal, parentId: child.sourceOrdinal },
+        {
+          id: child.sourceOrdinal,
+          parentId: parent.sourceOrdinal,
+          childCompletion: { terminal: 1, total: 1 },
+        },
+      ],
+    });
+    expect(response.json().items[0].childIds).toHaveLength(999);
+    const active = await app!.inject({
+      method: "GET",
+      url: `/api/actionables?project=${project.id}&parent=top-level`,
+    });
+    expect(active.statusCode, active.body).toBe(200);
+    expect(active.json().items.map((item: { id: number }) => item.id)).toEqual([
+      parent.sourceOrdinal,
+    ]);
+    const dashboard = await app!.inject({
+      method: "GET",
+      url: `/api/dashboard?project=${project.id}`,
+    });
+    expect(dashboard.statusCode, dashboard.body).toBe(200);
+    expect(dashboard.json().counts).toEqual({
+      total: 3,
+      topLevel: 1,
+      nested: 2,
+    });
+    const candidates = await listInboxTriageCandidates(
+      prisma!,
+      { project: project.id },
+      1,
+    );
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      id: parent.sourceOrdinal,
+      directTaskProgress: { total: 1_000, completed: 1, open: 999 },
+      statusHistory: [{ newStatus: "Inbox" }, { newStatus: "Researching" }],
+      activity: [
+        { summary: "Earlier activity" },
+        { summary: "Later activity" },
+      ],
+    });
   });
 });

@@ -903,13 +903,34 @@ export function actionableQueryRecord(query: ActionableQuery) {
 }
 
 async function allActionableRows(prisma: AppPrismaClient) {
-  const rows = await prisma.actionable.findMany({
-    include: actionableInclude,
-    orderBy: { sourceOrdinal: "asc" },
-  });
+  // Nested child includes can exceed SQLite's bind limit even with batched roots.
+  const include = {
+    ...actionableInclude,
+    hierarchyAsParent: {
+      where: actionableInclude.hierarchyAsParent.where,
+      orderBy: actionableInclude.hierarchyAsParent.orderBy,
+    },
+  };
+  const rows: Prisma.ActionableGetPayload<{ include: typeof include }>[] = [];
+  const batchSize = 500;
+  let afterOrdinal: number | undefined;
+  while (true) {
+    const batch = await prisma.actionable.findMany({
+      where:
+        afterOrdinal === undefined
+          ? undefined
+          : { sourceOrdinal: { gt: afterOrdinal } },
+      include,
+      orderBy: { sourceOrdinal: "asc" },
+      take: batchSize,
+    });
+    rows.push(...batch);
+    if (batch.length < batchSize) break;
+    afterOrdinal = batch.at(-1)!.sourceOrdinal;
+  }
   const byId = new Map(rows.map((row) => [row.id, row]));
   return rows.map((row): ActionableRow => {
-    const descendants: StoredActionableRow[] = [];
+    const descendants: ActionableRow["descendants"] = [];
     const pending = row.hierarchyAsParent.map((edge) => edge.childId);
     const visited = new Set([row.id]);
     while (pending.length) {
@@ -921,7 +942,14 @@ async function allActionableRows(prisma: AppPrismaClient) {
       descendants.push(child);
       pending.push(...child.hierarchyAsParent.map((edge) => edge.childId));
     }
-    return { ...row, descendants };
+    return {
+      ...row,
+      hierarchyAsParent: row.hierarchyAsParent.map((edge) => ({
+        ...edge,
+        child: byId.get(edge.childId)!,
+      })),
+      descendants,
+    };
   });
 }
 
