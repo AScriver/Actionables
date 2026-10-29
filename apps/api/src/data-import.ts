@@ -237,6 +237,7 @@ function fieldObject(item: PortableActionable): Record<string, unknown> {
     title: item.title,
     priority: item.priority,
     status: item.status,
+    deferredAt: item.deferredAt,
     statusProvenance: item.statusProvenance,
     effort: item.effort,
     evidenceState: item.evidenceState,
@@ -284,6 +285,7 @@ function legacySeedBaseline(
     statusProvenance: item.statusProvenance,
     effort: item.effort,
     evidenceState: "Unclassified",
+    deferredAt: null,
     finding: item.finding,
     description: item.description,
     resolution: incoming.resolution,
@@ -704,6 +706,17 @@ function integrityItems(
   }
   for (const actionable of document.actionables) {
     if (
+      actionable.deferredAt &&
+      ["Done", "Dismissed"].includes(actionable.status)
+    ) {
+      add(
+        "actionable",
+        actionable.portableId,
+        "integrity-failure",
+        "Terminal tasks cannot be deferred.",
+      );
+    }
+    if (
       actionable.status === "Ready" &&
       (!actionable.finding.trim() ||
         !actionable.description.trim() ||
@@ -1063,7 +1076,7 @@ async function analyze(
       client.project.findMany(),
       client.repository.findMany(),
       client.worktree.findMany(),
-      client.actionable.findMany(),
+      client.actionable.findMany({ include: { agentTaskClaim: true } }),
     ]);
   const projectRow = new Map(
     projectRows.map((item) => [item.externalKey, item]),
@@ -1258,6 +1271,33 @@ async function analyze(
       fieldObject(actionable),
       baseline,
     );
+    const deferralErrors: string[] = [];
+    if (
+      compared.plan.safeFields.includes("deferredAt") &&
+      row?.agentTaskClaim &&
+      row.agentTaskClaim.leaseExpiresAt > new Date()
+    )
+      deferralErrors.push(
+        "Release the active agent claim before importing a deferral change.",
+      );
+    const resultingStatus = compared.plan.safeFields.includes("status")
+      ? actionable.status
+      : existing.status;
+    const resultingDeferral = compared.plan.safeFields.includes("deferredAt")
+      ? actionable.deferredAt
+      : existing.deferredAt;
+    if (resultingDeferral && ["Done", "Dismissed"].includes(resultingStatus))
+      deferralErrors.push("Terminal tasks cannot be deferred.");
+    if (deferralErrors.length)
+      addItem(items, totals, totalsByRecordType, {
+        id: `integrity-failure:actionable:${actionable.portableId}:deferral`,
+        recordType: "actionable",
+        portableId: actionable.portableId,
+        display: actionable.title,
+        classification: "integrity-failure",
+        changes: [],
+        errors: deferralErrors,
+      });
     if (
       compared.plan.safeFields.includes("status") &&
       !document.statusHistory.some(
@@ -1482,6 +1522,8 @@ function safeData(
   if (requested.has("title")) data.title = item.title;
   if (requested.has("priority")) data.priority = item.priority;
   if (requested.has("status")) data.status = item.status;
+  if (requested.has("deferredAt"))
+    data.deferredAt = item.deferredAt ? new Date(item.deferredAt) : null;
   if (requested.has("statusProvenance")) {
     data.statusProvenance = item.statusProvenance.note;
     data.sourceStatusSuggestion =
@@ -2012,6 +2054,7 @@ export class DataImportService {
               title: item.title,
               priority: item.priority,
               status: item.status,
+              deferredAt: item.deferredAt ? new Date(item.deferredAt) : null,
               statusProvenance: item.statusProvenance.note,
               sourceStatusSuggestion:
                 item.statusProvenance.kind === "neutral-import"

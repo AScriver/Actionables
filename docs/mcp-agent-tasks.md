@@ -103,6 +103,32 @@ null. Each page reflects current state. Archive inclusion is explicit through
 `includeArchived: true`. Unresolved prerequisite IDs are capped at 100; compare
 `unresolvedDependencyCount`. Reads never clean up expired claims or change records.
 
+## Manual deferral and resumption
+
+Deferral preserves the current lifecycle status and applies only to the selected
+task. It does not defer descendants, satisfy dependencies, or schedule automatic
+resumption. Task summaries and compact detail expose `deferredAt`; a non-null
+value means manual resumption is required. Explicit inspection reports
+`unavailableReasons: ["deferred"]` alongside any other applicable reasons and
+offers no lifecycle transitions until the task resumes.
+
+Use `actionables.defer_task` with the claimed task's `id`, current `version`,
+and secret `claimToken`. The transaction records deferral and releases only that
+valid claim. The receipt returns the preserved status, timestamp, new version,
+and `claimReleased: true`. Do not reuse the released claim token.
+
+Find deferred tasks using `actionables.list_tasks` with `view: "deferred"` and
+the explicit top-level `workItemId`. Follow `hasMore` as for other bounded task
+lists, or inspect a known task directly. `view: "available"` excludes deferred
+tasks, and `claim_task` rejects them with `DEFERRED`.
+
+When resumption is authorized, call `actionables.resume_task` with `id`, its
+original `workItemId`, and the exact inspected `version`. It rejects stale,
+archived, terminal, or actively claimed work and leaves the resumed task
+unclaimed. Continue through the normal list/claim workflow; readiness, manual
+blockers, and dependencies still apply. Inspect authoritative state before
+retrying an uncertain defer or resume operation.
+
 ## Completion evidence and atomic completion
 
 `actionables.get_completion_view` combines the claimed task's outstanding

@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DataImportService, PortableImportError } from "../src/data-import.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { readSampleSeed } from "../src/import-seed.js";
-import { updateRepositoryProject } from "../src/repository.js";
+import {
+  updateRepositoryProject,
+  transitionActionable,
+  setActionableDeferred,
+  setActionableArchived,
+} from "../src/repository.js";
 import {
   exportPortableDocument,
   sampleSeedToPortable,
@@ -78,6 +83,139 @@ async function commitPreview(
 async function seedDocument() {
   return sampleSeedToPortable(await readSampleSeed());
 }
+
+it("retains manual deferral through portable export and import", async () => {
+  const prisma = await freshDatabase();
+  const service = new DataImportService(prisma);
+  const original = await seedDocument();
+  await commitPreview(service, await service.preview(original));
+  const task = await prisma.actionable.findFirstOrThrow();
+  await prisma.actionable.update({
+    where: { id: task.id },
+    data: { deferredAt: new Date("2026-10-29T17:00:00.000Z") },
+  });
+  const document = await exportPortableDocument(prisma);
+  expect(
+    document.actionables.find((item) => item.portableId === task.externalKey),
+  ).toMatchObject({ deferredAt: "2026-10-29T17:00:00.000Z" });
+  const restored = await freshDatabase();
+  const restore = new DataImportService(restored);
+  await commitPreview(restore, await restore.preview(document));
+  expect(
+    await restored.actionable.findUniqueOrThrow({
+      where: { externalKey: task.externalKey },
+    }),
+  ).toMatchObject({
+    status: task.status,
+    deferredAt: new Date("2026-10-29T17:00:00.000Z"),
+  });
+  await commitPreview(service, await service.preview(original));
+  expect(
+    (await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }))
+      .deferredAt,
+  ).toEqual(new Date("2026-10-29T17:00:00.000Z"));
+}, 30_000);
+
+it("rejects imported deferral changes while an agent owns the task, including after preview", async () => {
+  const prisma = await freshDatabase();
+  const service = new DataImportService(prisma);
+  const document = await seedDocument();
+  await commitPreview(service, await service.preview(document));
+  const task = await prisma.actionable.findUniqueOrThrow({
+    where: { externalKey: document.actionables[0]!.portableId },
+  });
+  document.actionables[0]!.deferredAt = "2026-10-29T17:00:00.000Z";
+  const claimData = {
+    actionableId: task.id,
+    agentId: "active-import-owner",
+    claimTokenHash: randomUUID(),
+    leaseExpiresAt: new Date(Date.now() + 60_000),
+  };
+  await prisma.agentTaskClaim.create({ data: claimData });
+  const blocked = await service.preview(document);
+  expect(blocked.canCommit).toBe(false);
+  expect(
+    blocked.items.some((item) =>
+      item.errors.some((message) => message.includes("active agent claim")),
+    ),
+  ).toBe(true);
+  await prisma.agentTaskClaim.delete({ where: { actionableId: task.id } });
+  const preview = await service.preview(document);
+  expect(preview.canCommit).toBe(true);
+  const prepared = service.prepare(preview.previewToken, {
+    contentDigest: preview.contentDigest,
+    conflictResolutions: conflictSelections(preview),
+    acceptedSuggestionIds: [],
+  });
+  await prisma.agentTaskClaim.create({ data: claimData });
+  await expect(
+    service.commit(preview.previewToken, {
+      contentDigest: preview.contentDigest,
+      commitToken: prepared.commitToken,
+      selectionsDigest: prepared.selectionsDigest,
+    }),
+  ).rejects.toMatchObject({ code: "STALE_PREVIEW" });
+  expect(
+    (await prisma.actionable.findUniqueOrThrow({ where: { id: task.id } }))
+      .deferredAt,
+  ).toBeNull();
+  expect(
+    await prisma.agentTaskClaim.count({ where: { actionableId: task.id } }),
+  ).toBe(1);
+}, 30_000);
+
+it("rejects terminal deferred tasks in portable input", async () => {
+  const prisma = await freshDatabase();
+  const service = new DataImportService(prisma);
+  await commitPreview(service, await service.preview(await seedDocument()));
+  const task = await prisma.actionable.findFirstOrThrow();
+  await transitionActionable(prisma, task.sourceOrdinal, {
+    version: task.version,
+    status: "Dismissed",
+    reason: "This work is no longer needed.",
+    origin: "user",
+  });
+  const document = await exportPortableDocument(prisma);
+  document.actionables.find(
+    (item) => item.portableId === task.externalKey,
+  )!.deferredAt = "2026-10-29T17:00:00.000Z";
+  const preview = await service.preview(document);
+  expect(preview.canCommit).toBe(false);
+  expect(
+    preview.items.some((item) =>
+      item.errors.some((message) =>
+        message.includes("Terminal tasks cannot be deferred"),
+      ),
+    ),
+  ).toBe(true);
+}, 30_000);
+
+it("preserves deferral when archived tasks are exported and restored", async () => {
+  const prisma = await freshDatabase();
+  const service = new DataImportService(prisma);
+  await commitPreview(service, await service.preview(await seedDocument()));
+  const task = await prisma.actionable.findFirstOrThrow();
+  const deferred = await setActionableDeferred(prisma, task.sourceOrdinal, {
+    version: task.version,
+    deferred: true,
+    origin: "user",
+  });
+  await setActionableArchived(
+    prisma,
+    task.sourceOrdinal,
+    deferred!.version,
+    true,
+  );
+  const document = await exportPortableDocument(prisma);
+  const restored = await freshDatabase();
+  const restore = new DataImportService(restored);
+  await commitPreview(restore, await restore.preview(document));
+  const row = await restored.actionable.findUniqueOrThrow({
+    where: { externalKey: task.externalKey },
+  });
+  expect(row.deferredAt?.toISOString()).toBe(deferred!.deferredAt);
+  expect(row.archivedAt).not.toBeNull();
+}, 30_000);
 
 it("preserves repository reassignment when the same seed is imported again", async () => {
   const prisma = await freshDatabase();

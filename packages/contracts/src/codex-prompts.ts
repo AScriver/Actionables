@@ -18,6 +18,8 @@ export function completionRequirements(task: ActionableDetail) {
   const requirements: string[] = [];
   if (task.archiveState.isArchived)
     requirements.push("Restore this task before starting parent acceptance.");
+  if (task.deferredAt)
+    requirements.push("Resume this deferred task before starting work.");
   if (task.status !== "In progress")
     requirements.push(
       "Move this task through its required lifecycle to In progress before completion.",
@@ -55,6 +57,7 @@ export function renderCodexParentAcceptancePrompt(
     !parentAcceptancePending(task) ||
     task.agentClaim ||
     task.archiveState.isArchived ||
+    task.deferredAt ||
     task.isEffectivelyBlocked ||
     (task.status === "Ready" && task.readiness.requiredForReady.length > 0)
   )
@@ -136,10 +139,12 @@ export function renderCodexStartPrompt(
     title: string;
     parentId?: number;
     status: string;
+    deferredAt?: string | null;
     relationships: { subtasks: readonly unknown[] };
   },
   templates: { codexResearchPrompt: string; codexImplementationPrompt: string },
 ): string | null {
+  if (task.deferredAt) return null;
   const research = task.status === "Inbox" || task.status === "Researching";
   if (!research && task.status !== "Ready" && task.status !== "In progress")
     return null;
@@ -184,7 +189,11 @@ export function renderCodexStartPrompt(
 
 /** Choose eligible leaves or coordination tasks whose complete direct-child inventory is terminal. */
 export function eligibleCodexSubtasks(inventory: InspectAgentTaskResponse) {
-  if (!inventory.task.availableForClaim) return [];
+  const parentOnlyDeferred =
+    Boolean(inventory.task.deferredAt) &&
+    inventory.task.unavailableReasons?.length === 1 &&
+    inventory.task.unavailableReasons.includes("deferred");
+  if (!inventory.task.availableForClaim && !parentOnlyDeferred) return [];
   return inventory.descendants.filter((task) => {
     if (
       !task.availableForClaim ||

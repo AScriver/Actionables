@@ -17,6 +17,7 @@ const actionFields = [
   "title",
   "priority",
   "status",
+  "deferredAt",
   "statusProvenance",
   "effort",
   "evidenceState",
@@ -266,6 +267,7 @@ export async function exportPortableDocument(
         title: item.title,
         priority: item.priority as PortableActionable["priority"],
         status: item.status as PortableActionable["status"],
+        deferredAt: item.deferredAt?.toISOString() ?? null,
         statusProvenance: statusProvenance(item),
         effort: item.effort as PortableActionable["effort"],
         evidenceState:
@@ -456,6 +458,7 @@ export function sampleSeedToPortable(document: SeedDocument): PortableDocument {
       title: item.title,
       priority: item.priority,
       status: item.status,
+      deferredAt: null,
       statusProvenance: item.statusProvenance,
       effort: item.effort,
       evidenceState: "Unclassified",

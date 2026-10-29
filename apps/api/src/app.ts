@@ -66,6 +66,7 @@ import {
   listScopeOptions,
   recordValidation,
   setActionableArchived,
+  setActionableDeferred,
   setScopeArchived,
   transitionActionable,
   updateActionable,
@@ -197,6 +198,7 @@ function normalizeActionableQuery(raw: unknown): ActionableQuery {
     "evidence",
     "tag",
     "archived",
+    "deferred",
     "parent",
     "validation",
     "reopened",
@@ -997,6 +999,40 @@ export function buildApp({
       return actionableDetailResponseSchema.parse({ item });
     },
   );
+
+  for (const action of ["defer", "resume"] as const) {
+    app.post<{ Params: { id: string } }>(
+      `/api/actionables/:id/${action}`,
+      async (request, reply) => {
+        const id = parseRouteId(request, reply, request.params.id);
+        if (id === null) return;
+        const parsed = archiveMutationRequestSchema.safeParse(request.body);
+        if (!parsed.success)
+          return problem(
+            request,
+            reply,
+            422,
+            "VALIDATION_ERROR",
+            "Check the deferral request.",
+            { errors: fieldErrors(parsed.error) },
+          );
+        const item = await setActionableDeferred(prisma, id, {
+          version: parsed.data.version,
+          deferred: action === "defer",
+          origin: "user",
+        });
+        if (!item)
+          return problem(
+            request,
+            reply,
+            404,
+            "NOT_FOUND",
+            "Actionable not found.",
+          );
+        return actionableDetailResponseSchema.parse({ item });
+      },
+    );
+  }
 
   app.get<{ Params: { kind: string; id: string } }>(
     "/api/archive-impact/:kind/:id",

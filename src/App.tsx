@@ -115,6 +115,7 @@ import {
   restoreDependency,
   setParent,
   setActionableArchived,
+  setActionableDeferred,
   setScopeArchived,
   transitionActionable,
   triageInboxQueue,
@@ -1423,6 +1424,89 @@ function LifecycleControls({
   );
 }
 
+function DeferralControls({
+  selected,
+  onMutated,
+}: {
+  selected: ActionableDetail;
+  onMutated: (saved: ActionableDetail, notice: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  if (
+    selected.archiveState.isArchived ||
+    selected.status === "Done" ||
+    selected.status === "Dismissed"
+  )
+    return null;
+  const deferred = Boolean(selected.deferredAt);
+  const claimed = selected.agentClaim?.state === "active";
+  const submit = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await setActionableDeferred(
+        selected.id,
+        selected.version,
+        !deferred,
+      );
+      let notice = "Actionable resumed. Its lifecycle status is preserved.";
+      if (!deferred)
+        notice = "Actionable deferred. Find it using the Deferred work filter.";
+      onMutated(saved, notice);
+    } catch (caught) {
+      if (caught instanceof ApiProblem) {
+        setError(
+          Object.values(caught.problem.errors ?? {})
+            .flat()
+            .join(" ") || caught.problem.title,
+        );
+        if (
+          caught.problem.code === "VERSION_CONFLICT" &&
+          caught.problem.current
+        )
+          onMutated(
+            caught.problem.current,
+            "This deferral action was stale and was not applied. The current version is loaded.",
+          );
+      } else setError("The deferral action could not be completed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <section className="lifecycle-strip" aria-label="Deferral actions">
+      <div className="lifecycle-heading">
+        <strong>
+          {deferred ? "Deferred until resumed." : "Set this task aside"}
+        </strong>
+        <span>
+          {deferred
+            ? "Resume before starting work."
+            : "Return to it when you're ready."}
+        </span>
+      </div>
+      <div className="lifecycle-actions">
+        <button
+          type="button"
+          aria-label={deferred ? "Resume actionable" : "Defer actionable"}
+          disabled={saving || claimed}
+          onClick={() => void submit()}
+        >
+          {deferred ? "Resume task" : "Defer task"}
+        </button>
+      </div>
+      {claimed && (
+        <p>
+          The owning agent can defer this task. Release its claim first to defer
+          it here.
+        </p>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}
+
 function ValidationRecords({
   selected,
   onMutated,
@@ -2009,12 +2093,13 @@ function AgentClaimPanel({
       dependent.status !== "Done" &&
       dependent.status !== "Dismissed",
   );
-  const canRecommendPrompt =
+  const canRecommendSubtasks =
     !claim &&
     !selected.archiveState.isArchived &&
     !selected.isEffectivelyBlocked &&
     !isTerminal &&
     !(selected.status === "Ready" && hasReadyBlockers);
+  const canRecommendPrompt = canRecommendSubtasks && !selected.deferredAt;
   const promptSettingsQuery = useQuery({
     queryKey: ["helper-agent-settings"],
     queryFn: fetchHelperAgentSettings,
@@ -2055,17 +2140,20 @@ function AgentClaimPanel({
           : selected.workspacePath,
       )
     : null;
-  const unavailableGuidance = selected.archiveState.isArchived
-    ? "Restore this Actionable before starting agent work."
-    : isTerminal
-      ? `Reopen this ${selected.status} Actionable before starting agent work.`
-      : claim
-        ? null
-        : selected.isEffectivelyBlocked
-          ? "Resolve this Actionable's blockers before starting agent work."
-          : selected.status === "Ready" && hasReadyBlockers
-            ? "Restore every Ready prerequisite before starting implementation."
-            : null;
+  let unavailableGuidance: string | null = null;
+  if (selected.archiveState.isArchived)
+    unavailableGuidance = "Restore this Actionable before starting agent work.";
+  else if (selected.deferredAt)
+    unavailableGuidance =
+      "Resume this deferred Actionable before starting its own work.";
+  else if (isTerminal)
+    unavailableGuidance = `Reopen this ${selected.status} Actionable before starting agent work.`;
+  else if (!claim && selected.isEffectivelyBlocked)
+    unavailableGuidance =
+      "Resolve this Actionable's blockers before starting agent work.";
+  else if (!claim && selected.status === "Ready" && hasReadyBlockers)
+    unavailableGuidance =
+      "Restore every Ready prerequisite before starting implementation.";
 
   const copyStartPrompt = async () => {
     if (!startPrompt) return;
@@ -2196,7 +2284,7 @@ function AgentClaimPanel({
       {unavailableGuidance && (
         <p className="agent-start-guidance">{unavailableGuidance}</p>
       )}
-      {canRecommendPrompt &&
+      {canRecommendSubtasks &&
         !acceptancePending &&
         selected.relationships.subtasks.length > 0 &&
         promptSettingsQuery.data &&
@@ -2208,12 +2296,12 @@ function AgentClaimPanel({
             onNotice={onNotice}
           />
         )}
-      {canRecommendPrompt && promptSettingsQuery.isPending && (
+      {canRecommendSubtasks && promptSettingsQuery.isPending && (
         <p className="agent-start-guidance" role="status">
           Loading Codex prompt settings…
         </p>
       )}
-      {canRecommendPrompt && promptSettingsQuery.isError && (
+      {canRecommendSubtasks && promptSettingsQuery.isError && (
         <div className="inline-error" role="alert">
           <p>
             Could not load Codex prompt settings. Retry before starting this
@@ -2636,11 +2724,20 @@ function Inspector({
       )}
 
       {!selected.archiveState.isArchived && (
-        <LifecycleControls
-          key={`lifecycle-${selected.id}`}
-          selected={selected}
-          onMutated={onMutated}
-        />
+        <div className="inspector-workflow">
+          <DeferralControls
+            key={`deferral-${selected.id}`}
+            selected={selected}
+            onMutated={onMutated}
+          />
+          {!selected.deferredAt && (
+            <LifecycleControls
+              key={`lifecycle-${selected.id}`}
+              selected={selected}
+              onMutated={onMutated}
+            />
+          )}
+        </div>
       )}
 
       <AgentClaimPanel
@@ -3632,6 +3729,7 @@ const queryKeys: Array<keyof ActionableQuery> = [
   "evidence",
   "tag",
   "archived",
+  "deferred",
   "parent",
   "validation",
   "reopened",
@@ -6343,9 +6441,10 @@ export default function App() {
     Object.entries(patch).forEach(([key, value]) => {
       if (
         !value ||
-        (value === "all" && key !== "status") ||
+        (value === "all" && !["status", "deferred"].includes(key)) ||
         (key === "status" && value === "active") ||
         (key === "archived" && value === "active") ||
+        (key === "deferred" && value === "active") ||
         (key === "sort" && value === "updated-desc")
       ) {
         delete next[key as keyof ActionableQuery];
@@ -7579,6 +7678,22 @@ export default function App() {
                       <option value="no">Not manually blocked</option>
                     </select>
                   </AdvancedFilterField>
+                  <div className="filter-field">
+                    <div className="filter-field-heading">
+                      <label htmlFor="filter-deferred">Deferred work</label>
+                    </div>
+                    <select
+                      id="filter-deferred"
+                      value={query.deferred ?? "active"}
+                      onChange={(event) =>
+                        patchQuery({ deferred: event.target.value })
+                      }
+                    >
+                      <option value="active">Not deferred</option>
+                      <option value="deferred">Deferred</option>
+                      <option value="all">All</option>
+                    </select>
+                  </div>
                   <AdvancedFilterField
                     id="filter-dependency-blocking"
                     label="Dependency blocking"
@@ -8117,6 +8232,9 @@ export default function App() {
                       )}
                       {item.archiveState.isArchived && (
                         <span className="archived-indicator">Archived</span>
+                      )}
+                      {item.deferredAt && (
+                        <span className="archived-indicator">Deferred</span>
                       )}
                     </div>
                     <div role="cell">

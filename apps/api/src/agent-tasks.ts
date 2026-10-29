@@ -46,6 +46,9 @@ import {
   renewAgentTaskClaimResponseSchema,
   sourceFileSchema,
   transitionClaimedAgentTaskRequestSchema,
+  deferClaimedAgentTaskRequestSchema,
+  resumeAgentTaskRequestSchema,
+  agentTaskDeferralReceiptSchema,
   updateActionableRequestSchema,
   updateClaimedAgentTaskRequestSchema,
   type ActionableDetail,
@@ -97,6 +100,7 @@ import {
   recordValidationWithRecord,
   requiredReason,
   transitionActionable,
+  setActionableDeferred,
   completedAncestorsToReopen,
   updateActionable,
   VersionConflictError,
@@ -204,6 +208,7 @@ export class AgentTaskClaimError extends Error {
       | "INVALID_REQUEST"
       | "NOT_FOUND"
       | "ARCHIVED"
+      | "DEFERRED"
       | "ARCHIVE_INCLUSION_REQUIRED"
       | "TERMINAL"
       | "TERMINAL_READ_INVALIDATED"
@@ -348,6 +353,7 @@ async function toAgentTaskSummary(
     tags: persistedStringArray(row.tagsJson).slice(0, 10),
     priority: row.priority,
     status: row.status,
+    deferredAt: row.deferredAt?.toISOString() ?? null,
     effort: row.effort,
     evidenceState: row.evidenceState,
     isEffectivelyBlocked:
@@ -481,6 +487,11 @@ function requireClaimable(
       "Terminal Actionables cannot be claimed.",
     );
   }
+  if (row.deferredAt)
+    throw new AgentTaskClaimError(
+      "DEFERRED",
+      "Resume this task explicitly before claiming it.",
+    );
 }
 
 function requireResolvedDependencies(row: AgentTaskRow) {
@@ -772,6 +783,7 @@ export async function inspectAgentTask(
       if (task.id !== workItem.id && terminalStatuses.includes(workItem.status))
         unavailableReasons.push("work_item_terminal");
       if (task.status === "Blocked") unavailableReasons.push("manual_blocker");
+      if (task.deferredAt) unavailableReasons.push("deferred");
       if (summary.unresolvedDependencyCount)
         unavailableReasons.push("dependency");
       if (task.agentTaskClaim && task.agentTaskClaim.leaseExpiresAt > now)
@@ -789,10 +801,9 @@ export async function inspectAgentTask(
         manualBlockerExcerpt: truncateExcerpt(task.manualBlockerMd ?? "", 300),
         availableForClaim: unavailableReasons.length === 0,
         unavailableReasons,
-        permittedTransitions: permittedTransitions(
-          summary.status,
-          summary.readiness,
-        ),
+        permittedTransitions: task.deferredAt
+          ? []
+          : permittedTransitions(summary.status, summary.readiness),
       };
     };
     const descendants = request.includeDescendants
@@ -1032,36 +1043,44 @@ export async function listAgentTasks(
           }
         : {}),
     } satisfies Prisma.ActionableWhereInput;
-    const where: Prisma.ActionableWhereInput =
-      request.view === "mine"
-        ? {
-            ...baseWhere,
+    let where: Prisma.ActionableWhereInput;
+    if (request.view === "mine") {
+      where = {
+        ...baseWhere,
+        agentTaskClaim: {
+          is: {
+            agentId: request.agentId,
+            leaseExpiresAt: { gt: now },
+          },
+        },
+      };
+    } else if (request.view === "deferred") {
+      where = {
+        ...baseWhere,
+        deferredAt: { not: null },
+      };
+    } else {
+      where = {
+        ...baseWhere,
+        deferredAt: null,
+        status: { notIn: [...terminalStatuses, "Blocked"] },
+        dependenciesAsDependent: {
+          none: {
+            removedAt: null,
+            waivedAt: null,
+            prerequisite: { status: { not: "Done" } },
+          },
+        },
+        OR: [
+          { agentTaskClaim: { is: null } },
+          {
             agentTaskClaim: {
-              is: {
-                agentId: request.agentId,
-                leaseExpiresAt: { gt: now },
-              },
+              is: { leaseExpiresAt: { lte: now } },
             },
-          }
-        : {
-            ...baseWhere,
-            status: { notIn: [...terminalStatuses, "Blocked"] },
-            dependenciesAsDependent: {
-              none: {
-                removedAt: null,
-                waivedAt: null,
-                prerequisite: { status: { not: "Done" } },
-              },
-            },
-            OR: [
-              { agentTaskClaim: { is: null } },
-              {
-                agentTaskClaim: {
-                  is: { leaseExpiresAt: { lte: now } },
-                },
-              },
-            ],
-          };
+          },
+        ],
+      };
+    }
     const rows = await tx.actionable.findMany({
       where,
       include: agentTaskInclude,
@@ -2762,6 +2781,114 @@ export function transitionClaimedAgentTaskWithProjection<T>(
     now,
     projectResponse,
   ) as Promise<T>;
+}
+
+/** Defer owned work and release its claim in one transaction. */
+export async function deferClaimedAgentTask(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: { claimToken: string; version: number },
+  now = new Date(),
+) {
+  const request = parseInput(deferClaimedAgentTaskRequestSchema, input);
+  return runClaimedMutation(
+    prisma,
+    sourceOrdinal,
+    request,
+    now,
+    async (tx, row, claim) => {
+      await tx.agentTaskClaim.delete({ where: { actionableId: row.id } });
+      const saved = await setActionableDeferred(
+        prisma,
+        sourceOrdinal,
+        {
+          version: request.version,
+          deferred: true,
+          origin: agentOrigin(claim.agentId),
+        },
+        tx,
+        now,
+      );
+      if (!saved)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      await tx.activityEvent.create({
+        data: {
+          actionableId: row.id,
+          type: "agent-released",
+          summary: "Released agent claim after deferring task",
+          metadataJson: {
+            agentId: claim.agentId,
+            origin: agentOrigin(claim.agentId),
+            operation: "defer",
+          },
+          occurredAt: now,
+        },
+      });
+      return agentTaskDeferralReceiptSchema.parse({
+        id: sourceOrdinal,
+        workItemId: saved.workItemId,
+        version: saved.version,
+        status: saved.status,
+        deferredAt: saved.deferredAt,
+        claimReleased: true,
+      });
+    },
+  );
+}
+
+/** Resume explicitly selected deferred work without acquiring ownership. */
+export async function resumeAgentTask(
+  prisma: AppPrismaClient,
+  input: { id: number; workItemId: number; version: number },
+  caller: AgentTaskCaller,
+  now = new Date(),
+) {
+  const request = parseInput(resumeAgentTaskRequestSchema, input);
+  return withClaimLock(String(request.id), () =>
+    prisma.$transaction(async (tx) => {
+      const root = await requireWorkItem(tx, request.workItemId);
+      const row = await findTask(tx, request.id);
+      if (!row)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      await requireTaskInWorkItem(tx, row, root);
+      if (row.version !== request.version)
+        throw new AgentTaskClaimError(
+          "VERSION_CONFLICT",
+          "The task changed after inspection.",
+          undefined,
+          row.version,
+        );
+      if (row.agentTaskClaim && row.agentTaskClaim.leaseExpiresAt > now)
+        throw new AgentTaskClaimError(
+          "ALREADY_CLAIMED",
+          "This task has an active claim.",
+          undefined,
+          row.version,
+          row.agentTaskClaim.leaseExpiresAt.toISOString(),
+        );
+      const saved = await setActionableDeferred(
+        prisma,
+        request.id,
+        {
+          version: request.version,
+          deferred: false,
+          origin: agentOrigin(`codex:${caller.threadId}`),
+        },
+        tx,
+        now,
+      );
+      if (!saved)
+        throw new AgentTaskClaimError("NOT_FOUND", "Actionable not found.");
+      return agentTaskDeferralReceiptSchema.parse({
+        id: request.id,
+        workItemId: request.workItemId,
+        version: saved.version,
+        status: saved.status,
+        deferredAt: saved.deferredAt,
+        claimReleased: false,
+      });
+    }),
+  );
 }
 
 /** Reopen only explicitly authorized terminal work, without acquiring a claim. */

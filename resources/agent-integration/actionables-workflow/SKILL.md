@@ -88,6 +88,14 @@ Use `actionables.inspect_task` for an explicitly named ID, including active work
 - Unresolved dependencies prevent claims, unblocking and entering `In progress`, including prerequisites added or reopened after a claim. On `UNRESOLVED_DEPENDENCIES`, inspect the current blockers and wait for their resolution; this request does not authorize working on, waiving or removing prerequisites. A prerequisite is satisfied by `Done`, not `Dismissed`, unless its edge was separately waived or removed through an authorized workflow.
 - Dependency-only blocking clears automatically when its prerequisites are satisfied: use normal available discovery and resume the existing status. A separate manual blocker remains until explicitly cleared. After claim expiry or a version conflict, discard partial context, re-inspect the authorized blocked ID, and reconcile before retrying.
 
+## Defer and resume explicitly authorized work
+
+- Deferral manually sets one open task aside while preserving its lifecycle status, content, validation, and relationships. It does not defer descendants, satisfy prerequisites, or schedule automatic resumption. Do not defer or resume unrelated work.
+- To defer claimed work, save any needed handoff context with `update_task`, then call `actionables.defer_task` with the task's `id`, latest `version`, and valid `claimToken`. Deferral and claim release commit together; use the returned version and discard the released token. The receipt reports `deferredAt` and `claimReleased: true`.
+- Find deferred work only within an explicitly authorized top-level `workItemId`, using `list_tasks(view: deferred)`. Inspect a known task with `inspect_task`; `deferredAt` and the `deferred` availability reason distinguish deferral from lifecycle blocking. Normal `available` discovery excludes deferred tasks, and they cannot be claimed or advanced until resumed.
+- For authorized resumption, call `actionables.resume_task` with its explicit `id`, original `workItemId`, and exact inspected `version`. Resumption leaves the task unclaimed and preserves its recorded status and blockers. Continue with the normal list/claim workflow; readiness and dependency checks still apply.
+- Stale versions, archived or terminal work, and conflicting live claims are rejected. After uncertain delivery, inspect authoritative state before retrying. Deferral is unfinished work, not completion; report its preserved lifecycle status and deferred state in the handoff.
+
 ## Create authorized tasks
 
 - Create a task only when the user explicitly requests or approves its creation and the dedicated `actionables.create_task` tool is available.

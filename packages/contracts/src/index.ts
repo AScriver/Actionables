@@ -208,6 +208,8 @@ export const activityTypeSchema = z.enum([
   "parent-auto-reopened",
   "archived",
   "restored",
+  "deferred",
+  "resumed",
   "scope-archived",
   "scope-restored",
   "scope-changed",
@@ -341,6 +343,7 @@ export const actionableSummarySchema = z.object({
   title: z.string().min(1),
   priority: prioritySchema,
   status: statusSchema,
+  deferredAt: z.string().datetime().nullable().default(null),
   statusProvenance: statusProvenanceSchema,
   scope: scopeSchema,
   worktree: z.string().min(1),
@@ -579,6 +582,7 @@ export const actionableSortSchema = z.enum([
   "effort",
 ]);
 export const archivedFilterSchema = z.enum(["active", "archived", "all"]);
+export const deferredFilterSchema = z.enum(["active", "deferred", "all"]);
 export const parentFilterSchema = z.enum(["all", "top-level", "subtasks"]);
 export const booleanFilterSchema = z.enum(["all", "yes", "no"]);
 export const actionableStatusFilterSchema = statusSchema.or(
@@ -621,6 +625,7 @@ export const actionableQuerySchema = z.object({
   evidence: evidenceStateSchema.optional(),
   tag: z.string().overwrite(normalizeTag).default(""),
   archived: archivedFilterSchema.default("active"),
+  deferred: deferredFilterSchema.default("active"),
   parent: parentFilterSchema.default("all"),
   validation: booleanFilterSchema.default("all"),
   reopened: booleanFilterSchema.default("all"),
@@ -740,8 +745,10 @@ export const agentClaimExpiryWarningMinutesSchema = z
   .max(119)
   .describe("Expiring-claim warning window in minutes, from 1 through 119.");
 export const agentTaskListViewSchema = z
-  .enum(["available", "mine"])
-  .describe("Use mine for owned claims or available within one work item.");
+  .enum(["available", "mine", "deferred"])
+  .describe(
+    "Use mine for owned claims, or available/deferred within one explicit work item.",
+  );
 
 export const agentTaskSummaryChildIdsLimit = 100;
 
@@ -760,6 +767,7 @@ export const agentTaskSummarySchema = z
     tags: z.array(z.string().min(1).max(60)).max(10),
     priority: prioritySchema,
     status: statusSchema,
+    deferredAt: z.string().datetime().nullable().default(null),
     effort: effortSchema,
     evidenceState: evidenceStateSchema,
     isEffectivelyBlocked: z.boolean(),
@@ -840,9 +848,10 @@ export const inspectedAgentTaskSchema = agentTaskSummarySchema.extend({
         "manual_blocker",
         "dependency",
         "claimed",
+        "deferred",
       ]),
     )
-    .max(6),
+    .max(7),
   permittedTransitions: z.array(statusSchema).max(8),
 });
 
@@ -864,7 +873,7 @@ export const listAgentTasksRequestSchema = z
       .positive()
       .optional()
       .describe(
-        "Top-level Actionable ID for the current feature or bug; required for available.",
+        "Top-level Actionable ID for the current feature or bug; required for available and deferred.",
       ),
     limit: z
       .number()
@@ -876,12 +885,12 @@ export const listAgentTasksRequestSchema = z
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.view === "available" && input.workItemId === undefined) {
+    if (input.view !== "mine" && input.workItemId === undefined) {
       context.addIssue({
         code: "custom",
         path: ["workItemId"],
         message:
-          "Available tasks require the top-level feature or bug work-item ID.",
+          "Available and deferred tasks require the top-level feature or bug work-item ID.",
       });
     }
   });
@@ -1649,6 +1658,39 @@ export const transitionClaimedAgentTaskRequestSchema = z
   })
   .strict();
 
+export const deferClaimedAgentTaskRequestSchema = z
+  .object(claimedAgentMutationFields)
+  .strict();
+export const resumeAgentTaskRequestSchema = z
+  .object({
+    id: z
+      .number()
+      .int()
+      .positive()
+      .describe("Explicit public ID of the deferred task to resume."),
+    workItemId: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Original top-level feature or bug Actionable authorizing this resumption.",
+      ),
+    version: agentTaskVersionInputSchema.describe(
+      "Exact task version returned by deferred discovery or explicit inspection.",
+    ),
+  })
+  .strict();
+export const agentTaskDeferralReceiptSchema = z
+  .object({
+    id: z.number().int().positive(),
+    workItemId: z.number().int().positive(),
+    version: z.number().int().positive(),
+    status: statusSchema,
+    deferredAt: z.string().datetime().nullable(),
+    claimReleased: z.boolean(),
+  })
+  .strict();
+
 export const dismissAgentTaskRequestSchema = z
   .object({
     reason: z
@@ -2336,6 +2378,12 @@ const actionablesRecoveryByCode: Record<string, ActionablesRecoveryDefinition> =
       guidance:
         "Restore the archived Actionable or governing scope before attempting agent work again.",
     },
+    DEFERRED: {
+      retryMode: "after_state_change",
+      action: "resolve_state",
+      guidance:
+        "Inspect the deferred task. Only explicitly authorized resumption may use actionables.resume_task with its id, original workItemId, and current version; then use the normal claim and lifecycle workflow.",
+    },
     ARCHIVE_INCLUSION_REQUIRED: {
       retryMode: "after_input_change",
       action: "modify_request",
@@ -2857,6 +2905,7 @@ const portableActionableSchema = z
     title: titleField,
     priority: prioritySchema,
     status: statusSchema,
+    deferredAt: z.string().datetime().nullable().default(null),
     statusProvenance: statusProvenanceSchema,
     effort: effortSchema,
     evidenceState: evidenceStateSchema,

@@ -365,6 +365,21 @@ export async function recordValidation(
   return response.item;
 }
 
+export async function setActionableDeferred(
+  id: number,
+  version: number,
+  deferred: boolean,
+): Promise<ActionableDetail> {
+  const action = deferred ? "defer" : "resume";
+  const response = actionableDetailResponseSchema.parse(
+    await requestJson(`/api/actionables/${id}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  );
+  return response.item;
+}
+
 async function relationshipRequest(
   path: string,
   method: string,

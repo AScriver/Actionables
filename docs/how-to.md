@@ -10,6 +10,7 @@ to Codex.
 - [Run Actionables and connect Codex](#run-actionables-and-connect-codex)
 - [Navigate the dashboard](#navigate-the-dashboard)
 - [Capture, research, and complete work](#capture-research-and-complete-work)
+- [Defer and resume work](#defer-and-resume-work)
 - [Select multiple Actionables](#select-multiple-actionables)
 - [Manage repositories and projects](#manage-repositories-and-projects)
 - [Organize subtasks](#organize-subtasks)
@@ -99,6 +100,25 @@ appropriate. Dependency blocking is derived from recorded prerequisite
 relationships and is separate from the manual Blocked status. Reopening Done
 or Dismissed work returns it to Ready with a required reason. Returning from
 In progress to Researching also requires a reason.
+
+## Defer and resume work
+
+Choose **Defer task** in an open item's inspector to set it aside until you
+manually resume it. Its lifecycle status, notes, validation, and relationships
+stay intact. Deferral affects only that task; subtasks remain unchanged and
+dependent work still waits for its prerequisites.
+
+Deferred tasks leave the default task list, dashboard queues, automatic Inbox
+triage, and agent available-work results. To find them, open **Actionables**,
+choose **Filters**, and set **Deferred work** to **Deferred**. **All** includes
+both deferred and non-deferred tasks. Open an item and choose **Resume task**
+to bring it back while preserving its status and normal readiness/blocker rules.
+Deferral and resumption appear in the activity history.
+
+An agent can defer its own claimed task and release its claim in one operation.
+The dashboard cannot defer or resume work with a live agent claim; have the
+owning agent defer it, or release the claim first. Archived and terminal work
+cannot be deferred or resumed. There is no automatic resume date.
 
 ## Select multiple Actionables
 

@@ -147,6 +147,140 @@ describe("T-004 lifecycle authority", () => {
     ).json().item;
   }
 
+  it("manually defers and resumes without changing lifecycle or content", async () => {
+    const item = await prepareStatus("Researching");
+    const response = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/defer`,
+      payload: { version: item.version },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const deferred = response.json().item;
+    expect(deferred.deferredAt).toEqual(expect.any(String));
+    expect(deferred.status).toBe("Researching");
+    expect(deferred.research).toEqual(item.research);
+    expect(deferred.validation).toEqual(item.validation);
+    expect(deferred.statusHistory).toEqual(item.statusHistory);
+    expect(
+      deferred.activity.some(
+        (event: { type: string }) => event.type === "deferred",
+      ),
+    ).toBe(true);
+    const active = await app!.inject({
+      method: "GET",
+      url: "/api/actionables",
+    });
+    expect(
+      active.json().items.some((entry: { id: number }) => entry.id === item.id),
+    ).toBe(false);
+    const paused = await app!.inject({
+      method: "GET",
+      url: "/api/actionables?deferred=deferred",
+    });
+    expect(
+      paused.json().items.some((entry: { id: number }) => entry.id === item.id),
+    ).toBe(true);
+    const dashboard = await app!.inject({
+      method: "GET",
+      url: "/api/dashboard",
+    });
+    expect(
+      dashboard
+        .json()
+        .queues.flatMap(
+          (queue: { items: Array<{ id: number }> }) => queue.items,
+        )
+        .some((entry: { id: number }) => entry.id === item.id),
+    ).toBe(false);
+    const resumedResponse = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/resume`,
+      payload: { version: deferred.version },
+    });
+    expect(resumedResponse.statusCode, resumedResponse.body).toBe(200);
+    expect(resumedResponse.json().item).toMatchObject({
+      deferredAt: null,
+      status: "Researching",
+      research: item.research,
+    });
+  });
+
+  it("rejects stale deferral requests and lifecycle advancement while deferred", async () => {
+    const item = await prepareStatus("Researching");
+    const deferredResponse = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/defer`,
+      payload: { version: item.version },
+    });
+    expect(deferredResponse.statusCode, deferredResponse.body).toBe(200);
+    const deferred = deferredResponse.json().item;
+    const stale = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/resume`,
+      payload: { version: item.version },
+    });
+    expect(stale.statusCode).toBe(409);
+    const transition = await move(deferred, "Ready", {}, 422);
+    expect(transition.json().code).toBe("DEFERRED");
+    expect(
+      (
+        await app!.inject({ method: "GET", url: `/api/actionables/${item.id}` })
+      ).json().item.deferredAt,
+    ).toBe(deferred.deferredAt);
+  });
+
+  it("rejects dashboard deferral when an agent has a live claim", async () => {
+    const item = await prepareStatus("Ready");
+    await prisma!.agentTaskClaim.create({
+      data: {
+        actionableId: item.recordId,
+        agentId: "other-thread",
+        claimTokenHash: randomUUID(),
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const response = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/defer`,
+      payload: { version: item.version },
+    });
+    expect(response.statusCode, response.body).toBe(422);
+    expect(response.json().code).toBe("ACTIVE_AGENT_CLAIM");
+    expect(
+      await prisma!.agentTaskClaim.count({
+        where: { actionableId: item.recordId },
+      }),
+    ).toBe(1);
+  });
+
+  it("keeps manual blockers and rejects deferral of terminal work", async () => {
+    const item = await prepareStatus("Blocked");
+    const deferredResponse = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/defer`,
+      payload: { version: item.version },
+    });
+    expect(deferredResponse.statusCode, deferredResponse.body).toBe(200);
+    const resumedResponse = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${item.id}/resume`,
+      payload: { version: deferredResponse.json().item.version },
+    });
+    expect(resumedResponse.json().item).toMatchObject({
+      status: "Blocked",
+      manualBlocker: "Waiting for test access.",
+      deferredAt: null,
+    });
+    const done = await prepareStatus("Done");
+    const rejected = await app!.inject({
+      method: "POST",
+      url: `/api/actionables/${done.id}/defer`,
+      payload: { version: done.version },
+    });
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json().code).toBe("TERMINAL");
+  });
+
   const matrix: Record<Status, Status[]> = {
     Inbox: ["Researching", "Dismissed"],
     Researching: ["Inbox", "Ready", "Blocked", "Dismissed"],

@@ -29,6 +29,17 @@ const task = {
 };
 
 describe("Codex prompt templates", () => {
+  it("requires manual resumption before generating a Codex start prompt", () => {
+    expect(
+      renderCodexStartPrompt(
+        { ...task, deferredAt: "2026-10-29T17:00:00.000Z" },
+        templates,
+      ),
+    ).toBeNull();
+    expect(
+      renderCodexStartPrompt({ ...task, deferredAt: null }, templates),
+    ).toContain("Claim task #47");
+  });
   it("keeps finished children separate from parent research, validation and ownership", () => {
     const parent = {
       ...task,
@@ -129,6 +140,13 @@ describe("Codex prompt templates", () => {
       537, 538, 540,
     ]);
     inventory.task.availableForClaim = false;
+    expect(eligibleCodexSubtasks(inventory)).toEqual([]);
+    inventory.task.deferredAt = "2026-10-29T17:00:00.000Z";
+    inventory.task.unavailableReasons = ["deferred"];
+    expect(eligibleCodexSubtasks(inventory).map((task) => task.id)).toEqual([
+      537, 538, 540,
+    ]);
+    inventory.task.unavailableReasons = ["deferred", "claimed"];
     expect(eligibleCodexSubtasks(inventory)).toEqual([]);
   });
 

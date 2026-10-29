@@ -348,6 +348,233 @@ afterAll(async () => {
 });
 
 describe("Actionables MCP", () => {
+  it("defers owned work, exposes scoped deferred discovery, and resumes without claiming", async () => {
+    const task = await createTask();
+    const child = await createTask();
+    await prisma.hierarchyRelationship.create({
+      data: { parentId: task.id, childId: child.id },
+    });
+    const { client, transport } = await connectClient();
+    try {
+      const claim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      const deferred = output<{
+        id: number;
+        version: number;
+        status: string;
+        deferredAt: string;
+        claimReleased: boolean;
+      }>(
+        await client.callTool({
+          name: "actionables.defer_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            version: claim.task.version,
+            claimToken: claim.claim.claimToken,
+          },
+        }),
+      );
+      expect(deferred).toMatchObject({
+        id: task.sourceOrdinal,
+        status: "Ready",
+        deferredAt: expect.any(String),
+        claimReleased: true,
+      });
+      expect(
+        await prisma.agentTaskClaim.count({ where: { actionableId: task.id } }),
+      ).toBe(0);
+      const inspected = output<InspectAgentTaskResponse>(
+        await client.callTool({
+          name: "actionables.inspect_task",
+          arguments: { id: task.sourceOrdinal },
+        }),
+      );
+      expect(inspected.task).toMatchObject({
+        availableForClaim: false,
+        unavailableReasons: ["deferred"],
+        deferredAt: deferred.deferredAt,
+      });
+      const available = output<{ items: Array<{ id: number }> }>(
+        await client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "available", workItemId: task.sourceOrdinal },
+        }),
+      );
+      expect(available.items.map((item) => item.id)).toEqual([
+        child.sourceOrdinal,
+      ]);
+      const paused = output<{ items: Array<{ id: number }> }>(
+        await client.callTool({
+          name: "actionables.list_tasks",
+          arguments: { view: "deferred", workItemId: task.sourceOrdinal },
+        }),
+      );
+      expect(paused.items.map((item) => item.id)).toEqual([task.sourceOrdinal]);
+      const rejected = errorOutput(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: deferred.version,
+          },
+        }),
+      );
+      expect(rejected.code).toBe("DEFERRED");
+      const resumed = output<{
+        version: number;
+        status: string;
+        deferredAt: null;
+        claimReleased: boolean;
+      }>(
+        await client.callTool({
+          name: "actionables.resume_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: deferred.version,
+          },
+        }),
+      );
+      expect(resumed).toMatchObject({
+        status: "Ready",
+        deferredAt: null,
+        claimReleased: false,
+      });
+      expect(
+        await prisma.agentTaskClaim.count({ where: { actionableId: task.id } }),
+      ).toBe(0);
+      expect(
+        await prisma.actionable.findUnique({ where: { id: task.id } }),
+      ).toMatchObject({
+        status: "Ready",
+        finding: task.finding,
+        researchJson: task.researchJson,
+      });
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it("protects deferral against invalid ownership, stale versions, and wrong work-item scope", async () => {
+    const task = await createTask();
+    const other = await createTask();
+    const { client, transport } = await connectClient();
+    try {
+      const claim = output<{
+        task: { version: number };
+        claim: { claimToken: string };
+      }>(
+        await client.callTool({
+          name: "actionables.claim_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            workItemId: task.sourceOrdinal,
+            version: task.version,
+          },
+        }),
+      );
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.defer_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              version: claim.task.version,
+              claimToken: "x".repeat(43),
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_CLAIM_TOKEN");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.defer_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              version: task.version,
+              claimToken: claim.claim.claimToken,
+            },
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(
+        await prisma.agentTaskClaim.count({ where: { actionableId: task.id } }),
+      ).toBe(1);
+      const deferred = output<{ version: number }>(
+        await client.callTool({
+          name: "actionables.defer_task",
+          arguments: {
+            id: task.sourceOrdinal,
+            version: claim.task.version,
+            claimToken: claim.claim.claimToken,
+          },
+        }),
+      );
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.resume_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              workItemId: task.sourceOrdinal,
+              version: claim.task.version,
+            },
+          }),
+        ).code,
+      ).toBe("VERSION_CONFLICT");
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.resume_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              workItemId: other.sourceOrdinal,
+              version: deferred.version,
+            },
+          }),
+        ).code,
+      ).toBe("INVALID_REQUEST");
+      await prisma.agentTaskClaim.create({
+        data: {
+          actionableId: task.id,
+          agentId: "other-thread",
+          claimTokenHash: randomUUID(),
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      expect(
+        errorOutput(
+          await client.callTool({
+            name: "actionables.resume_task",
+            arguments: {
+              id: task.sourceOrdinal,
+              workItemId: task.sourceOrdinal,
+              version: deferred.version,
+            },
+          }),
+        ).code,
+      ).toBe("ALREADY_CLAIMED");
+      expect(
+        (await prisma.actionable.findUnique({ where: { id: task.id } }))
+          ?.deferredAt,
+      ).not.toBeNull();
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("exposes exactly the bounded task tools through the official client", async () => {
     const { client, transport } = await connectClient();
     try {
@@ -503,6 +730,8 @@ describe("Actionables MCP", () => {
           "actionables.renew_task_claim",
           "actionables.update_task",
           "actionables.transition_task",
+          "actionables.defer_task",
+          "actionables.resume_task",
           "actionables.dismiss_task",
           "actionables.record_task_validation",
           "actionables.handoff_task",

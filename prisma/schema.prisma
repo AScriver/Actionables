@@ -92,6 +92,7 @@ model Actionable {
   evidenceState          String     @default("Unclassified")
   version                Int        @default(1)
   archivedAt             DateTime?
+  deferredAt             DateTime?
   updatedLabel           String
   manualBlockerMd        String?
   dismissalReasonMd      String?

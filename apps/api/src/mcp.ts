@@ -37,6 +37,9 @@ import {
   searchCompletedTasksResponseSchema,
   statusSchema,
   transitionClaimedAgentTaskRequestSchema,
+  deferClaimedAgentTaskRequestSchema,
+  resumeAgentTaskRequestSchema,
+  agentTaskDeferralReceiptSchema,
   updateClaimedAgentTaskRequestSchema,
   type ActionableDetail,
   type ActionablesInternalRetryMode,
@@ -71,6 +74,8 @@ import {
   createAgentTask,
   dismissAgentTaskWithProjection,
   reopenAgentTask,
+  deferClaimedAgentTask,
+  resumeAgentTask,
   getClaimedAgentTask,
   getClaimedCompletionSnapshot,
   completeClaimedAgentTask,
@@ -118,7 +123,7 @@ const listTasksSchema = z
       .positive()
       .optional()
       .describe(
-        "Top-level Actionable ID for the current feature or bug; required for available.",
+        "Top-level Actionable ID for the current feature or bug; required for available and deferred.",
       ),
     limit: z
       .number()
@@ -130,12 +135,12 @@ const listTasksSchema = z
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.view === "available" && input.workItemId === undefined) {
+    if (input.view !== "mine" && input.workItemId === undefined) {
       context.addIssue({
         code: "custom",
         path: ["workItemId"],
         message:
-          "Available tasks require the top-level feature or bug work-item ID.",
+          "Available and deferred tasks require the top-level feature or bug work-item ID.",
       });
     }
   });
@@ -442,6 +447,10 @@ const toolInputSchemas = {
   "actionables.list_tasks": listTasksSchema,
   "actionables.inspect_task": inspectAgentTaskRequestSchema,
   "actionables.reopen_task": reopenAgentTaskRequestSchema,
+  "actionables.defer_task": deferClaimedAgentTaskRequestSchema.extend({
+    id: idSchema,
+  }),
+  "actionables.resume_task": resumeAgentTaskRequestSchema,
   "actionables.create_dependency": createAgentDependencyRequestSchema,
   "actionables.remove_dependency": removeAgentDependencyRequestSchema,
   "actionables.search_completed_tasks": searchCompletedTasksRequestSchema,
@@ -502,6 +511,7 @@ const compactTaskSchema = z
     status: z.string().max(40),
     terminal: z.boolean(),
     archiveState: actionableDetailSchema.shape.archiveState,
+    deferredAt: actionableDetailSchema.shape.deferredAt,
     effort: z.string().max(40),
     evidenceState: z.string().max(40),
     version: z.number().int().positive(),
@@ -1303,6 +1313,7 @@ function compactTask(
     status: task.status,
     terminal: task.status === "Done" || task.status === "Dismissed",
     archiveState: task.archiveState,
+    deferredAt: task.deferredAt,
     effort: task.effort,
     evidenceState: task.evidenceState,
     version: task.version,
@@ -1785,7 +1796,7 @@ function createActionablesMcpServer(
     {
       title: "List Actionables",
       description:
-        "List the current Codex thread's unexpired claims, optionally within one feature or bug. Thread identity comes from request metadata. Available discovery requires that work item's top-level Actionable ID and never returns arbitrary pending work. Scoped reads of Done or Dismissed work items succeed with workItem status and terminal true; items remains an active-work list and may be empty.",
+        "List the current Codex thread's unexpired claims with view mine, or available/deferred tasks within one explicitly identified work item. Thread identity comes from request metadata. Available discovery excludes deferred tasks. Deferred discovery and available discovery require the original top-level workItemId and never browse unrelated work. Scoped reads of terminal work items succeed with empty items and workItem.terminal true.",
       inputSchema: toolInputSchemas["actionables.list_tasks"],
       outputSchema: listAgentTasksResponseSchema,
       annotations: readOnly,
@@ -1812,6 +1823,36 @@ function createActionablesMcpServer(
     (input) =>
       runReadTool("actionables.inspect_task", () =>
         inspectAgentTask(prisma, input),
+      ),
+  );
+  registerTool(
+    "actionables.defer_task",
+    {
+      title: "Defer claimed Actionable",
+      description:
+        "Manually defer this thread's claimed task using its valid claim token and current version. Preserves lifecycle status, content, and relationships, excludes only this task from active work, and atomically releases its claim. No automatic resume or subtree propagation. Inspect before retrying an uncertain mutation.",
+      inputSchema: toolInputSchemas["actionables.defer_task"],
+      outputSchema: agentTaskDeferralReceiptSchema,
+      annotations: mutation,
+    },
+    ({ id, ...input }) =>
+      runMutationTool("actionables.defer_task", () =>
+        deferClaimedAgentTask(prisma, id, input),
+      ),
+  );
+  registerTool(
+    "actionables.resume_task",
+    {
+      title: "Resume explicitly selected deferred Actionable",
+      description:
+        "Resume an explicitly authorized deferred task with its id, original top-level workItemId, and exact inspected version. Preserves lifecycle status and readiness/dependency gates; rejects archived, terminal, stale, or actively claimed work. Leaves the task unclaimed. Use list_tasks(view: deferred) within that work item or inspect_task to find its current state, then follow the normal claim workflow after resuming.",
+      inputSchema: toolInputSchemas["actionables.resume_task"],
+      outputSchema: agentTaskDeferralReceiptSchema,
+      annotations: mutation,
+    },
+    (input, extra) =>
+      runMutationTool("actionables.resume_task", () =>
+        resumeAgentTask(prisma, input, { threadId: requestThreadId(extra) }),
       ),
   );
   registerTool(

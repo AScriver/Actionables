@@ -25,7 +25,11 @@ import {
 const maxContextCharacters = 160_000;
 
 function assertInboxTriageEligible(actionable: ActionableDetail) {
-  if (actionable.status !== "Inbox" || actionable.archiveState.isArchived) {
+  if (
+    actionable.status !== "Inbox" ||
+    actionable.archiveState.isArchived ||
+    actionable.deferredAt
+  ) {
     throw new DomainValidationError(
       "INBOX_TRIAGE_NOT_ELIGIBLE",
       {

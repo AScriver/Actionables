@@ -306,6 +306,7 @@ function toSummary(row: ActionableRow): ActionableSummary {
     title: row.title,
     priority: row.priority,
     status,
+    deferredAt: row.deferredAt?.toISOString() ?? null,
     statusProvenance: imported
       ? {
           kind: "neutral-import",
@@ -452,7 +453,9 @@ function toDetail(
     files: sourceFiles(row.filesJson),
     sourceThread: row.sourceThread,
     readiness,
-    permittedTransitions: permittedTransitions(status, readiness),
+    permittedTransitions: row.deferredAt
+      ? []
+      : permittedTransitions(status, readiness),
     statusHistory: row.statusHistory.map((entry) => ({
       id: entry.id,
       previousStatus: entry.previousStatus,
@@ -822,6 +825,11 @@ function matchesQuery(row: ActionableRow, query: ActionableQuery) {
     (query.archived === "archived") !== summary.archiveState.isArchived
   )
     return false;
+  if (
+    query.deferred !== "all" &&
+    (query.deferred === "deferred") !== Boolean(summary.deferredAt)
+  )
+    return false;
   const parentMatches =
     query.parent === "all" ||
     (query.parent === "top-level" ? isTopLevel : !isTopLevel);
@@ -892,6 +900,7 @@ export function actionableQueryRecord(query: ActionableQuery) {
   if (query.evidence) values.evidence = query.evidence;
   if (query.tag) values.tag = query.tag;
   if (query.archived !== "active") values.archived = query.archived;
+  if (query.deferred !== "active") values.deferred = query.deferred;
   if (query.parent !== "all") values.parent = query.parent;
   if (query.validation !== "all") values.validation = query.validation;
   if (query.reopened !== "all") values.reopened = query.reopened;
@@ -1470,6 +1479,7 @@ export async function listInboxTriageCandidates(
           (!scope.repository || row.repositoryId === scope.repository) &&
           (!scope.worktree || row.worktreeId === scope.worktree) &&
           !archiveState(row).isArchived &&
+          !row.deferredAt &&
           row.status === "Inbox",
       )
       .sort((left, right) => left.sourceOrdinal - right.sourceOrdinal)
@@ -1498,7 +1508,8 @@ export async function getDashboard(
       (!scope.project || row.projectId === scope.project) &&
       (!scope.repository || row.repositoryId === scope.repository) &&
       (!scope.worktree || row.worktreeId === scope.worktree) &&
-      !archiveState(row).isArchived,
+      !archiveState(row).isArchived &&
+      !row.deferredAt,
   );
   const summaries = new Map(rows.map((row) => [row.id, toSummary(row)]));
   const recent = (predicate: (row: ActionableRow) => boolean) =>
@@ -1877,6 +1888,83 @@ export async function setActionableArchived(
   });
 }
 
+/** Pause one task without changing its lifecycle, content, or relationships. */
+export async function setActionableDeferred(
+  prisma: AppPrismaClient,
+  sourceOrdinal: number,
+  input: { version: number; deferred: boolean; origin: string },
+  existingTransaction?: TransactionClient,
+  now = new Date(),
+): Promise<ActionableDetail | null> {
+  const operation = async (transaction: TransactionClient) => {
+    const current = await findActionableRow(transaction, sourceOrdinal);
+    if (!current) return null;
+    if (current.version !== input.version)
+      throw new VersionConflictError(toDetail(current));
+    if (archiveState(current).isArchived)
+      throw new DomainValidationError(
+        "ARCHIVED",
+        { deferred: ["Restore this task's archived scope first."] },
+        "Archived tasks cannot be deferred or resumed.",
+      );
+    if (isTerminalStatus(current.status))
+      throw new DomainValidationError(
+        "TERMINAL",
+        { deferred: ["Only open tasks can be deferred or resumed."] },
+        "Terminal tasks cannot be deferred or resumed.",
+      );
+    if (current.agentTaskClaim && current.agentTaskClaim.leaseExpiresAt > now)
+      throw new DomainValidationError(
+        "ACTIVE_AGENT_CLAIM",
+        {
+          deferred: [
+            "The owning agent must defer this task, or release its claim first.",
+          ],
+        },
+        "This task has an active agent claim.",
+      );
+    if (Boolean(current.deferredAt) === input.deferred)
+      throw new DomainValidationError(
+        "INVALID_REQUEST",
+        {
+          deferred: [
+            input.deferred
+              ? "This task is already deferred."
+              : "This task is not deferred.",
+          ],
+        },
+        "The task's deferral state has already changed.",
+      );
+    const updated = await transaction.actionable.updateMany({
+      where: { id: current.id, version: input.version },
+      data: {
+        deferredAt: input.deferred ? now : null,
+        updatedLabel: "just now",
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count !== 1) {
+      const latest = await findActionableRow(transaction, sourceOrdinal);
+      if (!latest) return null;
+      throw new VersionConflictError(toDetail(latest));
+    }
+    await transaction.activityEvent.create({
+      data: {
+        actionableId: current.id,
+        type: input.deferred ? "deferred" : "resumed",
+        summary: input.deferred ? "Deferred actionable" : "Resumed actionable",
+        metadataJson: { origin: input.origin, workflowStatus: current.status },
+        occurredAt: now,
+      },
+    });
+    const saved = await findActionableRow(transaction, sourceOrdinal);
+    return saved ? toDetail(saved) : null;
+  };
+  return existingTransaction
+    ? operation(existingTransaction)
+    : prisma.$transaction(operation);
+}
+
 export async function setScopeArchived(
   prisma: AppPrismaClient,
   kind: Exclude<ArchiveTargetKind, "actionable">,
@@ -2179,6 +2267,12 @@ function validateTransition(
   },
   request: Pick<StatusTransitionRequest, "reason" | "completionOverrideReason">,
 ): TransitionDecision {
+  if (current.deferredAt)
+    throw new DomainValidationError(
+      "DEFERRED",
+      { status: ["Resume this task before changing its lifecycle status."] },
+      "Deferred tasks must be resumed before lifecycle changes.",
+    );
   const previousStatus = parsePersistedStatus(current.status);
   const readyState = lifecycleReadiness(previousStatus, {
     finding: readiness.finding,
