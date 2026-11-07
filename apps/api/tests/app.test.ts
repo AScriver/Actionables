@@ -14,6 +14,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  actionableQuerySchema,
   defaultCodexResearchPrompt,
   defaultCodexImplementationPrompt,
   resolveApiRuntimeConfig,
@@ -30,7 +31,10 @@ import { defaultRelationshipAuditorPrompt } from "../src/assistant-prompts.js";
 import { createPrismaClient, type AppPrismaClient } from "../src/database.js";
 import { importSampleSeed, readSampleSeed } from "../src/import-seed.js";
 import type { NativeFolderPicker } from "../src/native-folder-picker.js";
-import { listInboxTriageCandidates } from "../src/repository.js";
+import {
+  listActionablesWithQuery,
+  listInboxTriageCandidates,
+} from "../src/repository.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const prismaCli = resolve(repoRoot, "node_modules/prisma/build/index.js");
@@ -3540,6 +3544,20 @@ describe("Actionables API", () => {
         },
       ],
     });
+
+    let servicedPendingWork = false;
+    const pendingWork = setImmediate(() => {
+      servicedPendingWork = true;
+    });
+    try {
+      await listActionablesWithQuery(
+        prisma!,
+        actionableQuerySchema.parse({ project: project.id }),
+      );
+      expect(servicedPendingWork).toBe(true);
+    } finally {
+      clearImmediate(pendingWork);
+    }
 
     const response = await app!.inject({
       method: "GET",

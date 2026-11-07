@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate } from "node:timers/promises";
 import {
   projectWorkspacePath,
   resolveProjectWorkspace,
@@ -936,6 +937,8 @@ async function allActionableRows(prisma: AppPrismaClient) {
     rows.push(...batch);
     if (batch.length < batchSize) break;
     afterOrdinal = batch.at(-1)!.sourceOrdinal;
+    // Synchronous SQLite batches must let health checks and other requests run.
+    await setImmediate();
   }
   const byId = new Map(rows.map((row) => [row.id, row]));
   return rows.map((row): ActionableRow => {
