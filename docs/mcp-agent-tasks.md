@@ -236,6 +236,16 @@ The full workflow directs agents to use this sequence:
 
 When implementation uncovers a need for more investigation, `In progress` can return directly to `Researching` with a meaningful reason. The transition is recorded in task activity; do not route through a semantically false Ready state.
 
+Keep research proportional to the change's reach and risk. For each credible
+side effect, record the affected behavior, concrete evidence linking the risk
+to the proposed change, a prevention step, and a focused regression check in
+planned validation. Before editing, confirm that this analysis still matches
+the current code and intended change. Apply the prevention steps, refresh the
+analysis when the actual diff exposes additional affected paths, and record
+actual regression results and remaining uncertainty before Done. A narrow,
+low-risk change needs only a brief check of its affected path; when no credible
+side effect is found, state the inspected boundary without inventing risks.
+
 A work item is one existing top-level Actionable representing the feature or bug plus all its descendants. Available discovery never falls back to unrelated pending Actionables. Create and organize the root and subtasks in the UI or with the authorized creation tool before assigning that `workItemId` to an agent session.
 
 Available discovery returns only active, unarchived, nonterminal tasks that are

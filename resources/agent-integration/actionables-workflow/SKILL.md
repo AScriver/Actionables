@@ -134,6 +134,14 @@ cannot leave or expose a claim, claim unlisted work, or bypass repository scope,
 hierarchy, lifecycle, or version checks. Split 139 items into six chunks per
 phase.
 
+## Research and prevent credible side effects
+
+- Keep research within the task's stated outcome and proportional to the proposed change's reach and risk. A narrow, low-risk change needs only a brief check of its affected path; expand investigation when concrete evidence implicates other callers, shared contracts, persisted data, or workflows.
+- For each credible side effect, record the behavior to preserve, concrete evidence linking the risk to the proposed change (file/symbol references or observed results), and a prevention step in Research. Add a focused regression check for that behavior to planned validation. Reuse existing checks when they cover the risk.
+- Distinguish verified facts from assumptions and remaining uncertainty. When no credible side effect is found, briefly record the inspected boundary and any unverified behavior. Do not invent risks or investigate adjacent cleanup to fill a checklist.
+- Before editing, confirm that the recorded analysis covers the current code and intended change, filling only relevant gaps. If material investigation remains, keep or return the task to Researching through its permitted transitions with a meaningful reason.
+- During implementation, apply the recorded prevention steps and refresh the research and planned validation when the actual diff reveals additional affected paths. Run the focused regression checks alongside the task's planned acceptance checks. Before Done, record actual results and remaining unverified behavior in Resolution and validation evidence; an unrun check is not Passed evidence. Preserve the existing completion and handoff requirements.
+
 ## Split researched work
 
 - Split only when research confirms multiple independently implementable outcomes. A task with one outcome remains one task.
